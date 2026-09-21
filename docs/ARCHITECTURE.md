@@ -63,7 +63,9 @@ The student path never blocks on a live AI call for question selection — only 
 
 - `question-engine` never talks to `/packages/ai` directly for anything student-facing at request time — generation is always a background job, never inline in a request handler.
 - `mastery` is a pure function of `attempts` + `question DNA` + time. It must not read `prep-phase` state — phase and mastery are computed independently and only reconciled at the UI/recommendation layer (see [PRODUCT_SPEC.md](PRODUCT_SPEC.md) §4.8).
-- `autopsy` never writes a diagnosis as fact — its output type is always `hypothesis` until a student confirms it; only confirmed diagnoses are allowed to influence `mastery` or `repair`.
+- `prep-phase` is a pure function of `(examId, enrollmentDate, today)` plus a stored `PrepPhaseTemplate`/`CatchUpPlan`. It must not read `attempts` or `MasteryState` — the boundary runs both ways, not just from mastery's side. This is built and unit-tested in Phase 1, ahead of the practice UI, precisely because it's foundational rather than a later enhancement (see [DECISIONS.md](DECISIONS.md) D-009).
+- `attempts` owns `AttemptEvent` as its append-only source of truth for timing and interaction history. `Attempt`'s own timestamp/count fields (`started_at`, `submitted_at`, `hints_used`, etc.) are denormalizations computed from the event log, never written independently of it — a new timing signal is a new `event_type`, not a new column.
+- `autopsy` never writes a diagnosis as fact — its output type is always `hypothesis` until a student confirms it; only confirmed diagnoses are allowed to influence `mastery` or `repair`. Its `error_taxonomy_id` always references the `ErrorTaxonomy` table, never a free-form string.
 - Nothing outside `/packages/ai` constructs a prompt string or parses a raw LLM response. All call sites go through typed functions that return Zod-validated results or throw.
 
 ## 7. Environments

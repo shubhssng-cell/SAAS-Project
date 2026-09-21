@@ -47,7 +47,7 @@ A question that fails step 1 or 2 is `rejected`, not silently discarded — reje
 
 ## 5. Question Autopsy → Targeted Repair
 
-Covered in detail in [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) §4. The one point worth restating here: the repair step selects follow-up questions **from the Question Universe taxonomy**, filtered to the confirmed `error_type` and `target_concept_id` — repair is not "give another random question from this chapter," it's "give a question from the taxonomy cell that specifically exercises the thing the student just got wrong." This only works because the taxonomy in §3 exists and every question is tagged against it.
+Covered in detail in [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) §4. The one point worth restating here: the repair step selects follow-up questions **from the Question Universe taxonomy**, filtered to the confirmed `error_taxonomy_id` (see [DATABASE.md](DATABASE.md) §Error Taxonomy) and `target_concept_id` — repair is not "give another random question from this chapter," it's "give a question from the taxonomy cell that specifically exercises the thing the student just got wrong." This only works because the taxonomy in §3 exists and every question is tagged against it. The evidence behind the confirmed error (including any `AttemptEvent` timing detail or `reasoning_text`) is richer than a single wrong-answer flag, but the repair *selection logic* itself only ever consumes the confirmed, stable `error_taxonomy_id` — it never re-derives its own judgment from raw evidence.
 
 ## 6. How this generalizes beyond Percentages (without building for it yet)
 

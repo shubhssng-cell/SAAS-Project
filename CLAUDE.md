@@ -32,6 +32,10 @@ Full docs:
 - **Expensive/slow AI work is a background job (BullMQ), never inline in a request handler.** Question generation, validation, and Examiner Lens analysis are never called synchronously from a student-facing route.
 - **No premature abstraction.** This codebase intentionally supports only IPMAT/Quant/Percentages right now — don't add multi-exam branching, plugin systems, or config layers for exams/chapters that don't exist yet just because the long-term vision has them. The schema is already shaped to generalize (see [docs/DATABASE.md](docs/DATABASE.md)); the code should stay simple until a second chapter is actually being built.
 - **Tests on domain logic, not on AI call correctness.** Unit-test concept graph traversal, mastery computation, validation rules, and phase-curve logic with Vitest. AI call sites are tested against recorded fixtures (see [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md) §6), not live provider calls.
+- **Calendar-awareness (`computePrepPhase`, `applyCatchUp`, `PrepPhaseTemplate`, `CatchUpPlan`) is Phase 1 domain logic, not a deferred UI feature.** Only the phase *UI* is Phase 6 — don't push the schema or the pure functions back to "later" if asked to touch this area; see [docs/DECISIONS.md](docs/DECISIONS.md) D-009.
+- **`AttemptEvent` is the source of truth for timing, not `Attempt`'s own columns.** A new timing question (e.g. "how long between hint and next click") is a new `event_type`, never a new column on `Attempt` or a new table. See [docs/DECISIONS.md](docs/DECISIONS.md) D-010.
+- **`reasoning_text` (why the student answered this way) and `working_steps` (their scratch/computation) are different fields — don't collapse them.** See [docs/DECISIONS.md](docs/DECISIONS.md) D-011.
+- **Error classification goes through the `ErrorTaxonomy` table by foreign key, never a free-form string.** See [docs/DECISIONS.md](docs/DECISIONS.md) D-012.
 
 ## Current phase
 
