@@ -1,0 +1,508 @@
+// Prisma schema for the IPMAT vertical slice — see docs/DATABASE.md for the
+// authoritative design rationale. This is the FULL Phase 1 domain model
+// (per docs/MASTER_PLAN.md Phase 1): tables beyond Exam/Concept/Question
+// exist with correct constraints from day one, but no application code
+// reads or writes Attempt/Autopsy/MasteryState until Phase 4-5.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------
+// Exam catalog — data, not code (docs/DATABASE.md "Exam structure is data")
+// ---------------------------------------------------------------------
+
+model Exam {
+  id           String   @id @default(uuid())
+  name         String
+  code         String   @unique
+  examDateRule Json     @map("exam_date_rule")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sections           Section[]
+  enrollments        Enrollment[]
+  prepPhaseTemplates PrepPhaseTemplate[]
+  questions          Question[]
+
+  @@map("exams")
+}
+
+model Section {
+  id     String @id @default(uuid())
+  examId String @map("exam_id")
+  name   String
+  order  Int
+
+  exam      Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  chapters  Chapter[]
+  questions Question[]
+
+  @@unique([examId, name])
+  @@index([examId])
+  @@map("sections")
+}
+
+model Chapter {
+  id        String @id @default(uuid())
+  sectionId String @map("section_id")
+  name      String
+  order     Int
+
+  section   Section    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  concepts  Concept[]
+  questions Question[]
+
+  @@unique([sectionId, name])
+  @@index([sectionId])
+  @@map("chapters")
+}
+
+// ---------------------------------------------------------------------
+// Concept Universe — a real graph, not a flat tag list
+// ---------------------------------------------------------------------
+
+enum ConceptStatus {
+  draft
+  curated
+  ai_assisted
+  published
+}
+
+model Concept {
+  id          String        @id @default(uuid())
+  chapterId   String        @map("chapter_id")
+  name        String
+  description String?
+  status      ConceptStatus @default(draft)
+
+  chapter          Chapter                @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  relationsFrom    ConceptRelation[]      @relation("RelationFrom")
+  relationsTo      ConceptRelation[]      @relation("RelationTo")
+  lensAnalyses     ExaminerLensAnalysis[]
+  taxonomyCells    PatternTaxonomyCell[]
+  questionsPrimary Question[]             @relation("QuestionConcept")
+  masteryStates    MasteryState[]
+
+  @@unique([chapterId, name])
+  @@index([chapterId])
+  @@map("concepts")
+}
+
+enum RelationType {
+  prerequisite_of
+  related_to
+  combines_with
+}
+
+enum RelationStrength {
+  weak
+  moderate
+  strong
+}
+
+enum RelationSource {
+  human
+  ai_suggested
+}
+
+model ConceptRelation {
+  id            String            @id @default(uuid())
+  fromConceptId String            @map("from_concept_id")
+  toConceptId   String            @map("to_concept_id")
+  type          RelationType
+  strength      RelationStrength
+  source        RelationSource
+
+  fromConcept Concept @relation("RelationFrom", fields: [fromConceptId], references: [id], onDelete: Cascade)
+  toConcept   Concept @relation("RelationTo", fields: [toConceptId], references: [id], onDelete: Cascade)
+
+  @@unique([fromConceptId, toConceptId, type])
+  @@index([fromConceptId])
+  @@index([toConceptId])
+  @@map("concept_relations")
+}
+
+// ---------------------------------------------------------------------
+// Examiner Lens — versioned, stored analysis (docs/QUESTION_ENGINE.md §2)
+// ---------------------------------------------------------------------
+
+enum LensStatus {
+  draft
+  reviewed
+  published
+}
+
+model ExaminerLensAnalysis {
+  id                     String     @id @default(uuid())
+  conceptId              String     @map("concept_id")
+  version                Int
+  whatIsTested           Json       @map("what_is_tested")
+  prerequisitesExercised String[]   @map("prerequisites_exercised")
+  legitimatePatterns     Json       @map("legitimate_patterns")
+  validCombinations      String[]   @map("valid_combinations")
+  validTraps             Json       @map("valid_traps")
+  transformations        Json
+  novelRepresentations   Json       @map("novel_representations")
+  generatedByProvider    String     @map("generated_by_provider")
+  promptVersion          String     @map("prompt_version")
+  reviewedBy             String?    @map("reviewed_by")
+  status                 LensStatus @default(draft)
+  createdAt              DateTime   @default(now()) @map("created_at")
+
+  concept       Concept               @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  taxonomyCells PatternTaxonomyCell[]
+
+  @@unique([conceptId, version])
+  @@index([conceptId])
+  @@map("examiner_lens_analyses")
+}
+
+// ---------------------------------------------------------------------
+// Question Universe — the coverage map (docs/QUESTION_ENGINE.md §3)
+// ---------------------------------------------------------------------
+
+enum CoverageStatus {
+  uncovered
+  in_generation
+  covered
+}
+
+enum DifficultyTier {
+  standard
+  advanced
+  hard
+  extreme
+  novel
+}
+
+model PatternTaxonomyCell {
+  id                     String         @id @default(uuid())
+  conceptId              String         @map("concept_id")
+  examinerLensAnalysisId String         @map("examiner_lens_analysis_id")
+  patternName            String         @map("pattern_name")
+  combination            String[]
+  transformation         String?
+  trapType               String?        @map("trap_type")
+  difficultyTier         DifficultyTier @map("difficulty_tier")
+  targetTimeSeconds      Int            @map("target_time_seconds")
+  coverageStatus         CoverageStatus @default(uncovered) @map("coverage_status")
+
+  concept              Concept              @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  examinerLensAnalysis ExaminerLensAnalysis @relation(fields: [examinerLensAnalysisId], references: [id], onDelete: Cascade)
+  questions            Question[]
+
+  @@unique([conceptId, patternName, transformation, trapType, difficultyTier])
+  @@index([conceptId])
+  @@index([examinerLensAnalysisId])
+  @@index([coverageStatus])
+  @@map("pattern_taxonomy_cells")
+}
+
+// ---------------------------------------------------------------------
+// Provenance — mandatory before a Question can be published
+// ---------------------------------------------------------------------
+
+enum SourceType {
+  original
+  licensed
+  public_domain
+  open_license
+  official
+  user_authorized
+}
+
+model Provenance {
+  id           String     @id @default(uuid())
+  sourceType   SourceType @map("source_type")
+  sourceRef    String?    @map("source_ref")
+  licenseRef   String?    @map("license_ref")
+  attributedTo String?    @map("attributed_to")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  questions Question[]
+
+  @@map("provenances")
+}
+
+// ---------------------------------------------------------------------
+// Question + Question DNA (docs/QUESTION_ENGINE.md §4)
+// A CHECK constraint enforcing "published requires provenance" is added
+// by hand in the initial migration SQL (Prisma's schema DSL has no
+// conditional-NOT-NULL / CHECK syntax) — see the migration file.
+// ---------------------------------------------------------------------
+
+enum ValidationState {
+  draft
+  ai_validated
+  human_reviewed
+  published
+  rejected
+}
+
+model Question {
+  id                    String          @id @default(uuid())
+  examId                String          @map("exam_id")
+  sectionId             String          @map("section_id")
+  chapterId             String          @map("chapter_id")
+  conceptId             String          @map("concept_id")
+  subconcepts           String[]
+  prerequisites         String[]
+  patternTaxonomyCellId String          @map("pattern_taxonomy_cell_id")
+  skill                 String
+  difficultyTier        DifficultyTier  @map("difficulty_tier")
+  difficultyDimensions  Json            @map("difficulty_dimensions")
+  expectedTimeSeconds   Int             @map("expected_time_seconds")
+  trapType              String?         @map("trap_type")
+  transformation        String?
+  body                  String
+  options               Json
+  correctAnswer         String          @map("correct_answer")
+  solutionSteps         Json            @map("solution_steps")
+  groundTruthDerivation Json            @map("ground_truth_derivation")
+  validationState       ValidationState @default(draft) @map("validation_state")
+  provenanceId          String?         @map("provenance_id")
+  createdAt             DateTime        @default(now()) @map("created_at")
+
+  exam                Exam                @relation(fields: [examId], references: [id])
+  section             Section             @relation(fields: [sectionId], references: [id])
+  chapter             Chapter             @relation(fields: [chapterId], references: [id])
+  concept             Concept             @relation("QuestionConcept", fields: [conceptId], references: [id])
+  patternTaxonomyCell PatternTaxonomyCell @relation(fields: [patternTaxonomyCellId], references: [id])
+  provenance          Provenance?         @relation(fields: [provenanceId], references: [id])
+  attempts            Attempt[]
+
+  @@index([conceptId])
+  @@index([patternTaxonomyCellId])
+  @@index([validationState])
+  @@map("questions")
+}
+
+// ---------------------------------------------------------------------
+// Student & Enrollment — Phase 1 foundation, not deferred
+// (docs/DATABASE.md "Student & Enrollment (Phase 1 foundation)")
+// ---------------------------------------------------------------------
+
+model Student {
+  id        String   @id @default(uuid())
+  authRef   String?  @unique @map("auth_ref")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  enrollments   Enrollment[]
+  attempts      Attempt[]
+  repairPlans   RepairPlan[]
+  masteryStates MasteryState[]
+  catchUpPlans  CatchUpPlan[]
+
+  @@map("students")
+}
+
+model Enrollment {
+  id         String   @id @default(uuid())
+  studentId  String   @map("student_id")
+  examId     String   @map("exam_id")
+  enrolledAt DateTime @map("enrolled_at")
+
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  attempts     Attempt[]
+  catchUpPlans CatchUpPlan[]
+
+  @@unique([studentId, examId])
+  @@index([examId])
+  @@map("enrollments")
+}
+
+// ---------------------------------------------------------------------
+// Attempt & AttemptEvent — event-sourced timing (docs/DECISIONS.md D-010)
+// AttemptEvent is the source of truth; Attempt's own timestamp/count
+// fields are denormalized convenience only.
+// ---------------------------------------------------------------------
+
+enum ReasoningInputMode {
+  text
+  voice
+}
+
+model Attempt {
+  id                 String             @id @default(uuid())
+  studentId          String             @map("student_id")
+  questionId         String             @map("question_id")
+  enrollmentId       String             @map("enrollment_id")
+  retryOfAttemptId   String?            @map("retry_of_attempt_id")
+  startedAt          DateTime           @map("started_at")
+  submittedAt        DateTime?          @map("submitted_at")
+  timeSpentSeconds   Int?               @map("time_spent_seconds")
+  chosenAnswer       String?            @map("chosen_answer")
+  isCorrect          Boolean?           @map("is_correct")
+  hintsUsed          Int                @default(0) @map("hints_used")
+  solutionOpenedAt   DateTime?          @map("solution_opened_at")
+  workingSteps       Json?              @map("working_steps")
+  reasoningText      String?            @map("reasoning_text")
+  reasoningInputMode ReasoningInputMode @default(text) @map("reasoning_input_mode")
+  reasoningAudioRef  String?            @map("reasoning_audio_ref")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  student    Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  question   Question       @relation(fields: [questionId], references: [id])
+  enrollment Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  retryOf    Attempt?       @relation("AttemptRetry", fields: [retryOfAttemptId], references: [id])
+  retries    Attempt[]      @relation("AttemptRetry")
+  events     AttemptEvent[]
+  autopsy    Autopsy?
+
+  @@index([studentId])
+  @@index([questionId])
+  @@index([enrollmentId])
+  @@index([retryOfAttemptId])
+  @@map("attempts")
+}
+
+enum AttemptEventType {
+  question_opened
+  option_selected
+  option_changed
+  hint_requested
+  solution_opened
+  working_input_changed
+  reasoning_submitted
+  answer_submitted
+}
+
+model AttemptEvent {
+  id         String           @id @default(uuid())
+  attemptId  String           @map("attempt_id")
+  eventType  AttemptEventType @map("event_type")
+  payload    Json?
+  occurredAt DateTime         @map("occurred_at")
+
+  attempt Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+  @@index([attemptId, occurredAt])
+  @@map("attempt_events")
+}
+
+// ---------------------------------------------------------------------
+// Error Taxonomy — data, not a free-form string (docs/DECISIONS.md D-012)
+// ---------------------------------------------------------------------
+
+model ErrorTaxonomy {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  label       String
+  description String?
+
+  autopsies   Autopsy[]
+  repairPlans RepairPlan[]
+
+  @@map("error_taxonomies")
+}
+
+// ---------------------------------------------------------------------
+// Question Autopsy — hypothesis until confirmed (docs/DECISIONS.md D-006)
+// ---------------------------------------------------------------------
+
+model Autopsy {
+  id                    String    @id @default(uuid())
+  attemptId             String    @unique @map("attempt_id")
+  hypothesisText        String    @map("hypothesis_text")
+  errorTaxonomyId       String?   @map("error_taxonomy_id")
+  likelyRootCause       String?   @map("likely_root_cause")
+  evidenceUsed          Json      @map("evidence_used")
+  confirmed             Boolean?  @map("confirmed")
+  studentCorrectionText String?   @map("student_correction_text")
+  generatedByProvider   String    @map("generated_by_provider")
+  promptVersion         String    @map("prompt_version")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  attempt       Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  errorTaxonomy ErrorTaxonomy? @relation(fields: [errorTaxonomyId], references: [id])
+  repairPlans   RepairPlan[]
+
+  @@index([errorTaxonomyId])
+  @@map("autopsies")
+}
+
+enum RepairStatus {
+  pending
+  in_progress
+  completed
+}
+
+model RepairPlan {
+  id                    String       @id @default(uuid())
+  autopsyId             String       @map("autopsy_id")
+  studentId             String       @map("student_id")
+  targetConceptId       String       @map("target_concept_id")
+  targetErrorTaxonomyId String?      @map("target_error_taxonomy_id")
+  followUpQuestionIds   String[]     @map("follow_up_question_ids")
+  status                RepairStatus @default(pending)
+  createdAt             DateTime     @default(now()) @map("created_at")
+
+  autopsy       Autopsy        @relation(fields: [autopsyId], references: [id], onDelete: Cascade)
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  errorTaxonomy ErrorTaxonomy? @relation(fields: [targetErrorTaxonomyId], references: [id])
+
+  @@index([autopsyId])
+  @@index([studentId])
+  @@map("repair_plans")
+}
+
+// ---------------------------------------------------------------------
+// Mastery — derived only, never input (docs/DATABASE.md "Mastery" rule)
+// ---------------------------------------------------------------------
+
+model MasteryState {
+  id                  String   @id @default(uuid())
+  studentId           String   @map("student_id")
+  conceptId           String   @map("concept_id")
+  accuracy            Float
+  speedRatio          Float    @map("speed_ratio")
+  noveltyHandling     Float    @map("novelty_handling")
+  pressurePerformance Float    @map("pressure_performance")
+  patternCoverage     Float    @map("pattern_coverage")
+  computedAt          DateTime @map("computed_at")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  concept Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, conceptId])
+  @@index([studentId])
+  @@index([conceptId])
+  @@map("mastery_states")
+}
+
+// ---------------------------------------------------------------------
+// Calendar-aware preparation — Phase 1 foundation (docs/DECISIONS.md D-009)
+// ---------------------------------------------------------------------
+
+model PrepPhaseTemplate {
+  id         String @id @default(uuid())
+  examId     String @map("exam_id")
+  phaseCurve Json   @map("phase_curve")
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@unique([examId])
+  @@map("prep_phase_templates")
+}
+
+model CatchUpPlan {
+  id           String   @id @default(uuid())
+  studentId    String   @map("student_id")
+  enrollmentId String   @map("enrollment_id")
+  overlay      Json
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([enrollmentId])
+  @@map("catch_up_plans")
+}

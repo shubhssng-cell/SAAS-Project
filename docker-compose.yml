@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ipmat
+      POSTGRES_PASSWORD: ipmat
+      POSTGRES_DB: ipmat_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - ipmat_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  ipmat_postgres_data:
