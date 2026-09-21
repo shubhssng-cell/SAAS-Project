@@ -50,7 +50,7 @@ All of the above runs as a background job (see §5), never inline in a student-f
 ```
 Attempt (wrong answer)
   → assemble evidence from the Attempt aggregate AND its AttemptEvent log:
-      - chosen_answer vs correct_answer, question DNA (esp. trap_type/pattern)
+      - chosen_answer vs correct_answer, question DNA (esp. trap_error_taxonomy_id/pattern family)
       - started_at/submitted_at vs expected_time, and finer-grained AttemptEvent timing where available
         (time before first interaction, time between actions, time after a hint)
       - hints_used, solution_opened_at (did they view the solution before or after submitting?)

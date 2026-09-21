@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "@ipmat/concept-graph": "*",
+    "@ipmat/examiner-lens": "*",
     "@ipmat/prep-phase": "*",
+    "@ipmat/question-engine": "*",
     "@prisma/client": "^5.20.0"
   },
   "devDependencies": {

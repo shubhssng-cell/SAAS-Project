@@ -26,28 +26,28 @@ One deployable app, internally organized into domain modules with enforced bound
 | Testing | Vitest (unit, domain logic), Playwright (e2e, added when there's a UI worth testing end-to-end) | Business logic (concept graph traversal, mastery computation, validation rules) is unit-tested; AI call sites are tested against recorded fixtures, not live calls. |
 | Deployment | Vercel (app) + managed Postgres (Neon/Supabase) + managed Redis (Upstash) | Zero ops for a single-founder phase; all swappable later since nothing is Vercel-specific in the domain code. |
 
-## 4. Repository layout (target, created incrementally — do not scaffold all of it at once)
+## 4. Repository layout (created incrementally — status noted per package)
 
 ```
 /apps
-  /web                 Next.js app: UI + API routes/server actions (the BFF)
+  /web                 [not built] Next.js app: UI + API routes/server actions (the BFF)
 /packages
   /domain              Framework-agnostic business logic, split by bounded context:
-    /concept-graph        Concept Universe: nodes, edges, traversal
-    /examiner-lens        Examiner Lens analysis: schema + orchestration
-    /question-engine      Question Universe taxonomy, Question DNA, generation orchestration
-    /validation           Validation pipeline rules (math correctness, ambiguity, dedup)
-    /attempts             Attempt recording, scoring
-    /autopsy               Autopsy hypothesis orchestration, repair planning
-    /mastery              Mastery computation (pure functions over attempt history)
-    /prep-phase           Calendar-aware phase + catch-up layer
-  /ai                  Provider abstraction, prompt templates, Zod schemas for every AI call shape
-  /db                  Prisma schema, migrations, generated client
-  /jobs                BullMQ job definitions + workers (one worker per expensive AI task type)
+    /concept-graph        [built, Phase 1-2] Concept Universe: 8-type relationship graph, Concept Depth
+    /examiner-lens        [built, Phase 2] Examiner Lens: WhatIsTested, TestingMode, error modes, combination derivation
+    /question-engine      [built, Phase 2] Pattern families, taxonomy cells, coverage ladder, Question DNA validation
+    /validation           [not built, Phase 3] Validation pipeline rules (math correctness, ambiguity, dedup)
+    /attempts             [not built, Phase 4] Attempt recording, scoring
+    /autopsy              [not built, Phase 5] Autopsy hypothesis orchestration, repair planning
+    /mastery              [not built, Phase 5] Mastery computation (pure functions over attempt history)
+    /prep-phase           [built, Phase 1] Calendar-aware phase + catch-up layer
+  /ai                  [not built, Phase 3] Provider abstraction, prompt templates, Zod schemas for every AI call shape
+  /db                  [built] Prisma schema (full domain model), migrations, seed data, generated client
+  /jobs                [not built, Phase 3] BullMQ job definitions + workers (one worker per expensive AI task type)
 /docs                  This directory
 ```
 
-`/packages/domain/*` modules depend only on plain TS + `/packages/ai` interfaces (never a concrete provider) + `/packages/db` types (not the Prisma client directly, to keep them testable without a live DB). `/apps/web` is the only place that wires concrete implementations together.
+`/packages/domain/*` modules depend only on plain TS + other `/packages/domain/*` packages (e.g. `question-engine` depends on `concept-graph` and `examiner-lens`) + `/packages/ai` interfaces (never a concrete provider) — never on `/packages/db`'s Prisma client or types directly, to keep them testable without a live DB. `/packages/db`'s seed script is the one place that imports domain-package fixtures and writes them through Prisma; this is the correct dependency direction (infrastructure depends on domain, never the reverse). `/apps/web` (when built) is where concrete implementations get wired together for the UI.
 
 ## 5. Request/data flow (vertical slice)
 
@@ -66,6 +66,8 @@ The student path never blocks on a live AI call for question selection — only 
 - `prep-phase` is a pure function of `(examId, enrollmentDate, today)` plus a stored `PrepPhaseTemplate`/`CatchUpPlan`. It must not read `attempts` or `MasteryState` — the boundary runs both ways, not just from mastery's side. This is built and unit-tested in Phase 1, ahead of the practice UI, precisely because it's foundational rather than a later enhancement (see [DECISIONS.md](DECISIONS.md) D-009).
 - `attempts` owns `AttemptEvent` as its append-only source of truth for timing and interaction history. `Attempt`'s own timestamp/count fields (`started_at`, `submitted_at`, `hints_used`, etc.) are denormalizations computed from the event log, never written independently of it — a new timing signal is a new `event_type`, not a new column.
 - `autopsy` never writes a diagnosis as fact — its output type is always `hypothesis` until a student confirms it; only confirmed diagnoses are allowed to influence `mastery` or `repair`. Its `error_taxonomy_id` always references the `ErrorTaxonomy` table, never a free-form string.
+- `examiner-lens` never stores a "combinations" list — it always recomputes combination candidates live from `concept-graph`'s `ConceptRelation` edges (`deriveCombinations()`). A stored, hand-maintained combinations column would be a second source of truth that could silently disagree with the graph.
+- `question-engine`'s pattern-family coverage stage (`mapped`/`has_questions`/`validated`/`practice_ready`) is computed from `PatternTaxonomyCell` + `Question` rows on every read, never stored — same "derived, never input" discipline as `mastery`.
 - Nothing outside `/packages/ai` constructs a prompt string or parses a raw LLM response. All call sites go through typed functions that return Zod-validated results or throw.
 
 ## 7. Environments

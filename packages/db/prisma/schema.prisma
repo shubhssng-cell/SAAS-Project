@@ -80,29 +80,75 @@ model Concept {
   description String?
   status      ConceptStatus @default(draft)
 
-  chapter          Chapter                @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  relationsFrom    ConceptRelation[]      @relation("RelationFrom")
-  relationsTo      ConceptRelation[]      @relation("RelationTo")
-  lensAnalyses     ExaminerLensAnalysis[]
-  taxonomyCells    PatternTaxonomyCell[]
-  questionsPrimary Question[]             @relation("QuestionConcept")
-  masteryStates    MasteryState[]
+  chapter             Chapter                 @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  relationsFrom       ConceptRelation[]       @relation("RelationFrom")
+  relationsTo         ConceptRelation[]       @relation("RelationTo")
+  depth               ConceptDepth?
+  lensAnalyses        ExaminerLensAnalysis[]
+  lensPrerequisiteFor ExaminerLensAnalysis[]  @relation("LensPrerequisite")
+  patternFamilies     QuestionPatternFamily[]
+  taxonomyCells       PatternTaxonomyCell[]
+  questionsPrimary    Question[]              @relation("QuestionConcept")
+  masteryStates       MasteryState[]
 
   @@unique([chapterId, name])
   @@index([chapterId])
   @@map("concepts")
 }
 
-enum RelationType {
-  prerequisite_of
-  related_to
-  combines_with
+// Structured "concept depth" content (docs/QUESTION_ENGINE.md §1a) — kept
+// as typed JSON substructures per section rather than one text blob, so
+// e.g. just the shortcuts or just the common traps can be queried and
+// rendered independently. See packages/domain/concept-graph/src/depth.ts
+// for the substructure shapes (Formula, Method, Shortcut, ...).
+model ConceptDepth {
+  id                    String        @id @default(uuid())
+  conceptId             String        @unique @map("concept_id")
+  definition            String
+  intuition             String
+  formulas              Json
+  methods               Json
+  alternativeMethods    Json          @map("alternative_methods")
+  shortcuts             Json
+  commonMisconceptions  Json          @map("common_misconceptions")
+  commonTraps           Json          @map("common_traps")
+  applicationAreas      Json          @map("application_areas")
+  difficultyProgression Json          @map("difficulty_progression")
+  status                ConceptStatus @default(draft)
+  createdAt             DateTime      @default(now()) @map("created_at")
+
+  concept Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@map("concept_depths")
 }
 
-enum RelationStrength {
-  weak
-  moderate
-  strong
+// Eight distinct relationship types (docs/DECISIONS.md D-013) — deliberately
+// not flattened into a single "related" bucket. See the domain-layer
+// documentation in packages/domain/concept-graph/src/types.ts for what each
+// one specifically means and how it differs from its neighbors.
+enum RelationType {
+  prerequisite
+  foundational
+  directly_related
+  commonly_combined
+  application
+  dependent
+  advanced_extension
+  related_but_distinct
+}
+
+// Is the relationship a hard gate, a nice-to-have, or only relevant in some contexts?
+enum RequirementLevel {
+  required
+  optional
+  contextual
+}
+
+// How sure we are this relationship is real and correctly characterized.
+enum Certainty {
+  confirmed
+  probable
+  speculative
 }
 
 enum RelationSource {
@@ -111,12 +157,16 @@ enum RelationSource {
 }
 
 model ConceptRelation {
-  id            String            @id @default(uuid())
-  fromConceptId String            @map("from_concept_id")
-  toConceptId   String            @map("to_concept_id")
-  type          RelationType
-  strength      RelationStrength
-  source        RelationSource
+  id                          String           @id @default(uuid())
+  fromConceptId               String           @map("from_concept_id")
+  toConceptId                 String           @map("to_concept_id")
+  type                        RelationType
+  rationale                   String
+  sharedKnowledge             String           @map("shared_knowledge")
+  usefulForQuestionGeneration Boolean          @map("useful_for_question_generation")
+  requirementLevel            RequirementLevel @map("requirement_level")
+  certainty                   Certainty
+  source                      RelationSource
 
   fromConcept Concept @relation("RelationFrom", fields: [fromConceptId], references: [id], onDelete: Cascade)
   toConcept   Concept @relation("RelationTo", fields: [toConceptId], references: [id], onDelete: Cascade)
@@ -137,29 +187,70 @@ enum LensStatus {
   published
 }
 
-model ExaminerLensAnalysis {
-  id                     String     @id @default(uuid())
-  conceptId              String     @map("concept_id")
-  version                Int
-  whatIsTested           Json       @map("what_is_tested")
-  prerequisitesExercised String[]   @map("prerequisites_exercised")
-  legitimatePatterns     Json       @map("legitimate_patterns")
-  validCombinations      String[]   @map("valid_combinations")
-  validTraps             Json       @map("valid_traps")
-  transformations        Json
-  novelRepresentations   Json       @map("novel_representations")
-  generatedByProvider    String     @map("generated_by_provider")
-  promptVersion          String     @map("prompt_version")
-  reviewedBy             String?    @map("reviewed_by")
-  status                 LensStatus @default(draft)
-  createdAt              DateTime   @default(now()) @map("created_at")
+// Who produced this analysis — distinct from LensStatus (which tracks the
+// review workflow regardless of who authored it). Phase 2's Percentages
+// analysis is human-authored (docs/MASTER_PLAN.md Phase 2 excludes
+// large-scale AI generation); generatedByProvider/promptVersion only apply
+// once authoredBy = ai.
+enum AuthorshipSource {
+  human
+  ai
+}
 
-  concept       Concept               @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  taxonomyCells PatternTaxonomyCell[]
+// Finalized shape (docs/QUESTION_ENGINE.md §2): "what is tested" is four
+// normalized fields, not one Json blob; testingModes is the controlled
+// 10-value vocabulary; errorModes and difficultyDimensions stay Json
+// because they're small, internally-cohesive structures that are always
+// read/written whole, never queried by a sub-field. Deliberately has NO
+// "combinations" column — that list is always derived live from
+// ConceptRelation via deriveCombinations() (see packages/domain/examiner-
+// lens), never cached here, so it can never drift from the graph it's
+// supposed to reflect (same "derived, not stored" discipline as coverage
+// and mastery).
+model ExaminerLensAnalysis {
+  id                         String           @id @default(uuid())
+  conceptId                  String           @map("concept_id")
+  version                    Int
+  whatIsTestedConcept        String           @map("what_is_tested_concept")
+  whatIsTestedSubconcept     String           @map("what_is_tested_subconcept")
+  whatIsTestedSkill          String           @map("what_is_tested_skill")
+  whatIsTestedPrerequisiteId String?          @map("what_is_tested_prerequisite_id")
+  testingModes               TestingMode[]    @map("testing_modes")
+  errorModes                 Json             @map("error_modes")
+  difficultyDimensions       Json             @map("difficulty_dimensions")
+  authoredBy                 AuthorshipSource @default(human) @map("authored_by")
+  generatedByProvider        String?          @map("generated_by_provider")
+  promptVersion              String?          @map("prompt_version")
+  reviewedBy                 String?          @map("reviewed_by")
+  status                     LensStatus       @default(draft)
+  createdAt                  DateTime         @default(now()) @map("created_at")
+
+  concept                  Concept                 @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  whatIsTestedPrerequisite Concept?                @relation("LensPrerequisite", fields: [whatIsTestedPrerequisiteId], references: [id])
+  patternFamilies          QuestionPatternFamily[]
+  taxonomyCells            PatternTaxonomyCell[]
 
   @@unique([conceptId, version])
   @@index([conceptId])
   @@map("examiner_lens_analyses")
+}
+
+// ---------------------------------------------------------------------
+// The 10 legitimate ways a concept can be tested (docs/QUESTION_ENGINE.md
+// §2) — a controlled vocabulary shared by pattern families and questions.
+// ---------------------------------------------------------------------
+
+enum TestingMode {
+  direct
+  reverse
+  transformed
+  combined
+  contextualized
+  represented_differently
+  constrained
+  time_pressured
+  multi_step
+  novel_representation
 }
 
 // ---------------------------------------------------------------------
@@ -180,25 +271,68 @@ enum DifficultyTier {
   novel
 }
 
+enum PatternFamilyStatus {
+  draft
+  reviewed
+  published
+}
+
+// A pattern describes the STRUCTURE of a question, not a numerical
+// instance (docs/QUESTION_ENGINE.md §3) — one family can generate many
+// valid questions. `potentialCombinationConceptIds` and
+// `potentialTrapErrorTaxonomyIds` are plain reference arrays (consistent
+// with Question.subconcepts/prerequisites), not enforced FKs, since a
+// family's "potential" space is broader than any single concrete link.
+model QuestionPatternFamily {
+  id                             String              @id @default(uuid())
+  conceptId                      String              @map("concept_id")
+  examinerLensAnalysisId         String?             @map("examiner_lens_analysis_id")
+  name                           String
+  skill                          String
+  description                    String
+  expectedDifficultyTier         DifficultyTier      @map("expected_difficulty_tier")
+  potentialCombinationConceptIds String[]            @map("potential_combination_concept_ids")
+  potentialTrapErrorTaxonomyIds  String[]            @map("potential_trap_error_taxonomy_ids")
+  potentialTestingModes          TestingMode[]       @map("potential_testing_modes")
+  status                         PatternFamilyStatus @default(draft)
+  createdAt                      DateTime            @default(now()) @map("created_at")
+
+  concept              Concept               @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  examinerLensAnalysis ExaminerLensAnalysis? @relation(fields: [examinerLensAnalysisId], references: [id])
+  taxonomyCells        PatternTaxonomyCell[]
+
+  @@unique([conceptId, name])
+  @@index([conceptId])
+  @@map("question_pattern_families")
+}
+
+// One specific, concrete slice of a pattern family's space — the unit
+// coverage is tracked against (docs/QUESTION_ENGINE.md §3, §6).
+// `testingMode` stays a single nullable value here (unlike Question's
+// array) so the natural-key uniqueness below stays simple and reliable —
+// a cell is meant to be one narrow, atomic coverage target.
 model PatternTaxonomyCell {
   id                     String         @id @default(uuid())
   conceptId              String         @map("concept_id")
   examinerLensAnalysisId String         @map("examiner_lens_analysis_id")
-  patternName            String         @map("pattern_name")
+  patternFamilyId        String         @map("pattern_family_id")
   combination            String[]
-  transformation         String?
-  trapType               String?        @map("trap_type")
+  testingMode            TestingMode?   @map("testing_mode")
+  trapErrorTaxonomyId    String?        @map("trap_error_taxonomy_id")
   difficultyTier         DifficultyTier @map("difficulty_tier")
   targetTimeSeconds      Int            @map("target_time_seconds")
   coverageStatus         CoverageStatus @default(uncovered) @map("coverage_status")
 
-  concept              Concept              @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  examinerLensAnalysis ExaminerLensAnalysis @relation(fields: [examinerLensAnalysisId], references: [id], onDelete: Cascade)
+  concept              Concept               @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  examinerLensAnalysis ExaminerLensAnalysis  @relation(fields: [examinerLensAnalysisId], references: [id], onDelete: Cascade)
+  patternFamily        QuestionPatternFamily @relation(fields: [patternFamilyId], references: [id], onDelete: Cascade)
+  trapErrorTaxonomy    ErrorTaxonomy?        @relation("TaxonomyCellTrap", fields: [trapErrorTaxonomyId], references: [id])
   questions            Question[]
 
-  @@unique([conceptId, patternName, transformation, trapType, difficultyTier])
+  @@unique([conceptId, patternFamilyId, testingMode, trapErrorTaxonomyId, difficultyTier])
   @@index([conceptId])
   @@index([examinerLensAnalysisId])
+  @@index([patternFamilyId])
   @@index([coverageStatus])
   @@map("pattern_taxonomy_cells")
 }
@@ -244,35 +378,56 @@ enum ValidationState {
   rejected
 }
 
+// Used for filtering novelty-handling practice/mastery (docs/PRODUCT_SPEC.md
+// §3) — distinct from TestingMode, which classifies authoring technique
+// rather than student-facing familiarity.
+enum NoveltyLevel {
+  standard
+  novel_representation
+  novel_combination
+  novel_context
+}
+
+// How typical this pattern is of the actual exam, vs. good enrichment practice.
+enum ExamRelevance {
+  core
+  peripheral
+  stretch
+}
+
 model Question {
-  id                    String          @id @default(uuid())
-  examId                String          @map("exam_id")
-  sectionId             String          @map("section_id")
-  chapterId             String          @map("chapter_id")
-  conceptId             String          @map("concept_id")
-  subconcepts           String[]
-  prerequisites         String[]
-  patternTaxonomyCellId String          @map("pattern_taxonomy_cell_id")
-  skill                 String
-  difficultyTier        DifficultyTier  @map("difficulty_tier")
-  difficultyDimensions  Json            @map("difficulty_dimensions")
-  expectedTimeSeconds   Int             @map("expected_time_seconds")
-  trapType              String?         @map("trap_type")
-  transformation        String?
-  body                  String
-  options               Json
-  correctAnswer         String          @map("correct_answer")
-  solutionSteps         Json            @map("solution_steps")
-  groundTruthDerivation Json            @map("ground_truth_derivation")
-  validationState       ValidationState @default(draft) @map("validation_state")
-  provenanceId          String?         @map("provenance_id")
-  createdAt             DateTime        @default(now()) @map("created_at")
+  id                     String          @id @default(uuid())
+  examId                 String          @map("exam_id")
+  sectionId              String          @map("section_id")
+  chapterId              String          @map("chapter_id")
+  conceptId              String          @map("concept_id")
+  subconcepts            String[]
+  prerequisites          String[]
+  combinesWithConceptIds String[]        @map("combines_with_concept_ids")
+  patternTaxonomyCellId  String          @map("pattern_taxonomy_cell_id")
+  skill                  String
+  difficultyTier         DifficultyTier  @map("difficulty_tier")
+  difficultyDimensions   Json            @map("difficulty_dimensions")
+  noveltyLevel           NoveltyLevel    @default(standard) @map("novelty_level")
+  examRelevance          ExamRelevance   @default(core) @map("exam_relevance")
+  expectedTimeSeconds    Int             @map("expected_time_seconds")
+  testingModes           TestingMode[]   @map("testing_modes")
+  trapErrorTaxonomyId    String?         @map("trap_error_taxonomy_id")
+  body                   String
+  options                Json
+  correctAnswer          String          @map("correct_answer")
+  solutionSteps          Json            @map("solution_steps")
+  groundTruthDerivation  Json            @map("ground_truth_derivation")
+  validationState        ValidationState @default(draft) @map("validation_state")
+  provenanceId           String?         @map("provenance_id")
+  createdAt              DateTime        @default(now()) @map("created_at")
 
   exam                Exam                @relation(fields: [examId], references: [id])
   section             Section             @relation(fields: [sectionId], references: [id])
   chapter             Chapter             @relation(fields: [chapterId], references: [id])
   concept             Concept             @relation("QuestionConcept", fields: [conceptId], references: [id])
   patternTaxonomyCell PatternTaxonomyCell @relation(fields: [patternTaxonomyCellId], references: [id])
+  trapErrorTaxonomy   ErrorTaxonomy?      @relation("QuestionTrap", fields: [trapErrorTaxonomyId], references: [id])
   provenance          Provenance?         @relation(fields: [provenanceId], references: [id])
   attempts            Attempt[]
 
@@ -391,14 +546,29 @@ model AttemptEvent {
 // Error Taxonomy — data, not a free-form string (docs/DECISIONS.md D-012)
 // ---------------------------------------------------------------------
 
+// The 5 broad "what can go wrong" categories (docs/QUESTION_ENGINE.md §2)
+// — the SAME vocabulary Examiner Lens error modes use
+// (packages/domain/examiner-lens), so Autopsy diagnosis and Lens-authored
+// traps share one error vocabulary instead of two (docs/DECISIONS.md D-013).
+enum ErrorCategory {
+  misconception
+  trap
+  calculation_mistake
+  interpretation_mistake
+  method_selection_mistake
+}
+
 model ErrorTaxonomy {
-  id          String  @id @default(uuid())
-  code        String  @unique
+  id          String        @id @default(uuid())
+  code        String        @unique
   label       String
   description String?
+  category    ErrorCategory
 
-  autopsies   Autopsy[]
-  repairPlans RepairPlan[]
+  autopsies         Autopsy[]
+  repairPlans       RepairPlan[]
+  taxonomyCellTraps PatternTaxonomyCell[] @relation("TaxonomyCellTrap")
+  questionTraps     Question[]            @relation("QuestionTrap")
 
   @@map("error_taxonomies")
 }
@@ -408,17 +578,17 @@ model ErrorTaxonomy {
 // ---------------------------------------------------------------------
 
 model Autopsy {
-  id                    String    @id @default(uuid())
-  attemptId             String    @unique @map("attempt_id")
-  hypothesisText        String    @map("hypothesis_text")
-  errorTaxonomyId       String?   @map("error_taxonomy_id")
-  likelyRootCause       String?   @map("likely_root_cause")
-  evidenceUsed          Json      @map("evidence_used")
-  confirmed             Boolean?  @map("confirmed")
-  studentCorrectionText String?   @map("student_correction_text")
-  generatedByProvider   String    @map("generated_by_provider")
-  promptVersion         String    @map("prompt_version")
-  createdAt             DateTime  @default(now()) @map("created_at")
+  id                    String   @id @default(uuid())
+  attemptId             String   @unique @map("attempt_id")
+  hypothesisText        String   @map("hypothesis_text")
+  errorTaxonomyId       String?  @map("error_taxonomy_id")
+  likelyRootCause       String?  @map("likely_root_cause")
+  evidenceUsed          Json     @map("evidence_used")
+  confirmed             Boolean? @map("confirmed")
+  studentCorrectionText String?  @map("student_correction_text")
+  generatedByProvider   String   @map("generated_by_provider")
+  promptVersion         String   @map("prompt_version")
+  createdAt             DateTime @default(now()) @map("created_at")
 
   attempt       Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   errorTaxonomy ErrorTaxonomy? @relation(fields: [errorTaxonomyId], references: [id])

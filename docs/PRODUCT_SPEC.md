@@ -41,7 +41,7 @@ These are stored as distinct, queryable facts per (student, concept), not folded
 ## 4. Core differentiators, translated into system behavior
 
 ### 4.1 Concept Universe
-A concept (e.g. Percentages) is a node in a graph, not a leaf in a syllabus tree. The graph carries typed edges: `prerequisite_of`, `related_to`, `combines_with`. Percentages ↔ Ratio ↔ Averages ↔ Profit/Loss ↔ Discount ↔ DI ↔ Algebra is literally an edge list, not prose. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §1.
+A concept (e.g. Percentages) is a node in a graph, not a leaf in a syllabus tree. The graph carries 8 distinct typed edges — `prerequisite`, `foundational`, `directly_related`, `commonly_combined`, `application`, `dependent`, `advanced_extension`, `related_but_distinct` — each with a rationale, not a bare label. Percentages ↔ Ratio ↔ Averages ↔ Profit/Loss ↔ Discount ↔ DI ↔ Algebra is literally an edge list, not prose. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §1.
 
 ### 4.2 Examiner Lens
 A structured, schema-validated analysis artifact — not a generation shortcut. Given a concept (or a specific question), it answers: what is actually tested, what prerequisites are exercised, what legitimate patterns can test it, what transformations apply, what combinations are valid, what traps are legitimate (not just "make it harder"), and what unfamiliar representations are possible. This artifact is a first-class, versioned, stored object — every generated question must trace back to the Examiner Lens analysis cell it was generated from. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §2.
@@ -50,7 +50,7 @@ A structured, schema-validated analysis artifact — not a generation shortcut. 
 The system maps the *meaningful* pattern space for a concept — families, combinations, transformations, traps, difficulty levels, speed requirements, novel presentations — as an explicit taxonomy with coverage tracking. It never claims mathematical completeness; it claims and tracks **coverage against a curated, explainable taxonomy**. Coverage gaps are visible and queryable, not implicit. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §3.
 
 ### 4.4 Question DNA
-Every question is metadata-complete before it is servable: exam, section, subject, chapter, concept, subconcepts, prerequisites, pattern, skill, difficulty dimensions, expected time, trap type, transformation, source/provenance, validation state. This is a schema, not a convention — see [DATABASE.md](DATABASE.md) §Question / QuestionDNA.
+Every question is metadata-complete before it is servable: exam, section, subject, chapter, concept, subconcepts, prerequisites, combination concepts, pattern family, skill, difficulty dimensions, expected time, trap, testing mode(s), novelty level, exam relevance, source/provenance, validation state. This is a schema, not a convention, with fields that get queried frequently normalized as their own typed columns rather than buried in JSON — see [DATABASE.md](DATABASE.md) §Question / Question DNA.
 
 ### 4.5 Question Autopsy
 On a wrong answer, the system forms a **hypothesis**, not a verdict: "Your working suggests you may have treated X as Y — is that what happened?" It never claims to know the student's thoughts. The student confirms or corrects; a correction is captured (text now, voice later) and feeds the diagnosis and, over time, the hypothesis-generation prompt itself. Confirmed diagnosis drives targeted repair questions. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §5 and [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) §4.
@@ -59,7 +59,7 @@ On a wrong answer, the system forms a **hypothesis**, not a verdict: "Your worki
 Difficulty tiers — Standard, Advanced, Hard, Extreme, Novel — are exposure levels above expected exam difficulty, not nonsense generators. "Hard" must still be valid, syllabus-relevant, unambiguous, and correct. Validation gates this explicitly (see [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §4); a question that fails validity/unambiguity checks is rejected regardless of how "interesting" its difficulty is.
 
 ### 4.7 Surprise / Trap / Pressure, Calculation Gym, Vocabulary Gym
-All explicitly out of scope for this phase (see [MASTER_PLAN.md](MASTER_PLAN.md)). They are named here only so the Question DNA schema and concept graph are shaped to not block them later (e.g. `trap_type` and `expected_time` already exist on every question).
+All explicitly out of scope for this phase (see [MASTER_PLAN.md](MASTER_PLAN.md)). They are named here only so the Question DNA schema and concept graph are shaped to not block them later (e.g. `trap_error_taxonomy_id`, `testing_modes`, and `expected_time_seconds` already exist on every question).
 
 ### 4.8 Calendar-aware preparation, decoupled from mastery
 Two independent axes, never merged:

@@ -2,7 +2,7 @@
 
 ## Current state (2026-09-22)
 
-Phase 1 foundation implemented: full Prisma schema (all tables), initial migration generated and validated, concept graph + error taxonomy + prep-phase seed data written, `prep-phase` domain package (`computePrepPhase`/`applyCatchUp`) built and unit-tested (9 tests passing), typecheck/lint/build clean across all workspaces. Not yet done: applying the migration and running the seed script against a live Postgres instance (no database was reachable in the implementing environment — see the Phase 1 implementation report for details). No student-facing UI, no AI provider integration, no Examiner Lens yet — that's Phase 2+.
+Phase 1 and Phase 2 foundations implemented. Phase 1: full Prisma schema, initial migration, concept graph + error taxonomy + prep-phase seed data, `prep-phase` domain package. Phase 2: the concept graph deepened to 12 concepts / 16 richly-typed relationships across 8 chapters, `ConceptDepth` structure (full for Percentages, light for Ratio), `@ipmat/examiner-lens` (Examiner Lens domain model + combination derivation + structural validation), `@ipmat/question-engine` (4 pattern families, 8 taxonomy cells, the coverage readiness ladder, finalized Question DNA + validator, and a runnable deterministic demonstration). 44 unit tests passing, typecheck/lint/build clean across all 6 workspaces. Not yet done: applying either migration or running the seed script against a live Postgres instance — no database has been reachable in the implementing environment through either phase (see the Phase 1 and Phase 2 implementation reports). No student-facing UI, no AI provider integration, no real question generation yet — that's Phase 3+.
 
 ## Build phases
 
@@ -27,18 +27,23 @@ Repository audit (trivial — nothing existed), product spec, architecture, data
 3. A unit test proves `applyCatchUp` never mutates the underlying `PrepPhaseTemplate` row — it returns an adjusted curve, the template's `phase_curve` is byte-for-byte unchanged in the database before and after.
 4. A unit test (or explicit code-boundary check) proves `computePrepPhase`/`applyCatchUp` never read `MasteryState` — calendar phase and mastery are computed from disjoint inputs.
 
-### Phase 2 — Examiner Lens + Question Universe for Percentages
-- Run Examiner Lens generation against the seeded Percentages graph; human review and approve/edit the stored analysis.
-- Derive `PatternTaxonomyCell` rows from the approved analysis.
-- Build the smallest possible internal view (CLI output or a bare admin page — not a polished UI) to inspect coverage.
+### Phase 2 — Concept Intelligence + Examiner Lens ✅ done (this pass)
+- Deepened the Percentages concept graph from 7 to 12 concepts and from a 3-type to an 8-type relationship model (`prerequisite`, `foundational`, `directly_related`, `commonly_combined`, `application`, `dependent`, `advanced_extension`, `related_but_distinct`), each edge carrying rationale, shared knowledge, a requirement level, and an honest certainty marker.
+- Added `ConceptDepth` (definition, intuition, formulas, methods, shortcuts, misconceptions, traps, application areas, difficulty progression) — full for Percentages, light for Ratio.
+- Built `@ipmat/examiner-lens`: normalized `WhatIsTested`, the 10-value `TestingMode` vocabulary, graph-derived combinations (never hand-authored), error modes sharing `ErrorTaxonomy`'s 5-category vocabulary, dimensional difficulty, and structural validation (including a guard against false-completeness claims in free text).
+- Built `@ipmat/question-engine`: `QuestionPatternFamily` (the structure of a question) vs. `PatternTaxonomyCell` (one concrete slice of it), the `mapped → has_questions → validated → practice_ready` coverage ladder (computed, never stored), and `validateQuestionDna()`.
+- Finalized Question DNA on the `Question` table itself: `combinesWithConceptIds`, `noveltyLevel`, `examRelevance`, `testingModes[]`, and `trapErrorTaxonomyId` (FK) replacing the earlier free-text `transformation`/`trap_type` placeholders.
+- One hand-authored demonstration question (Reverse Percentage, `published`, full provenance) proves the DNA schema against a real example — not a question bank.
+- A deterministic demonstration script (`npm run demo:percentages --workspace @ipmat/question-engine`) shows Percentages as a graph node with real prerequisites, connections, pattern families, traps, difficulty dimensions, and one worked Question DNA example.
 
-**Exit criterion:** a real, human-reviewed `ExaminerLensAnalysis` exists for Percentages, and the taxonomy table has a coverage number that is true (not stubbed).
+**Exit criteria:** ✅ a human-authored, structurally-validated `ExaminerLensAnalysis` exists for Percentages; ✅ the pattern-family/taxonomy-cell tables exist with a coverage number that is true (1 of 8 cells `covered`, honestly); ✅ 44 unit tests prove relationship typing, directionality, combination derivation, coverage computation, and DNA validation; ✅ typecheck/lint/build clean. Not applied to a live database (see Phase 2 report).
 
-### Phase 3 — Question generation + validation pipeline
-- Generation job, independent re-derivation check, AI-judge pass, dedup check, human review gate for extreme/novel tiers.
+### Phase 3 — AI provider abstraction + question generation + validation pipeline
+- AI provider abstraction (`/packages/ai`) with the Zod schema for exactly one task type first (`examiner-lens-analysis` — regenerating Percentages' Lens via AI, checked against the Phase 2 human-authored version), proven end-to-end, before adding the rest.
+- Generation job targeting the 7 currently-`uncovered` Percentages taxonomy cells: independent re-derivation check, AI-judge pass, dedup check, human review gate for `hard`/`extreme`/`novel` tiers.
 - Fill taxonomy cells for Percentages until each has a minimum viable question count across at least Standard/Advanced/Hard.
 
-**Exit criterion:** a queryable, published question bank for Percentages exists where every row satisfies the Question DNA invariant (no nulls, provenance required).
+**Exit criterion:** a queryable, published question bank for Percentages exists where every row satisfies the Question DNA invariant (no nulls, provenance required), and the Phase 2 coverage ladder shows real families reaching `practice_ready` from actual generated (not hand-authored) content.
 
 ### Phase 4 — Student practice loop
 - `Student`/`Enrollment` already exist from Phase 1; `Attempt`/`AttemptEvent` tables already exist from Phase 1 — this phase is the first to actually write rows into them.
@@ -49,7 +54,7 @@ Repository audit (trivial — nothing existed), product spec, architecture, data
 
 ### Phase 5 — Mastery + Question Autopsy + Targeted Repair
 - `MasteryState` computation job (pure function over `Attempt`/`AttemptEvent` history) — table already exists from Phase 1.
-- `Autopsy` pipeline: evidence assembly now draws on the full `AttemptEvent` log plus `reasoning_text`/`solution_opened_at` where present; hypothesis generation, confirm/correct UI, `RepairPlan` generation and delivery. `error_taxonomy_id` references the `ErrorTaxonomy` table seeded in Phase 1 (grown as real error patterns are observed).
+- `Autopsy` pipeline: evidence assembly now draws on the full `AttemptEvent` log plus `reasoning_text`/`solution_opened_at` where present; hypothesis generation, confirm/correct UI, `RepairPlan` generation and delivery. `error_taxonomy_id` references the `ErrorTaxonomy` table seeded in Phase 1 and extended with `category` + real Percentages-specific codes in Phase 2 (grown further as real error patterns are observed).
 - Practice question selection starts using `MasteryState` + `PatternTaxonomyCell` coverage instead of a flat queue.
 
 **Exit criterion:** a wrong answer produces a hypothesis, the student can confirm or correct it, and a confirmed diagnosis visibly changes what question the student sees next.
@@ -66,18 +71,18 @@ Dogfood internally, fix correctness issues found in generated content, tighten v
 
 ## What should be implemented FIRST
 
-Phase 1 → 2, in the order listed above. Concretely, the very first code artifacts should be the full Prisma schema, the seed script for the Percentages concept graph, and the `prep-phase` domain package (`computePrepPhase`/`applyCatchUp`) with its unit tests — everything else (AI calls, UI) depends on that data and calculation existing and being correct.
+Phase 1 → 2 are done (this pass and the previous one). Phase 3 next: the `/packages/ai` provider abstraction proven against exactly one task type (`examiner-lens-analysis`) before anything else touches AI, since every later generation/validation/autopsy task depends on that abstraction existing and being trustworthy.
 
 ## What should explicitly NOT be built yet
 
 - Payments, subscriptions, or any pricing logic
 - Parent portal or any secondary-account model
-- Any exam other than IPMAT, any section other than Quant, any chapter other than Percentages
+- Full question-bank buildout (pattern families, taxonomy cells, generated content) for any exam other than IPMAT, any section other than Quant, or any chapter other than Percentages. This does NOT mean the concept graph must pretend other chapters don't exist — Phase 2 deliberately reaches into Ratio, Averages, Profit and Loss, Data Interpretation, Algebra, and others as *neighbors in Percentages' graph*, each with a real chapter row and a real relationship. The restriction is on building those chapters out as first-class content targets themselves, not on acknowledging they exist.
 - Social features (leaderboards, sharing, cohorts)
 - SEO/marketing site
 - Mock-test assembly engine or a large pre-built mock library
 - Calculation Gym, Vocabulary Gym
-- Surprise Mode, Trap Lab, Speed Lab, Pressure Lab as named features (their underlying data — `trap_type`, `expected_time_seconds` — already exists in the schema so they aren't blocked later, but no UI or job targets them now)
+- Surprise Mode, Trap Lab, Speed Lab, Pressure Lab as named features (their underlying data — `trap_error_taxonomy_id`, `testing_modes`, `expected_time_seconds` — already exists in the schema so they aren't blocked later, but no UI or job targets them now)
 - Multi-tenant / coaching-org accounts
 - Automated fine-tuning of any AI prompt from autopsy correction data (manual review only, for now)
 - A polished admin UI — internal tooling for Phase 1–3 can be CLI scripts or bare pages

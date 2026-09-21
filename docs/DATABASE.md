@@ -5,8 +5,12 @@ PostgreSQL, accessed via Prisma. This is the target schema for the vertical slic
 ## Design rules
 
 - **Exam structure is data.** `Exam`, `Section`, `Chapter` are rows, not enums — so adding CAT later is a seed script, not a code change.
-- **The concept graph is a real graph.** `Concept` nodes + typed `ConceptRelation` edges, not a flat `chapter → concept` list.
-- **Question DNA is enforced, not conventional.** A `Question` cannot be marked `published` without every DNA field populated and a `Provenance` record.
+- **The concept graph is a real graph, with 8 distinct edge types.** `Concept` nodes + typed `ConceptRelation` edges — `prerequisite`, `foundational`, `directly_related`, `commonly_combined`, `application`, `dependent`, `advanced_extension`, `related_but_distinct` — never flattened into one "related" bucket. See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §1 and [DECISIONS.md](DECISIONS.md) D-013.
+- **Examiner Lens combinations are always derived, never stored.** `ExaminerLensAnalysis` has no "combinations" column — the "what can this combine with" answer comes from querying `ConceptRelation` live (via `deriveCombinations()`), so it can never drift from the graph it's supposed to reflect. Same discipline as mastery/coverage below.
+- **A pattern family describes a question's structure; a taxonomy cell is one concrete point in that structure's space.** `QuestionPatternFamily` (e.g. "Reverse Percentage") is authored once; `PatternTaxonomyCell` rows are the specific (combination × testing mode × trap × difficulty) slices coverage is tracked against.
+- **Error taxonomy is one shared vocabulary, not two.** `ErrorTaxonomy.category` uses the same 5-value "what can go wrong" vocabulary Examiner Lens error modes use (misconception, trap, calculation_mistake, interpretation_mistake, method_selection_mistake) — Autopsy diagnosis and Lens-authored traps both key off the same table. See [DECISIONS.md](DECISIONS.md) D-013.
+- **Question DNA is enforced, not conventional.** A `Question` cannot be marked `published` without every DNA field populated and a `Provenance` record. Frequently-queried fields (`novelty_level`, `exam_relevance`, `testing_modes`, `trap_error_taxonomy_id`) are normalized columns, not buried inside a JSON blob.
+- **Coverage is a computed ladder, never a stored status.** A pattern family's readiness (`mapped` → `has_questions` → `validated` → `practice_ready`) is computed from real `PatternTaxonomyCell`/`Question` rows every time it's asked for — there is no column that could drift out of sync with reality. Same discipline as `MasteryState`.
 - **Mastery is derived, never input.** `MasteryState` rows are written only by the mastery-computation job reading `Attempt` history — there is no UI or API path that lets anything set mastery directly.
 - **Autopsy output is a hypothesis until confirmed.** The `Autopsy` table's diagnosis fields are only trusted downstream after `confirmed = true`.
 - **Error taxonomy is data, not a free-form string.** `Autopsy` references `ErrorTaxonomy` by foreign key, the same way `Provenance.source_type` and exam structure are data-backed rather than hard-coded — the taxonomy can grow without a code change, and downstream repair logic can key off a stable id instead of matching strings.
@@ -31,51 +35,93 @@ Concept
 
 ConceptRelation
   id, from_concept_id, to_concept_id
-  type: prerequisite_of | related_to | combines_with
-  strength: enum(weak, moderate, strong)   -- how load-bearing the relation is, curated or AI-suggested + human-approved
-  source: human | ai_suggested            -- provenance of the edge itself
+  type: prerequisite | foundational | directly_related | commonly_combined
+        | application | dependent | advanced_extension | related_but_distinct
+  rationale: text                          -- WHY this relationship exists — never a bare label
+  shared_knowledge: text                   -- WHAT knowledge/mechanic is actually shared
+  useful_for_question_generation: boolean  -- combinable, or purely a teaching/confusion-risk flag?
+  requirement_level: required | optional | contextual
+  certainty: confirmed | probable | speculative   -- never assert confidence we don't have
+  source: human | ai_suggested
 ```
+See [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §1 for what each of the 8 `type` values specifically means and how they differ — they are not interchangeable synonyms for "related."
+
+### Concept Depth
+```
+ConceptDepth
+  id, concept_id (unique — one depth record per concept)
+  definition: text, intuition: text
+  formulas: jsonb[]              -- { label, expression, whenToUse }
+  methods: jsonb[]                -- { name, steps[], bestFor }
+  alternative_methods: jsonb[]    -- same shape as methods
+  shortcuts: jsonb[]              -- { name, description, validWhen }
+  common_misconceptions: jsonb[]  -- { description, errorTaxonomyCode }
+  common_traps: jsonb[]           -- { description, errorTaxonomyCode }
+  application_areas: jsonb[]      -- { name, description }
+  difficulty_progression: jsonb[] -- { tier, description }
+  status: draft | curated | ai_assisted | published
+```
+Structured into typed sections rather than one text blob (docs/QUESTION_ENGINE.md §1a) so e.g. just the shortcuts can be queried or rendered independently. Not every concept has a `ConceptDepth` row yet — Phase 2 populated it in full for Percentages and lightly for Ratio to prove the shape generalizes; the rest is future curriculum-authoring work, not an architecture gap.
 
 ### Examiner Lens
 ```
 ExaminerLensAnalysis
   id, concept_id
-  version                          -- analyses are versioned; regenerating doesn't overwrite history
-  what_is_tested: jsonb
-  prerequisites_exercised: concept_id[]
-  legitimate_patterns: jsonb        -- structured list, see QUESTION_ENGINE.md
-  valid_combinations: concept_id[]
-  valid_traps: jsonb
-  transformations: jsonb
-  novel_representations: jsonb
-  generated_by: ai_provider_ref, prompt_version
-  reviewed_by: user_id | null       -- human sign-off, nullable until reviewed
+  version                              -- analyses are versioned; regenerating doesn't overwrite history
+  what_is_tested_concept: text
+  what_is_tested_subconcept: text
+  what_is_tested_skill: text
+  what_is_tested_prerequisite_id: concept_id | null
+  testing_modes: TestingMode[]         -- controlled 10-value vocabulary, see QUESTION_ENGINE.md §2
+  error_modes: jsonb                   -- { category, errorTaxonomyCode, description }[]
+  difficulty_dimensions: jsonb         -- { conceptualLoad, computationalLoad, trapDensity, representationNovelty, timePressure, multiStepDepth }, each 0-1
+  authored_by: human | ai              -- distinct from status: who produced it, not its review state
+  generated_by: ai_provider_ref | null, prompt_version | null   -- only set when authored_by = ai
+  reviewed_by: user_id | null          -- human sign-off, nullable until reviewed
   status: draft | reviewed | published
 ```
+No "combinations" column — see the design rules above. `TestingMode` is the exact 10-value vocabulary from [QUESTION_ENGINE.md](QUESTION_ENGINE.md) §2: `direct, reverse, transformed, combined, contextualized, represented_differently, constrained, time_pressured, multi_step, novel_representation`.
 
-### Question Universe (taxonomy)
+### Question Universe (pattern families + taxonomy)
 ```
+QuestionPatternFamily
+  id, concept_id, examiner_lens_analysis_id (nullable)
+  name (e.g. "Reverse Percentage"), skill, description
+  expected_difficulty_tier: standard | advanced | hard | extreme | novel
+  potential_combination_concept_ids: concept_id[]
+  potential_trap_error_taxonomy_ids: error_taxonomy_id[]
+  potential_testing_modes: TestingMode[]
+  status: draft | reviewed | published
+
 PatternTaxonomyCell
-  id, concept_id, examiner_lens_analysis_id
-  pattern_name, combination[], transformation, trap_type, difficulty_tier, target_time_seconds
+  id, concept_id, examiner_lens_analysis_id, pattern_family_id
+  combination: concept_id[], testing_mode: TestingMode | null
+  trap_error_taxonomy_id: error_taxonomy_id | null
+  difficulty_tier, target_time_seconds
   coverage_status: uncovered | in_generation | covered
 ```
-This table is the explicit, queryable "coverage map" — the product claims coverage of *this table*, never of "all possible questions."
+A pattern family describes the *structure* of a question (docs/QUESTION_ENGINE.md §3) — one family can generate many valid questions. A taxonomy cell is one concrete, narrow slice of that family's space, and is the unit `coverage_status` and coverage-ladder computation (below) are tracked against. The product claims coverage of *this table*, never of "all possible questions."
 
-### Question + Question DNA
+### Pattern coverage (computed, not stored)
+Given a family's `PatternTaxonomyCell` rows and the `Question` rows referencing them, a family's readiness is always one of: **mapped** (documented, nothing else yet) → **has_questions** (a draft exists) → **validated** (at least one `ai_validated`/`human_reviewed`/`published` question) → **practice_ready** (at least one `published` question). This ladder is computed on read (`computePatternFamilyReadiness` in `@ipmat/question-engine`), never a stored column — the same "derived, never input" discipline as `MasteryState`. This is what will eventually support "student has mastered 18/27 mapped pattern families": the mapped-family count comes from this table today; the mastered-count numerator needs student attempt data (Phase 5), not built yet.
+
+### Question + Question DNA (finalized — docs/QUESTION_ENGINE.md §4)
 ```
 Question
   id
   exam_id, section_id, chapter_id, concept_id
   subconcepts: concept_id[]
   prerequisites: concept_id[]
+  combines_with_concept_ids: concept_id[]   -- concepts this SPECIFIC question actually combines (vs. a family's "potential" list)
   pattern_taxonomy_cell_id            -- traces every question back to the universe cell it was generated for
   skill: text
   difficulty_tier: standard | advanced | hard | extreme | novel
-  difficulty_dimensions: jsonb        -- e.g. { conceptual, computational, trap_density, representation_novelty }
+  difficulty_dimensions: jsonb        -- { conceptualLoad, computationalLoad, trapDensity, representationNovelty, timePressure, multiStepDepth }
+  novelty_level: standard | novel_representation | novel_combination | novel_context   -- normalized column: filters novelty-handling practice/mastery
+  exam_relevance: core | peripheral | stretch   -- how typical this pattern is of the real exam vs. enrichment
   expected_time_seconds: int
-  trap_type: text | null
-  transformation: text | null
+  testing_modes: TestingMode[]        -- which of the 10 legitimate testing modes this question exercises (can be more than one)
+  trap_error_taxonomy_id: error_taxonomy_id | null   -- FK, not a free-form string (docs/DECISIONS.md D-012, D-013)
   body: text, options: jsonb, correct_answer: text, solution_steps: jsonb
   ground_truth_derivation: jsonb      -- the generator's own worked computation, used by the validator to check the stated answer independently of the LLM's claimed answer
   validation_state: draft | ai_validated | human_reviewed | published | rejected
@@ -85,6 +131,7 @@ Provenance
   id, source_type: original | licensed | public_domain | open_license | official | user_authorized
   source_ref, license_ref, attributed_to
 ```
+`novelty_level` and `exam_relevance` are separate, normalized fields rather than folded into `difficulty_dimensions` — both are filtered on frequently (novelty-handling practice selection, "is this actually IPMAT-style" filtering), so they get their own indexed columns instead of living inside a JSON blob (docs/DATABASE.md design rules, "normalize fields that will be queried frequently").
 
 ### Student & Enrollment (Phase 1 foundation)
 ```
@@ -123,8 +170,9 @@ This is the event model that makes time a first-class, extensible signal: time-b
 ```
 ErrorTaxonomy
   id, code, label, description
+  category: misconception | trap | calculation_mistake | interpretation_mistake | method_selection_mistake
 ```
-A small, curated reference table (e.g. `base_confusion`, `sign_error`, `misread_question`, `careless_arithmetic`) — grown deliberately, the same way exam structure is data rather than an enum baked into code.
+A small, curated reference table (e.g. `base_confusion`, `sign_error`, `misread_question`, `careless_arithmetic`, `percentage_point_confusion`) — grown deliberately, the same way exam structure is data rather than an enum baked into code. `category` is the SAME 5-value "what can go wrong" vocabulary Examiner Lens error modes use (docs/QUESTION_ENGINE.md §2) — one shared error taxonomy, not two (docs/DECISIONS.md D-013).
 
 ### Question Autopsy
 ```
