@@ -15,7 +15,9 @@ export type RejectionCode =
   | "judge_syllabus_irrelevant"
   | "judge_difficulty_dishonest"
   | "judge_multiple_answers"
-  | "budget_exceeded";
+  | "budget_exceeded"
+  | "unverifiable_cost"
+  | "answer_leakage_in_stem";
 
 export interface ValidationIssue {
   code: RejectionCode;

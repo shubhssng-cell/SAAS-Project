@@ -3,6 +3,7 @@ import type { QuestionCandidateAiOutput } from "@ipmat/ai";
 import { mergeResults, type ValidationResult } from "./types.js";
 import {
   validateBlueprintCompliance,
+  validateNoAnswerLeakageInStem,
   validateNoCompletenessClaims,
   validateProvenancePresent,
   validateSingleCorrectAnswer,
@@ -29,6 +30,7 @@ export function validateCandidateStructurally(
     validateBlueprintCompliance(candidate, blueprint),
     validateSyllabusCompatibility(candidate, graph),
     validateSingleCorrectAnswer(candidate),
+    validateNoAnswerLeakageInStem(candidate),
     validateNoCompletenessClaims(candidate),
     validateProvenancePresent(provenanceSourceType)
   );

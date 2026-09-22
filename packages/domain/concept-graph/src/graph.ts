@@ -70,6 +70,25 @@ export function hasConcept(graph: ConceptGraph, conceptName: string): boolean {
   return graph.concepts.some((concept) => concept.name === conceptName);
 }
 
+/**
+ * Canonical comparison key for a concept name (Phase 3.1.1 §4 /
+ * docs/DECISIONS.md D-030): trims, collapses internal whitespace runs to a
+ * single space, and lowercases. This exists so "Percentages", "percentages",
+ * "Percentages " (trailing space), and "PERCENTAGES" compare as the same
+ * concept — harmless authoring/formatting variance, not a different claim.
+ *
+ * Deliberately narrow: this does NOT stem, pluralize-fold, fuzzy-match, or
+ * correct typos. "Percentages" and "Percentage" normalize to two DIFFERENT
+ * keys ("percentages" vs "percentage") and are never silently treated as
+ * the same concept — conflating genuinely different names is a worse bug
+ * than failing to normalize a real formatting variant. Only exact match on
+ * this normalized key is ever used for comparison; nothing maps an
+ * ambiguous name to an arbitrarily "closest" concept.
+ */
+export function normalizeConceptNameKey(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export function getConcept(graph: ConceptGraph, conceptName: string) {
   return graph.concepts.find((concept) => concept.name === conceptName);
 }

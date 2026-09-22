@@ -136,4 +136,82 @@ describe("runGenerationPipeline — INPUT (blueprint) -> AI generation -> indepe
     expect(result.checks.judge.issues[0]?.code).toBe("budget_exceeded");
     expect(result.status).toBe("rejected");
   });
+
+  describe("budget breaker fail-closed on unpriced models (Phase 3.1.1 §1 / docs/DECISIONS.md D-027)", () => {
+    it("(a) a KNOWN model with modest usage increments the running budget correctly across a full run", async () => {
+      const responses = [JSON.stringify(validGeneratedCandidate), JSON.stringify(validReverification), JSON.stringify(passingJudge)];
+      let callIndex = 0;
+      const modestProvider: AiProvider = {
+        name: "mock-modest",
+        model: "claude-sonnet-5",
+        complete: async () => ({
+          rawText: responses[callIndex++] ?? "",
+          usage: { inputTokens: 500, outputTokens: 500 }, // ~$0.009/call at claude-sonnet-5 pricing — well under the $1.00 default budget
+          latencyMs: 1
+        })
+      };
+      const result = await runGenerationPipeline({
+        blueprint: demoBlueprint,
+        aiProvider: modestProvider,
+        graph: percentagesConceptGraph,
+        existingQuestionStems,
+        provenanceSourceType: "original"
+      });
+      expect(result.metadata.generation?.estimatedCostUsd).toBeCloseTo(0.009, 5);
+      expect(result.metadata.reverification?.estimatedCostUsd).toBeCloseTo(0.009, 5);
+      expect(result.metadata.judge?.estimatedCostUsd).toBeCloseTo(0.009, 5);
+      // all three calls actually ran — the budget breaker never tripped for a known, cheap model
+      expect(result.checks.reverification.issues.some((issue) => issue.code === "budget_exceeded")).toBe(false);
+      expect(result.checks.judge.issues.some((issue) => issue.code === "budget_exceeded")).toBe(false);
+      expect(result.status).toBe("validated");
+    });
+
+    it("(b) an UNKNOWN/unpriced model cannot bypass the budget limit — the pipeline refuses to make ANY call", async () => {
+      let callCount = 0;
+      const unknownModelProvider: AiProvider = {
+        name: "mock-unknown",
+        model: "claude-hypothetical-future-model",
+        complete: async () => {
+          callCount += 1;
+          throw new Error("complete() should never be called for an unpriced model");
+        }
+      };
+      const result = await runGenerationPipeline({
+        blueprint: demoBlueprint,
+        aiProvider: unknownModelProvider,
+        graph: percentagesConceptGraph,
+        existingQuestionStems,
+        provenanceSourceType: "original"
+      });
+      expect(callCount).toBe(0);
+      expect(result.status).toBe("rejected");
+      expect(result.candidate).toBeNull();
+      expect(result.metadata.generation).toBeNull();
+      expect(result.rejectionReasons.every((issue) => issue.code === "unverifiable_cost")).toBe(true);
+      expect(Object.values(result.checks).every((check) => check.issues[0]?.code === "unverifiable_cost")).toBe(true);
+    });
+
+    it("(c) repeated invocations with an unknown model never run indefinitely — every single call is blocked before any AI call, every time", async () => {
+      let callCount = 0;
+      const unknownModelProvider: AiProvider = {
+        name: "mock-unknown",
+        model: "some-model-nobody-priced",
+        complete: async () => {
+          callCount += 1;
+          throw new Error("complete() should never be called for an unpriced model");
+        }
+      };
+      for (let i = 0; i < 5; i++) {
+        const result = await runGenerationPipeline({
+          blueprint: demoBlueprint,
+          aiProvider: unknownModelProvider,
+          graph: percentagesConceptGraph,
+          existingQuestionStems,
+          provenanceSourceType: "original"
+        });
+        expect(result.status).toBe("rejected");
+      }
+      expect(callCount).toBe(0);
+    });
+  });
 });

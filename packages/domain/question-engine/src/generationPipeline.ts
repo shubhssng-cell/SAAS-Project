@@ -2,6 +2,7 @@ import type { ConceptGraph } from "@ipmat/concept-graph";
 import {
   answerReverificationAiSchema,
   generateStructured,
+  isKnownModel,
   questionCandidateAiSchema,
   validationJudgeAiSchema,
   AiGenerationError,
@@ -74,9 +75,45 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
   const limits = input.limits ?? DEFAULT_SINGLE_RUN_LIMITS;
   validateGenerationLimits(limits); // throws before any AI call if the limits themselves are unsafe
 
+  // Fail closed on unpriced models (Phase 3.1.1 §1 / docs/DECISIONS.md
+  // D-027): every call in this run uses the SAME provider/model, so
+  // pricing is knowable before any call is made, not just after one
+  // completes. Refusing to run at all — rather than making a call and
+  // discovering its cost is unknowable afterward — means an unrecognized
+  // model can never be silently treated as free, and can never make even
+  // one paid call under this pipeline's watch. This also structurally
+  // satisfies "repeated calls with an unknown model cannot run
+  // indefinitely": every single invocation is blocked here, before any
+  // AI call, every time.
+  if (!isKnownModel(input.aiProvider.model)) {
+    const failure = fail(
+      "unverifiable_cost",
+      "aiProvider.model",
+      `Model "${input.aiProvider.model}" has no known pricing entry in @ipmat/ai's cost table — refusing to make any AI call, since an unknown cost must never be treated as $0 (docs/DECISIONS.md D-027)`
+    );
+    return {
+      blueprint: input.blueprint,
+      candidate: null,
+      metadata: { generation: null, reverification: null, judge: null },
+      checks: { structural: failure, computation: failure, reverification: failure, duplicateRisk: failure, judge: failure },
+      status: "rejected",
+      rejectionReasons: failure.issues
+    };
+  }
+
+  // Running-cost circuit breaker (docs/DECISIONS.md D-025). This is
+  // REACTIVE — checked BETWEEN calls below, never during one — so it
+  // cannot itself stop a single call from costing a lot; that bound comes
+  // from AnthropicProvider's output-token cap (see
+  // `worstCaseSingleCallCostUsd()` in generationLimits.ts and
+  // docs/DECISIONS.md D-031, the one place that coupling is made explicit
+  // and tested). Because pricing is
+  // verified known above before any call, `estimatedCostUsd` here is only
+  // ever null if a call structurally failed (caught separately below) —
+  // it is never silently treated as $0 for a call that actually ran.
   let runningCostUsd = 0;
   const trackCost = (metadata: AiResultMetadata | null) => {
-    if (metadata?.estimatedCostUsd) runningCostUsd += metadata.estimatedCostUsd;
+    if (metadata && metadata.estimatedCostUsd !== null) runningCostUsd += metadata.estimatedCostUsd;
   };
   const overBudget = () => runningCostUsd > limits.maxEstimatedBudgetUsd;
 

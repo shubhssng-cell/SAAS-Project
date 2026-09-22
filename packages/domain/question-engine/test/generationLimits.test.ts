@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SINGLE_RUN_LIMITS, validateGenerationLimits } from "../src/generationLimits.js";
+import { DEFAULT_SINGLE_RUN_LIMITS, validateGenerationLimits, worstCaseSingleCallCostUsd } from "../src/generationLimits.js";
 
 describe("validateGenerationLimits — the generation infrastructure requires explicit, sane limits (Phase 3.1 §9)", () => {
   it("accepts the default single-run limits", () => {
@@ -52,5 +52,25 @@ describe("validateGenerationLimits — the generation infrastructure requires ex
       expect(message).toMatch(/maxCandidatesPerBlueprint/);
       expect(message).toMatch(/maxRetries/);
     }
+  });
+});
+
+describe("worstCaseSingleCallCostUsd — makes the AnthropicProvider max_tokens / cost-safety coupling explicit and testable (Phase 3.1.1 §7 / docs/DECISIONS.md D-031)", () => {
+  it("returns null for an unpriced model, same as estimateCostUsd — never a silent $0", () => {
+    expect(worstCaseSingleCallCostUsd("some-unpriced-model")).toBeNull();
+  });
+
+  it("bounds a single call's worst case, at the real output-token cap, under the default per-run budget for every currently priced real model", () => {
+    for (const model of ["claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-5"]) {
+      const worstCase = worstCaseSingleCallCostUsd(model);
+      expect(worstCase).not.toBeNull();
+      expect(worstCase as number).toBeLessThan(DEFAULT_SINGLE_RUN_LIMITS.maxEstimatedBudgetUsd);
+    }
+  });
+
+  it("scales with the assumed input-token ceiling, so the bound isn't accidentally hardcoded to a wrong constant", () => {
+    const small = worstCaseSingleCallCostUsd("claude-opus-5", 100);
+    const large = worstCaseSingleCallCostUsd("claude-opus-5", 100_000);
+    expect((small as number) < (large as number)).toBe(true);
   });
 });

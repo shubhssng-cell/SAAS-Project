@@ -2,7 +2,11 @@ import { percentagesConceptGraph } from "@ipmat/concept-graph";
 import { percentagesLens } from "@ipmat/examiner-lens";
 import { describe, expect, it } from "vitest";
 import { buildLensComparisonReport } from "../src/comparisonReport.js";
-import { aiLensRegenerationOutput, aiLensRegenerationOutputWithCompletenessClaim } from "../fixtures/aiLensOutputs.js";
+import {
+  aiLensRegenerationOutput,
+  aiLensRegenerationOutputWithCompletenessClaim,
+  aiLensRegenerationOutputWithNameVariance
+} from "../fixtures/aiLensOutputs.js";
 
 describe("Human baseline vs AI Examiner Lens — do not assume AI is correct", () => {
   const report = buildLensComparisonReport(percentagesLens, aiLensRegenerationOutput, percentagesConceptGraph);
@@ -70,5 +74,29 @@ describe("Human baseline vs AI Examiner Lens — do not assume AI is correct", (
     const withClaim = buildLensComparisonReport(percentagesLens, aiLensRegenerationOutputWithCompletenessClaim, percentagesConceptGraph);
     expect(withClaim.completenessClaims.hasUnsupportedClaim).toBe(true);
     expect(withClaim.completenessClaims.found.length).toBeGreaterThan(0);
+  });
+});
+
+describe("concept-name normalization (Phase 3.1.1 §4 / docs/DECISIONS.md D-030) — harmless casing/whitespace variance must not become a false unsupportedByGraph", () => {
+  const variedReport = buildLensComparisonReport(percentagesLens, aiLensRegenerationOutputWithNameVariance, percentagesConceptGraph);
+
+  it("a lowercase proposal ('ratio') still classifies as a valid generation combination, reported under the canonical name", () => {
+    expect(variedReport.combinations.validGenerationCombination).toContain("Ratio");
+    expect(variedReport.combinations.unsupportedByGraph).not.toContain("ratio");
+  });
+
+  it("an all-caps proposal ('PROFIT AND LOSS') still classifies as a valid generation combination", () => {
+    expect(variedReport.combinations.validGenerationCombination).toContain("Profit and Loss");
+  });
+
+  it("a proposal with stray leading whitespace ('  Probability') still classifies as related-but-non-combinable, not invented", () => {
+    expect(variedReport.combinations.relatedButNonCombinable).toContain("Probability");
+    expect(variedReport.combinations.unsupportedByGraph).not.toContain("  Probability");
+  });
+
+  it("a genuinely unsupported name stays unsupported even with whitespace variance — normalization never invents a match for a name that was never real", () => {
+    expect(variedReport.combinations.unsupportedByGraph).toContain(" time and work ");
+    expect(variedReport.combinations.validGenerationCombination).not.toContain(" time and work ");
+    expect(variedReport.combinations.relatedButNonCombinable).not.toContain(" time and work ");
   });
 });

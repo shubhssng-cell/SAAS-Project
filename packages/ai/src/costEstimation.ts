@@ -20,3 +20,15 @@ export function estimateCostUsd(model: string, usage: TokenUsage | null): number
   if (!pricing) return null;
   return (usage.inputTokens / 1_000_000) * pricing.input + (usage.outputTokens / 1_000_000) * pricing.output;
 }
+
+/**
+ * Whether `model` has a pricing entry at all — i.e. whether any future
+ * `estimateCostUsd(model, ...)` call could ever return a non-null number.
+ * Callers that must never let spend go unmeasured (docs/DECISIONS.md
+ * D-027) check this BEFORE making a paid call, not after: a `null` cost
+ * from `estimateCostUsd` is indistinguishable, on its own, from "genuinely
+ * free," which is why a budget circuit breaker must never treat it as $0.
+ */
+export function isKnownModel(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PRICING_USD_PER_MILLION_TOKENS, model);
+}

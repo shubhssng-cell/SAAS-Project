@@ -2,6 +2,8 @@
 
 **Scope:** fix the weaknesses [PHASE_REVIEW.md](PHASE_REVIEW.md) identified in Phases 1–3, before trusting any real AI-generated content. No new product features, no Phase 4, no student-facing UI, no batch generation. See [DECISIONS.md](DECISIONS.md) D-020 through D-026 for the individual decision records this report summarizes.
 
+**Update (Phase 3.1.1):** an implementation-level code review of this phase's own work ([PHASE_3_1_CODE_REVIEW.md](PHASE_3_1_CODE_REVIEW.md)) found several real gaps in the hardening below — most notably that the budget breaker silently disabled itself for any unpriced model. All of them were fixed in Phase 3.1.1 ([PHASE_3_1_1_REVIEW.md](PHASE_3_1_1_REVIEW.md), docs/DECISIONS.md D-027–D-033). §11 below is updated in place to reflect the current, post-3.1.1 state; the rest of this document is left as originally written, as the historical record of what Phase 3.1 itself did.
+
 **Headline result:** every code fix requested is implemented and tested against deterministic fixtures (118 tests, up from 92). **The real Anthropic smoke test was NOT run** — no `ANTHROPIC_API_KEY` was available in this environment; the user was asked directly and chose to defer it rather than provide one now. The script is written, typechecked, and ready (`npm run smoke:anthropic --workspace @ipmat/question-engine`). This report says so plainly in every section that would otherwise report a real result, rather than presenting fixture-based confidence as if it answered the same question.
 
 ---
@@ -113,19 +115,26 @@ New test files: `verifierView.test.ts` (6 tests), `generationLimits.test.ts` (8 
 
 See [PHASE_REVIEW.md](PHASE_REVIEW.md) §10 for the general caveat this report inherits in full: passing tests prove the deterministic control flow and type contracts are correct given the inputs tested — they do not and cannot prove a real AI provider will produce inputs shaped like the fixtures, because no real provider was exercised this phase either.
 
-## 11. Remaining known weaknesses
+## 11. Remaining known weaknesses (updated after Phase 3.1.1 — see note at top of document)
 
 Unchanged from [PHASE_REVIEW.md](PHASE_REVIEW.md) §9 except where noted:
 - Zero end-to-end validation against a real database (unchanged).
-- **Zero end-to-end validation against a real AI provider (unchanged, and the specific blocker for this phase's §5-7 requirements).**
+- **Zero end-to-end validation against a real AI provider (unchanged, and the specific blocker for this phase's §5-7 requirements — still true after Phase 3.1.1, see [PHASE_3_1_1_REVIEW.md](PHASE_3_1_1_REVIEW.md) §7).**
 - The completeness-claim guard is still a literal substring list (unchanged).
 - Duplicate detection still cannot catch a paraphrase (unchanged).
 - Ambiguity/contradiction detection still has no deterministic fallback — the judge's trust boundary is tighter (no claimed answer/explanation shown), but if the judge model itself is bad at spotting ambiguity, nothing else catches it (partially improved, core limitation unchanged).
 - `correctAnswer` parsing and the Lens comparison's category-blindness are **fixed** (see [PHASE_REVIEW.md](PHASE_REVIEW.md) §9 for the marked-up list).
 - Single demonstration question per phase — unchanged; this phase hardened rules, it did not generate more content.
-- The cost table can still silently go stale (unchanged).
-- **NEW: the independent-verifier leakage fix is proven structurally, not behaviorally** — it cannot prove a real model's "independent" answer wasn't a lucky guess (§6 above).
-- **NEW: the budget circuit breaker is reactive, not predictive** — it can let one single call exceed the entire budget before stopping the next one; a true batch loop would need a pre-flight cost estimate, not built.
+- The cost table can still silently go stale (unchanged) — **but as of Phase 3.1.1, going stale in the specific sense of "a model gets used without a pricing entry" now fails closed instead of silently disabling the budget breaker (docs/DECISIONS.md D-027).**
+- The independent-verifier leakage fix is proven structurally, not behaviorally — it cannot prove a real model's "independent" answer wasn't a lucky guess (§6 above) (unchanged).
+- The budget circuit breaker is reactive, not predictive — it can let one single call exceed the entire budget before stopping the next one; a true batch loop would need a pre-flight cost estimate, not built (unchanged in kind, but now bounded and tested: see docs/DECISIONS.md D-031 — the reactive gap can no longer be made arbitrarily worse by an unpriced model, and a single call's worst case is now a documented, tested number).
+- **FIXED in Phase 3.1.1: an unpriced/unrecognized model could silently bypass the entire budget breaker** (the most consequential finding of [PHASE_3_1_CODE_REVIEW.md](PHASE_3_1_CODE_REVIEW.md)) — now fails closed before any AI call (docs/DECISIONS.md D-027).
+- **FIXED in Phase 3.1.1: the arithmetic verifier's allowlist included a comma that did not do what its own comment implied, and had no length/magnitude/complexity bounds** — grammar narrowed, comma removed, and four new bounds added (docs/DECISIONS.md D-028).
+- **FIXED in Phase 3.1.1: the structural leakage boundary said nothing about the stem itself stating its own answer** — a new, deliberately narrow, deterministic (non-semantic) guard now catches a verbatim answer/blueprintId leak (docs/DECISIONS.md D-029). **INTENTIONALLY UNRESOLVED:** paraphrased or algebraically-derivable leakage remains undetectable by any deterministic check in this codebase — documented as a real, accepted limitation, not fixed, because no deterministic mechanism can fix it without becoming exactly the "brittle keyword blacklist" the hardening work was explicitly told not to build.
+- **FIXED in Phase 3.1.1: the Examiner Lens comparison matched concept names by raw string equality**, so a real model's harmless casing/whitespace variance could be misreported as an invented relationship — now matched by normalized key, exact-match only, never fuzzy (docs/DECISIONS.md D-030).
+- **FIXED in Phase 3.1.1: the real bound on worst-case single-call cost (AnthropicProvider's output-token cap) was an undocumented, untested cross-file assumption** — now a named constant, a documented decision, and a regression test (docs/DECISIONS.md D-031).
+- **FIXED in Phase 3.1.1: the generation prompt only named 3 of the 7 fields blueprint compliance enforces**, an avoidable-rejection gap, not a safety gap — prompt now states all 7 (docs/DECISIONS.md D-032).
+- **FIXED in Phase 3.1.1: `distractor_quality` was dead code with no test reaching it** — given a dedicated fixture and test (docs/DECISIONS.md D-033).
 
 ## 12. Is the pipeline ready for small-scale real question generation?
 

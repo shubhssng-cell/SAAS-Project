@@ -168,3 +168,63 @@ export function validateProvenancePresent(provenanceSourceType: string | null | 
   }
   return ok();
 }
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Case-insensitive whole-token/phrase match — `\b` boundaries mean "480" won't match inside "4801" or "48012", and are not fooled by surrounding punctuation like ₹ or %. */
+function containsWholeToken(haystack: string, needle: string): boolean {
+  if (needle.length === 0) return false;
+  return new RegExp(`\\b${escapeRegExp(needle)}\\b`, "i").test(haystack);
+}
+
+/**
+ * Deterministic, narrow guard against the generated stem accidentally
+ * revealing its own answer, or leaking internal metadata, to the student
+ * (Phase 3.1.1 §3). This is explicitly NOT semantic leakage detection —
+ * it is two concrete, checkable substring tests, not an understanding of
+ * meaning, and it does not claim to be complete:
+ *
+ * 1. The claimed `correctAnswer` must not appear verbatim, as a whole
+ *    token/phrase, inside the stem — the stem describes what's GIVEN, and
+ *    should never also independently state the target quantity's value.
+ * 2. The internal `blueprintId` must never appear in student-facing text
+ *    at all — it is metadata, never a legitimate part of a question.
+ *
+ * What this deliberately does NOT catch, and cannot catch deterministically
+ * (docs/QUESTION_ENGINE.md §5b, docs/DECISIONS.md D-029): a paraphrased or
+ * differently-formatted leak (e.g. the numeral "480" leaked as the words
+ * "four hundred eighty"), an answer that is leaked only by being
+ * algebraically derivable from other stated givens, or a short/common
+ * correctAnswer value that happens to coincide with an unrelated given
+ * quantity in the stem (a real false-positive risk this check accepts in
+ * exchange for being deterministic and auditable at all — a short answer
+ * below 2 characters is skipped for exactly this reason, though that
+ * doesn't eliminate the risk for slightly longer ones). Do not read a pass
+ * from this check as "the stem provably does not leak the answer" — read
+ * it as "no verbatim leak of this specific, checkable kind was found."
+ */
+export function validateNoAnswerLeakageInStem(candidate: QuestionCandidateAiOutput): ValidationResult {
+  const issues: ValidationResult[] = [];
+  const answer = candidate.correctAnswer.trim();
+  if (answer.length >= 2 && containsWholeToken(candidate.stem, answer)) {
+    issues.push(
+      fail(
+        "answer_leakage_in_stem",
+        "stem",
+        `Stem appears to state the correct answer ("${answer}") verbatim as a whole token/phrase — this would make the question trivial or self-defeating`
+      )
+    );
+  }
+  if (candidate.blueprintId.trim().length > 0 && containsWholeToken(candidate.stem, candidate.blueprintId.trim())) {
+    issues.push(
+      fail(
+        "answer_leakage_in_stem",
+        "stem",
+        `Stem contains the internal blueprintId ("${candidate.blueprintId}") — internal metadata must never reach student-facing text`
+      )
+    );
+  }
+  return mergeResults(...issues, ok());
+}

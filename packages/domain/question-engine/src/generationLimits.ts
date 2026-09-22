@@ -1,3 +1,5 @@
+import { ANTHROPIC_MAX_OUTPUT_TOKENS_PER_CALL, estimateCostUsd } from "@ipmat/ai";
+
 /**
  * Explicit, validated limits the generation pipeline requires before it
  * will run (Phase 3.1 §9 — "before generation is ever run in batches,
@@ -60,4 +62,50 @@ export function validateGenerationLimits(limits: GenerationLimits): void {
   if (failures.length > 0) {
     throw new Error(`Invalid generation limits: ${failures.join("; ")}`);
   }
+}
+
+/**
+ * A conservative, documented assumption about prompt input size (Phase
+ * 3.1.1 §7): unlike output tokens, nothing in this codebase caps input
+ * tokens directly, but input size is bounded by OUR OWN prompt
+ * construction (`prompts.ts`) — a blueprint's fields and a question's
+ * stem/options — not by anything the model controls, so this is a
+ * generous ceiling on what those prompts actually run to, not a hard
+ * enforced limit.
+ */
+export const ASSUMED_MAX_PROMPT_INPUT_TOKENS = 2000;
+
+/**
+ * THE one clearly documented place explaining how a maximum output-token
+ * cap bounds worst-case provider cost per call (Phase 3.1.1 §7 /
+ * docs/DECISIONS.md D-031). `runGenerationPipeline()`'s running-cost
+ * circuit breaker (`overBudget()`) is REACTIVE — it is only ever checked
+ * BETWEEN calls, never during one — so nothing in generationLimits.ts or
+ * generationPipeline.ts, by itself, stops a single call from costing a
+ * large amount before the breaker gets a chance to react. What actually
+ * bounds that is `AnthropicProvider`'s hardcoded
+ * `ANTHROPIC_MAX_OUTPUT_TOKENS_PER_CALL` (`@ipmat/ai`), combined with the
+ * fact that input tokens are bounded by our own prompt construction. This
+ * function computes exactly what that worst case is for a given model, so
+ * the coupling is a testable number, not just a comment — see
+ * `test/generationLimits.test.ts` for the assertion that this stays under
+ * `DEFAULT_SINGLE_RUN_LIMITS.maxEstimatedBudgetUsd` for every currently
+ * known model.
+ *
+ * This does NOT bound the total cost of a full pipeline run (three calls),
+ * only a single call — see the note on `overBudget()` in
+ * `generationPipeline.ts` for why the three-call aggregate can still
+ * exceed `maxEstimatedBudgetUsd` by up to roughly one call's worst case
+ * before the breaker stops the next one. No production billing guarantee
+ * is implied by this function; it is a conservative estimate for a
+ * specific, documented worst case, nothing more.
+ */
+export function worstCaseSingleCallCostUsd(
+  model: string,
+  assumedMaxInputTokens: number = ASSUMED_MAX_PROMPT_INPUT_TOKENS
+): number | null {
+  return estimateCostUsd(model, {
+    inputTokens: assumedMaxInputTokens,
+    outputTokens: ANTHROPIC_MAX_OUTPUT_TOKENS_PER_CALL
+  });
 }

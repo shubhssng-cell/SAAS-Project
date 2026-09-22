@@ -5,7 +5,7 @@ import {
   type ExaminerLensAnalysisData,
   type TestingMode
 } from "@ipmat/examiner-lens";
-import { getAllRelationsFor, type ConceptGraph } from "@ipmat/concept-graph";
+import { getAllRelationsFor, normalizeConceptNameKey, type ConceptGraph } from "@ipmat/concept-graph";
 import type { ExaminerLensAnalysisAiOutput } from "@ipmat/ai";
 
 /**
@@ -64,24 +64,53 @@ export function buildLensComparisonReport(
   const humanCategories = new Set(human.errorModes.map((mode) => mode.category));
   const aiCategories = new Set(ai.errorModes.map((mode) => mode.category));
 
-  const realCombinationConcepts = new Set(
-    deriveCombinations(graph, human.concept).map((candidate) => candidate.concept)
+  // Phase 3.1.1 §4 fix: matching is by NORMALIZED name key (case/whitespace
+  // -insensitive), not raw exact string equality — "Percentages" and
+  // "percentages" from the AI must classify identically. Only an EXACT
+  // match on the normalized key ever counts; there is no fuzzy/typo
+  // correction, so an unrecognized or misspelled name still correctly
+  // falls through to unsupportedByGraph rather than being silently mapped
+  // to whatever concept it looks closest to (docs/DECISIONS.md D-030).
+  const realCombinationConceptsByKey = new Map(
+    deriveCombinations(graph, human.concept).map((candidate) => [normalizeConceptNameKey(candidate.concept), candidate.concept])
   );
-  const allRelatedConcepts = new Set(
-    getAllRelationsFor(graph, human.concept).map((edge) => (edge.from === human.concept ? edge.to : edge.from))
+  const allRelatedConceptsByKey = new Map(
+    getAllRelationsFor(graph, human.concept).map((edge) => {
+      const other = edge.from === human.concept ? edge.to : edge.from;
+      return [normalizeConceptNameKey(other), other];
+    })
   );
   const aiSuggestedConcepts = ai.suggestedCombinations.map((s) => s.concept);
   // Phase 3.1 §2 fix: a graph edge existing is NOT the same claim as "this
   // is a valid generation combination" — related_but_distinct exists
   // specifically to say "do not combine these" (docs/QUESTION_ENGINE.md
   // §1). The four categories are mutually exclusive and jointly exhaustive
-  // over aiSuggestedConcepts (plus missedByAi, which isn't AI-suggested at all).
-  const validGenerationCombination = aiSuggestedConcepts.filter((concept) => realCombinationConcepts.has(concept));
-  const relatedButNonCombinable = aiSuggestedConcepts.filter(
-    (concept) => allRelatedConcepts.has(concept) && !realCombinationConcepts.has(concept)
-  );
-  const unsupportedByGraph = aiSuggestedConcepts.filter((concept) => !allRelatedConcepts.has(concept));
-  const missedByAi = [...realCombinationConcepts].filter((concept) => !aiSuggestedConcepts.includes(concept));
+  // over aiSuggestedConcepts (plus missedByAi, which isn't AI-suggested at
+  // all). Each category is populated with the graph's CANONICAL spelling
+  // once a normalized-key match is found, not the AI's raw string — so a
+  // proposal that matches only after normalization is reported under the
+  // name curators actually use.
+  const validGenerationCombination: string[] = [];
+  const relatedButNonCombinable: string[] = [];
+  const unsupportedByGraph: string[] = [];
+  for (const concept of aiSuggestedConcepts) {
+    const key = normalizeConceptNameKey(concept);
+    const validCanonical = realCombinationConceptsByKey.get(key);
+    if (validCanonical) {
+      validGenerationCombination.push(validCanonical);
+      continue;
+    }
+    const relatedCanonical = allRelatedConceptsByKey.get(key);
+    if (relatedCanonical) {
+      relatedButNonCombinable.push(relatedCanonical);
+      continue;
+    }
+    unsupportedByGraph.push(concept);
+  }
+  const aiSuggestedKeys = new Set(aiSuggestedConcepts.map(normalizeConceptNameKey));
+  const missedByAi = [...realCombinationConceptsByKey.entries()]
+    .filter(([key]) => !aiSuggestedKeys.has(key))
+    .map(([, canonical]) => canonical);
 
   const dimensionKeys = Object.keys(human.difficultyDimensions) as Array<keyof typeof human.difficultyDimensions>;
   const deltas: Record<string, number> = {};

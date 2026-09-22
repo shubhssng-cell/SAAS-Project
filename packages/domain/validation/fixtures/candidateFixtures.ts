@@ -125,3 +125,26 @@ export const unsupportedCompletenessClaimCandidate: QuestionCandidateAiOutput = 
     baseCandidate().explanation +
     " This single method covers every possible question of this type, so no other approach is ever needed."
 });
+
+/**
+ * The correct answer appears exactly once (so `multiple_or_no_correct_answer`
+ * does NOT fire), but two of the WRONG options are identical — a real,
+ * distinct question-quality defect the `distractor_quality` branch exists
+ * to catch (Phase 3.1.1 §6). Before this fixture, no test reached this
+ * branch, because the only prior "duplicate options" fixture also
+ * duplicated the correct answer, which returns early on a different check.
+ */
+export const duplicateDistractorCandidate: QuestionCandidateAiOutput = baseCandidate({
+  options: ["480", "420", "420", "500"]
+});
+
+/** The stem states the claimed correct answer's value verbatim, making the MCQ trivial (Phase 3.1.1 §3). */
+export const answerLeakedInStemCandidate: QuestionCandidateAiOutput = baseCandidate({
+  stem:
+    "A shop increased the price of a jacket by 25%, after which it became four times the price of a notebook priced at ₹150. The original price was 480. What was the jacket's price before the increase?"
+});
+
+/** The stem leaks the internal blueprintId, which is metadata and must never reach student-facing text (Phase 3.1.1 §3). */
+export const blueprintIdLeakedInStemCandidate: QuestionCandidateAiOutput = baseCandidate({
+  stem: baseCandidate().stem + ` (ref: ${demoBlueprintExpectation.id})`
+});

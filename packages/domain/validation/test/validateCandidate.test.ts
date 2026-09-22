@@ -2,10 +2,13 @@ import { percentagesConceptGraph } from "@ipmat/concept-graph";
 import { questionCandidateAiSchema } from "@ipmat/ai";
 import { describe, expect, it } from "vitest";
 import {
+  answerLeakedInStemCandidate,
+  blueprintIdLeakedInStemCandidate,
   blueprintViolationCandidate,
   combinationViolationCandidate,
   demoBlueprintExpectation,
   difficultyTierViolationCandidate,
+  duplicateDistractorCandidate,
   existingQuestionStems,
   malformedRawOutput,
   multipleCorrectAnswerCandidate,
@@ -80,6 +83,49 @@ describe("multiple-correct-answer question", () => {
   });
 });
 
+describe("duplicate distractors — a unique correct answer but two identical wrong options (Phase 3.1.1 §6, previously dead code)", () => {
+  it("is rejected with distractor_quality, not multiple_or_no_correct_answer", () => {
+    const result = validateCandidateStructurally(
+      duplicateDistractorCandidate,
+      percentagesConceptGraph,
+      demoBlueprintExpectation,
+      "original"
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "distractor_quality")).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "multiple_or_no_correct_answer")).toBe(false);
+  });
+});
+
+describe("answer leakage in the stem (Phase 3.1.1 §3 / docs/DECISIONS.md D-029)", () => {
+  it("is rejected when the stem states the claimed correct answer verbatim", () => {
+    const result = validateCandidateStructurally(
+      answerLeakedInStemCandidate,
+      percentagesConceptGraph,
+      demoBlueprintExpectation,
+      "original"
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "answer_leakage_in_stem")).toBe(true);
+  });
+
+  it("is rejected when the stem contains the internal blueprintId", () => {
+    const result = validateCandidateStructurally(
+      blueprintIdLeakedInStemCandidate,
+      percentagesConceptGraph,
+      demoBlueprintExpectation,
+      "original"
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.code === "answer_leakage_in_stem")).toBe(true);
+  });
+
+  it("does NOT false-positive on the well-formed valid candidate", () => {
+    const result = validateCandidateStructurally(validCandidate, percentagesConceptGraph, demoBlueprintExpectation, "original");
+    expect(result.issues.some((issue) => issue.code === "answer_leakage_in_stem")).toBe(false);
+  });
+});
+
 describe("wrong-answer question", () => {
   it("is rejected by independent recomputation, never trusting the stated answer", () => {
     const result = verifyComputation({
@@ -134,7 +180,73 @@ describe("computation input is treated as untrusted (AI-generated) text", () => 
     });
     expect(result.valid).toBe(false);
     expect(result.issues[0]?.code).toBe("impossible_computation");
-    expect(result.issues[0]?.message).toMatch(/outside plain arithmetic/);
+    expect(result.issues[0]?.message).toMatch(/outside the supported grammar/);
+  });
+});
+
+describe("verifyComputation grammar and complexity bounds (Phase 3.1.1 §2 / docs/DECISIONS.md D-028)", () => {
+  it("accepts a valid supported expression", () => {
+    expect(verifyComputation({ computation: "4 * 150 / 1.25", expectedAnswer: 480, correctAnswer: "480" }).valid).toBe(true);
+    expect(verifyComputation({ computation: "(100 - 20) * 0.5", expectedAnswer: 40, correctAnswer: "40" }).valid).toBe(true);
+  });
+
+  it("rejects unsupported syntax (letters/identifiers) before evaluation", () => {
+    const result = verifyComputation({ computation: "150 * discount", expectedAnswer: 100, correctAnswer: "100" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+  });
+
+  it("rejects a comma, since it is a statement separator in mathjs, not a thousands grouping character, and was removed from the allowlist", () => {
+    const result = verifyComputation({ computation: "1,000 + 200", expectedAnswer: 1200, correctAnswer: "1200" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/outside the supported grammar/);
+  });
+
+  it("rejects a computation with a very large numeric literal before evaluating it", () => {
+    const result = verifyComputation({
+      computation: "999999999999999999999999 * 2",
+      expectedAnswer: 1,
+      correctAnswer: "1"
+    });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/digit numeric literal/);
+  });
+
+  it("rejects excessive expression complexity (chained exponentiation) before evaluating it", () => {
+    const result = verifyComputation({ computation: "2^2^2^2^2^2", expectedAnswer: 1, correctAnswer: "1" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/operators, exceeding/);
+  });
+
+  it("rejects a non-finite result (division by zero)", () => {
+    const result = verifyComputation({ computation: "5 / 0", expectedAnswer: 1, correctAnswer: "1" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/finite number/);
+  });
+
+  it("rejects a malformed expression that fails to parse", () => {
+    const result = verifyComputation({ computation: "4 * / 150", expectedAnswer: 1, correctAnswer: "1" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+  });
+
+  it("rejects a plausible-charset expression whose result is implausibly large in magnitude", () => {
+    const result = verifyComputation({ computation: "999999999999 * 999999999999", expectedAnswer: 1, correctAnswer: "1" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/magnitude bound/);
+  });
+
+  it("rejects a computation string longer than the length limit", () => {
+    const longComputation = Array.from({ length: 60 }, () => "1 + ").join("") + "1";
+    const result = verifyComputation({ computation: longComputation, expectedAnswer: 1, correctAnswer: "1" });
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]?.code).toBe("impossible_computation");
+    expect(result.issues[0]?.message).toMatch(/characters long/);
   });
 });
 

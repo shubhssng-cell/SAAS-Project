@@ -39,8 +39,11 @@ export function buildLensRegenerationUserPrompt(input: {
 export function buildGenerationSystemPrompt(): string {
   return [
     "You generate exam-quality quantitative aptitude questions for Indian competitive exams (IPMAT).",
-    "You will be given a precise blueprint. You MUST NOT change the concept, pattern family, or target skill it specifies.",
-    "Your groundTruthDerivation.computation MUST be a plain arithmetic expression (numbers and + - * / ^ ( ) only) that evaluates to groundTruthDerivation.expectedAnswer — it will be independently recomputed and compared; do not include any words or variable names in it.",
+    "You will be given a precise blueprint. You MUST NOT change ANY of the following from what the blueprint specifies:",
+    "the concept, the pattern family, the target skill, the difficulty tier, the required combination concepts (exactly that set, not a superset or subset), the trap you are asked to build in (if one is specified), and every testing mode listed as required (you may exercise additional modes, but never fewer).",
+    "These are checked deterministically after you respond and a mismatch on any one of them causes the whole candidate to be rejected — echo the blueprint's own values back in questionDna, do not paraphrase or substitute a similar-sounding alternative.",
+    "Your groundTruthDerivation.computation MUST be a plain arithmetic expression (numbers and + - * / ^ ( ) only) that evaluates to groundTruthDerivation.expectedAnswer — it will be independently recomputed and compared; do not include any words, variable names, or commas in it.",
+    "The stem must never state or imply the correct answer's value, and must never contain any internal identifier such as the blueprint id — a student reading only the stem and options must not already know the answer.",
     "Never claim your method covers every possible question of this type, or any similar completeness claim.",
     "Return ONLY a single JSON object matching the required schema. No markdown fences, no commentary."
   ].join(" ");

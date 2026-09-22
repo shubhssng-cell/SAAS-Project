@@ -53,3 +53,25 @@ export const aiLensRegenerationOutputWithCompletenessClaim: ExaminerLensAnalysis
     skill: "A single unified method for solving every possible question of this type"
   }
 };
+
+/**
+ * Same as `aiLensRegenerationOutput`, but every proposed concept name has
+ * harmless casing/whitespace variance from the graph's canonical spelling
+ * (Phase 3.1.1 §4 / docs/DECISIONS.md D-030) — "ratio" instead of "Ratio",
+ * "PROFIT AND LOSS" instead of "Profit and Loss", "  Probability" with
+ * leading whitespace, and " time and work " (also not a real concept
+ * either way, to prove normalization does NOT invent a match for a name
+ * that was never real to begin with). Exercises: a valid combination
+ * surviving despite case variance, a related-but-non-combinable edge
+ * surviving despite whitespace variance, and a genuinely unsupported
+ * concept correctly staying unsupported even after normalization.
+ */
+export const aiLensRegenerationOutputWithNameVariance: ExaminerLensAnalysisAiOutput = {
+  ...aiLensRegenerationOutput,
+  suggestedCombinations: [
+    { concept: "ratio", rationale: "Percentages are often expressed as ratios of a base quantity." },
+    { concept: "PROFIT AND LOSS", rationale: "Profit/loss percentages are a direct application of percentage change." },
+    { concept: "  Probability", rationale: "Both percentages and probability are expressed as numbers between 0 and 100." },
+    { concept: " time and work ", rationale: "Work-rate problems sometimes express completed work as a percentage." }
+  ]
+};
