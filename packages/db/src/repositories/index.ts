@@ -5,3 +5,6 @@ export * from "./prismaAutopsyRepository.js";
 export * from "./prismaRepairPlanRepository.js";
 export * from "./prismaMasteryStateRepository.js";
 export * from "./prismaAttemptRepository.js";
+export * from "./inMemoryAttemptRepository.js";
+export * from "./prismaQuestionReader.js";
+export * from "./inMemoryQuestionReader.js";

@@ -1,6 +1,7 @@
 import type { AttemptState } from "@ipmat/attempt";
 import type { AutopsyHypothesis, AutopsyOutput, AutopsyPersistenceRecord, RepairPlan, RepairPlanPersistenceRecord } from "@ipmat/autopsy";
 import type { MasteryStatePersistenceRecord, MasteryStateResult } from "@ipmat/mastery";
+import type { ValidationState } from "@ipmat/question-engine";
 
 /**
  * Repository/adapter contracts (Phase 5C-1) — the FIRST persistence
@@ -81,4 +82,35 @@ export interface AttemptRepository {
   save(state: AttemptState): Promise<AttemptState>;
   /** Reconstructs a full, faithful `AttemptState` (including its ordered event timeline) from the persisted rows, or `null` if no attempt with this id exists. */
   findById(attemptId: string): Promise<AttemptState | null>;
+}
+
+/**
+ * Phase 4B-2 security fix (docs/DECISIONS.md D-048) — the canonical,
+ * server-loaded subset of a `Question` row that `@ipmat/practice-loop`
+ * needs to gate publication and grade an attempt. A `CanonicalQuestion` is
+ * NEVER meant to be constructed from caller-supplied/client input; only a
+ * `QuestionReader` implementation (backed by a real lookup) may produce
+ * one. This is exactly why `correctAnswer`/`validationState` live only
+ * here, and never on any client-facing input type in `@ipmat/practice-loop`.
+ */
+export interface CanonicalQuestion {
+  id: string;
+  conceptId: string;
+  /** Non-null only for multiple_choice, matching `AttemptQuestionContext.options` (`@ipmat/attempt`). */
+  options: string[] | null;
+  correctAnswer: string;
+  expectedTimeSeconds: number;
+  validationState: ValidationState;
+}
+
+/**
+ * The ONE legitimate source of truth for a `Question`'s answer key and
+ * publication state, for any orchestration layer (`@ipmat/practice-loop`)
+ * that needs to grade an attempt or gate on `validationState`. An
+ * untrusted HTTP/UI caller supplies an id, never the answer-bearing fields
+ * this interface's implementations resolve server-side.
+ */
+export interface QuestionReader {
+  /** Loads the canonical Question by id, or `null` if none exists. */
+  findById(questionId: string): Promise<CanonicalQuestion | null>;
 }
