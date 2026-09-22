@@ -209,6 +209,7 @@ RepairPlan
   follow_up_question_ids: uuid[]
   status: pending | in_progress | completed
 ```
+**Phase 5A** ([PHASE_5A_REVIEW.md](PHASE_5A_REVIEW.md)) implemented the OBSERVATION -> EVIDENCE half of this table's eventual content as a pure, database-free package, `packages/domain/autopsy` — `buildAutopsyOutput()` produces exactly the kind of structured signal `evidence_used` above is meant to hold (deterministic behavior signals, historical/repeated-evidence counts, and a CANDIDATE — never confirmed — error-category match against this same `ErrorTaxonomy` table). No `Autopsy` or `RepairPlan` row is ever written by this package; `hypothesis_text`/`likely_root_cause`/`confirmed`/`follow_up_question_ids` remain entirely Phase 5B's responsibility (the actual AI call that turns `AutopsyOutput` into a real hypothesis, actual follow-up-question selection, and the persistence adapter that writes both). This schema itself did not change in Phase 5A.
 
 ### Mastery (derived only)
 ```
