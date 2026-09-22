@@ -23,6 +23,19 @@ describe("QuestionBlueprint — a specification, not a question", () => {
     expect(blueprint.testingModes).toEqual(cell.testingMode ? [cell.testingMode] : []);
   });
 
+  it("marks its difficulty dimensions as provisional, never as calibrated (Phase 3.1 §4)", () => {
+    const cell = percentagesTaxonomyCells[0]!;
+    const family = percentagesPatternFamilies.find((f) => f.name === cell.patternFamilyName)!;
+    const blueprint = buildBlueprintFromCell(cell, family, {
+      examCode: "IPMAT_INDORE",
+      sectionName: "Quant",
+      chapterName: "Percentages",
+      answerFormat: "multiple_choice",
+      idSuffix: "calibration-check"
+    });
+    expect(blueprint.difficultyCalibrationStatus).toBe("provisional");
+  });
+
   it("has no body/options/answer fields — it is a specification, not question content", () => {
     const cell = percentagesTaxonomyCells[0]!;
     const family = percentagesPatternFamilies.find((f) => f.name === cell.patternFamilyName)!;

@@ -1,5 +1,5 @@
 import type { QuestionBlueprint } from "./blueprint.js";
-import type { QuestionCandidateAiOutput } from "@ipmat/ai";
+import type { JudgeView, PresentedQuestionView } from "./verifierView.js";
 
 /**
  * Real, usable prompts — not exercised against a live provider in this
@@ -69,27 +69,62 @@ export function buildGenerationUserPrompt(blueprint: QuestionBlueprint): string 
 export function buildReverificationSystemPrompt(): string {
   return [
     "You solve quantitative aptitude questions from scratch, showing your steps.",
-    "You are not told anything about how the question was created or what answer anyone else derived.",
+    "You are not told anything about how the question was created, what answer anyone else derived, or any explanation.",
+    "If the question is multiple-choice, determine which option is correct and give its exact text as derivedAnswer.",
+    "If it is numeric-entry, give the exact numeric value as derivedAnswer.",
     "Return ONLY a single JSON object with your own derived answer and derivation steps — no markdown fences, no commentary."
   ].join(" ");
+}
+
+/**
+ * Built ONLY from a PresentedQuestionView (docs/DECISIONS.md D-020) —
+ * never from the full candidate. This function's parameter type alone
+ * makes it impossible to accidentally reference candidate.correctAnswer,
+ * .explanation, .groundTruthDerivation, .solutionSteps, or .reasoning:
+ * those fields don't exist on the type this function accepts.
+ */
+export function buildReverificationUserPrompt(view: PresentedQuestionView): string {
+  const lines = [`Question: ${view.stem}`];
+  if (view.answerFormat === "multiple_choice" && view.options) {
+    lines.push("Options:");
+    view.options.forEach((option, i) => lines.push(`${String.fromCharCode(65 + i)}. ${option}`));
+    lines.push("Determine which option is correct.");
+  } else {
+    lines.push("This is a numeric-entry question. Compute the exact numeric answer.");
+  }
+  return lines.join("\n");
 }
 
 export function buildJudgeSystemPrompt(): string {
   return [
     "You are a strict quality reviewer for exam questions. You do not write questions; you only judge ones already written.",
-    "Check specifically: is it syllabus-relevant, does it have exactly one defensible correct answer, is any wording ambiguous,",
-    "are any conditions contradictory, and is the claimed difficulty tier honest given the actual reasoning required.",
+    "You are shown ONLY the question stem and its options (and the difficulty tier it claims to be) — exactly what a student",
+    "would see, plus that one claim. You are NOT told what anyone believes the correct answer is, and must not assume one.",
+    "Independently determine: is it syllabus-relevant, does it have exactly one defensible correct answer among the options",
+    "(if multiple options could be defended as correct, or none can, say so), is any wording ambiguous, are any conditions",
+    "contradictory, and is the claimed difficulty tier honest given the actual reasoning the question demands.",
     "List every concrete issue you find in `issues` — do not pass a question just because it looks fine at a glance.",
     "Return ONLY a single JSON object matching the required schema."
   ].join(" ");
 }
 
-export function buildJudgeUserPrompt(candidate: QuestionCandidateAiOutput): string {
-  return [
-    `Claimed difficulty tier: ${candidate.questionDna.difficultyTier}`,
-    `Stem: ${candidate.stem}`,
-    `Options: ${candidate.options ? candidate.options.join(" | ") : "(numeric entry, no options)"}`,
-    `Claimed correct answer: ${candidate.correctAnswer}`,
-    `Explanation: ${candidate.explanation}`
-  ].join("\n");
+/**
+ * Built ONLY from a JudgeView — the judge never sees the candidate's
+ * claimed answer, explanation, solution steps, or reasoning (docs/
+ * QUESTION_ENGINE.md §5b / Phase 3.1 §8). It must independently determine
+ * whether the question has exactly one defensible answer, not check
+ * whether it agrees with a claim it was never shown.
+ */
+export function buildJudgeUserPrompt(view: JudgeView): string {
+  const lines = [`Claimed difficulty tier: ${view.claimedDifficultyTier}`, `Stem: ${view.stem}`];
+  if (view.answerFormat === "multiple_choice" && view.options) {
+    lines.push("Options:");
+    view.options.forEach((option, i) => lines.push(`${String.fromCharCode(65 + i)}. ${option}`));
+  } else {
+    lines.push("(numeric entry, no options)");
+  }
+  lines.push(
+    "Judge only the question above. Determine independently whether it has exactly one defensible correct answer — do not assume any particular answer is correct."
+  );
+  return lines.join("\n");
 }

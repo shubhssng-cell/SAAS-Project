@@ -1,7 +1,8 @@
 import { percentagesConceptGraph } from "@ipmat/concept-graph";
-import { FixtureProvider } from "@ipmat/ai";
+import { FixtureProvider, type AiProvider } from "@ipmat/ai";
 import { describe, expect, it } from "vitest";
 import { runGenerationPipeline } from "../src/generationPipeline.js";
+import { DEFAULT_SINGLE_RUN_LIMITS } from "../src/generationLimits.js";
 import {
   demoBlueprint,
   disagreeingReverification,
@@ -92,5 +93,47 @@ describe("runGenerationPipeline — INPUT (blueprint) -> AI generation -> indepe
       provenanceSourceType: "original"
     });
     expect(result.status).toBe("review_required");
+  });
+
+  it("throws before any AI call if the supplied generation limits are invalid (Phase 3.1 §9)", async () => {
+    const provider = new FixtureProvider([]); // would throw "no canned response" if complete() were ever called
+    await expect(
+      runGenerationPipeline({
+        blueprint: demoBlueprint,
+        aiProvider: provider,
+        graph: percentagesConceptGraph,
+        existingQuestionStems,
+        provenanceSourceType: "original",
+        limits: { ...DEFAULT_SINGLE_RUN_LIMITS, maxBlueprints: 0 }
+      })
+    ).rejects.toThrow(/Invalid generation limits/);
+  });
+
+  it("stops making further AI calls once running estimated cost exceeds maxEstimatedBudgetUsd, and fails closed (Phase 3.1 §9)", async () => {
+    const expensiveProvider: AiProvider = {
+      name: "mock-expensive",
+      model: "claude-sonnet-5",
+      complete: async () => ({
+        rawText: JSON.stringify(validGeneratedCandidate),
+        usage: { inputTokens: 10_000_000, outputTokens: 10_000_000 }, // ~$180 at claude-sonnet-5 pricing
+        latencyMs: 1
+      })
+    };
+
+    const result = await runGenerationPipeline({
+      blueprint: demoBlueprint,
+      aiProvider: expensiveProvider,
+      graph: percentagesConceptGraph,
+      existingQuestionStems,
+      provenanceSourceType: "original"
+      // default budget is $1.00 — the first call alone blows well past it
+    });
+
+    expect(result.metadata.generation?.estimatedCostUsd).toBeGreaterThan(1);
+    expect(result.metadata.reverification).toBeNull();
+    expect(result.metadata.judge).toBeNull();
+    expect(result.checks.reverification.issues[0]?.code).toBe("budget_exceeded");
+    expect(result.checks.judge.issues[0]?.code).toBe("budget_exceeded");
+    expect(result.status).toBe("rejected");
   });
 });

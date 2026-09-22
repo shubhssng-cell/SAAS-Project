@@ -11,7 +11,8 @@
     "demo:percentages": "tsx demo/printPercentagesDemo.ts",
     "demo:generation": "tsx demo/printGenerationDemo.ts",
     "demo:rejection": "tsx demo/printRejectionDemo.ts",
-    "demo:lens-comparison": "tsx demo/printLensComparisonDemo.ts"
+    "demo:lens-comparison": "tsx demo/printLensComparisonDemo.ts",
+    "smoke:anthropic": "tsx demo/runRealAnthropicSmokeTest.ts"
   },
   "dependencies": {
     "@ipmat/ai": "*",

@@ -5,6 +5,7 @@ export type RejectionCode =
   | "multiple_or_no_correct_answer"
   | "answer_mismatch"
   | "impossible_computation"
+  | "unverifiable_answer"
   | "unsupported_completeness_claim"
   | "duplicate_risk"
   | "distractor_quality"
@@ -13,7 +14,8 @@ export type RejectionCode =
   | "judge_contradictory"
   | "judge_syllabus_irrelevant"
   | "judge_difficulty_dishonest"
-  | "judge_multiple_answers";
+  | "judge_multiple_answers"
+  | "budget_exceeded";
 
 export interface ValidationIssue {
   code: RejectionCode;

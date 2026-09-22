@@ -44,13 +44,14 @@ console.log(`   Agreed on: ${report.errorCategories.agreedOn.join(", ") || "(non
 console.log(`   Human only: ${report.errorCategories.humanOnly.join(", ") || "(none)"}`);
 console.log(`   AI only: ${report.errorCategories.aiOnly.join(", ") || "(none)"}`);
 
-console.log("\n6. Combinations — DOES AI INVENT UNSUPPORTED RELATIONSHIPS?");
+console.log("\n6. Combinations — four categories, not two (Phase 3.1 §2 fix)");
 console.log(`   AI suggested: ${report.combinations.aiSuggested.join(", ")}`);
-console.log(`   Supported by a real graph edge:   ${report.combinations.supportedByGraph.join(", ") || "(none)"}`);
-console.log(`   UNSUPPORTED (invented, no edge exists): ${report.combinations.unsupportedByGraph.join(", ") || "(none)"}`);
+console.log(`   [1] VALID generation combination (real, useful-for-generation edge): ${report.combinations.validGenerationCombination.join(", ") || "(none)"}`);
+console.log(`   [2] Related but NON-combinable (a real edge exists, e.g. related_but_distinct — do NOT combine): ${report.combinations.relatedButNonCombinable.join(", ") || "(none)"}`);
+console.log(`   [3] UNSUPPORTED / invented (no edge exists at all): ${report.combinations.unsupportedByGraph.join(", ") || "(none)"}`);
 
 console.log("\n7. DOES AI MISS IMPORTANT PATTERNS?");
-console.log(`   Real, useful combinations the AI did NOT mention: ${report.combinations.missedByAi.join(", ") || "(none)"}`);
+console.log(`   [4] Real, useful combinations the AI did NOT mention: ${report.combinations.missedByAi.join(", ") || "(none)"}`);
 
 console.log("\n8. DOES AI MAKE UNSUPPORTED COMPLETENESS CLAIMS?");
 console.log(`   Completeness claims found: ${report.completenessClaims.found.join("; ") || "(none)"}`);
@@ -58,6 +59,6 @@ console.log(`   hasUnsupportedClaim: ${report.completenessClaims.hasUnsupportedC
 
 console.log("\nCONCLUSION: do not assume AI is correct.");
 console.log(
-  `AI invented ${report.combinations.unsupportedByGraph.length} unsupported relationship(s) and missed ${report.combinations.missedByAi.length} real one(s). Neither the human baseline nor the graph was modified by this comparison.`
+  `AI invented ${report.combinations.unsupportedByGraph.length} unsupported relationship(s), proposed ${report.combinations.relatedButNonCombinable.length} that are related but NOT combinable, and missed ${report.combinations.missedByAi.length} real one(s). Neither the human baseline nor the graph was modified by this comparison.`
 );
 console.log("=".repeat(70));

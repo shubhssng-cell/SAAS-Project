@@ -42,8 +42,13 @@ export interface LensComparisonReport {
   };
   combinations: {
     aiSuggested: string[];
-    supportedByGraph: string[];
+    /** AI proposed a concept, and the graph has a `commonly_combined`/`application`/`dependent` edge for it with `usefulForQuestionGeneration: true` — a legitimate combination target. */
+    validGenerationCombination: string[];
+    /** AI proposed a concept, and a graph edge DOES exist between them — but it's not one of the generation-useful types (e.g. `related_but_distinct`, `prerequisite`, `foundational`, or a combinable-typed edge explicitly marked not useful). The AI found a real relationship but the wrong kind to build a combined question on. */
+    relatedButNonCombinable: string[];
+    /** AI proposed a concept with NO corresponding edge anywhere in the graph — invented, not just miscategorized. */
     unsupportedByGraph: string[];
+    /** A real, generation-useful combination the AI never mentioned at all. */
     missedByAi: string[];
   };
   completenessClaims: { found: string[]; hasUnsupportedClaim: boolean };
@@ -66,7 +71,15 @@ export function buildLensComparisonReport(
     getAllRelationsFor(graph, human.concept).map((edge) => (edge.from === human.concept ? edge.to : edge.from))
   );
   const aiSuggestedConcepts = ai.suggestedCombinations.map((s) => s.concept);
-  const supportedByGraph = aiSuggestedConcepts.filter((concept) => allRelatedConcepts.has(concept));
+  // Phase 3.1 §2 fix: a graph edge existing is NOT the same claim as "this
+  // is a valid generation combination" — related_but_distinct exists
+  // specifically to say "do not combine these" (docs/QUESTION_ENGINE.md
+  // §1). The four categories are mutually exclusive and jointly exhaustive
+  // over aiSuggestedConcepts (plus missedByAi, which isn't AI-suggested at all).
+  const validGenerationCombination = aiSuggestedConcepts.filter((concept) => realCombinationConcepts.has(concept));
+  const relatedButNonCombinable = aiSuggestedConcepts.filter(
+    (concept) => allRelatedConcepts.has(concept) && !realCombinationConcepts.has(concept)
+  );
   const unsupportedByGraph = aiSuggestedConcepts.filter((concept) => !allRelatedConcepts.has(concept));
   const missedByAi = [...realCombinationConcepts].filter((concept) => !aiSuggestedConcepts.includes(concept));
 
@@ -113,7 +126,8 @@ export function buildLensComparisonReport(
     },
     combinations: {
       aiSuggested: aiSuggestedConcepts,
-      supportedByGraph,
+      validGenerationCombination,
+      relatedButNonCombinable,
       unsupportedByGraph,
       missedByAi
     },

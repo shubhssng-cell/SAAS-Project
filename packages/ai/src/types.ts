@@ -1,4 +1,4 @@
-import type { ZodSchema } from "zod";
+import type { ZodType } from "zod";
 
 /**
  * This package is intentionally provider-agnostic and has NO dependency on
@@ -65,7 +65,16 @@ export interface GenerateStructuredInput<T> {
   promptVersion: string;
   systemPrompt: string;
   userPrompt: string;
-  schema: ZodSchema<T>;
+  /**
+   * `ZodType<T, any, any>` rather than `ZodSchema<T>` (which is `ZodType<T,
+   * ZodTypeDef, T>` — it forces the schema's Input type to equal T too).
+   * Several task schemas use `.default(...)` on a field (e.g.
+   * suggestedCombinations), which makes their Input and Output types
+   * legitimately differ; only the Output type matters here, since
+   * generateStructured only ever consumes the *parsed* result.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Def/Input positions are deliberately unconstrained; only Output (T) matters here, and `any` in these two positions is Zod's own convention (mirrored by its ZodTypeAny helper).
+  schema: ZodType<T, any, any>;
   options?: AiCallOptions;
 }
 

@@ -20,14 +20,17 @@ import {
   type ValidationResult
 } from "@ipmat/validation";
 import type { QuestionBlueprint } from "./blueprint.js";
+import { DEFAULT_SINGLE_RUN_LIMITS, validateGenerationLimits, type GenerationLimits } from "./generationLimits.js";
 import { computeLifecycleStatus, type QuestionLifecycleStatus } from "./lifecycle.js";
 import {
   buildGenerationSystemPrompt,
   buildGenerationUserPrompt,
   buildJudgeSystemPrompt,
   buildJudgeUserPrompt,
-  buildReverificationSystemPrompt
+  buildReverificationSystemPrompt,
+  buildReverificationUserPrompt
 } from "./prompts.js";
+import { toJudgeView, toPresentedQuestionView } from "./verifierView.js";
 
 export interface GenerationPipelineInput {
   blueprint: QuestionBlueprint;
@@ -35,6 +38,8 @@ export interface GenerationPipelineInput {
   graph: ConceptGraph;
   existingQuestionStems: string[];
   provenanceSourceType: string | null;
+  /** Defaults to DEFAULT_SINGLE_RUN_LIMITS (one blueprint, one candidate) — validated before any AI call is made (Phase 3.1 §9). */
+  limits?: GenerationLimits;
 }
 
 export interface GenerationPipelineResult {
@@ -66,10 +71,23 @@ export interface GenerationPipelineResult {
  * generation must terminate safely" (Phase 3 §11).
  */
 export async function runGenerationPipeline(input: GenerationPipelineInput): Promise<GenerationPipelineResult> {
+  const limits = input.limits ?? DEFAULT_SINGLE_RUN_LIMITS;
+  validateGenerationLimits(limits); // throws before any AI call if the limits themselves are unsafe
+
+  let runningCostUsd = 0;
+  const trackCost = (metadata: AiResultMetadata | null) => {
+    if (metadata?.estimatedCostUsd) runningCostUsd += metadata.estimatedCostUsd;
+  };
+  const overBudget = () => runningCostUsd > limits.maxEstimatedBudgetUsd;
+
   const blueprintExpectation = {
     id: input.blueprint.id,
     conceptName: input.blueprint.conceptName,
-    patternFamilyName: input.blueprint.patternFamilyName
+    patternFamilyName: input.blueprint.patternFamilyName,
+    difficultyTier: input.blueprint.difficultyTier,
+    requiredTestingModes: input.blueprint.testingModes,
+    trapErrorTaxonomyCode: input.blueprint.trapErrorTaxonomyCode,
+    combinationConcepts: input.blueprint.combinationConcepts
   };
 
   let candidate: QuestionCandidateAiOutput;
@@ -81,10 +99,11 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
       systemPrompt: buildGenerationSystemPrompt(),
       userPrompt: buildGenerationUserPrompt(input.blueprint),
       schema: questionCandidateAiSchema,
-      options: { maxRetries: 2, timeoutMs: 30_000 }
+      options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
     });
     candidate = result.data;
     generationMetadata = result.metadata;
+    trackCost(generationMetadata);
   } catch (error) {
     const aiError = error instanceof AiGenerationError ? error : null;
     const failure = fail("malformed_output", "generation", aiError?.message ?? "Generation call failed");
@@ -108,42 +127,64 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
 
   let reverification: ValidationResult;
   let reverificationMetadata: AiResultMetadata | null;
-  try {
-    const result = await generateStructured(input.aiProvider, {
-      task: "answer-reverification",
-      promptVersion: "answer-reverification-v1",
-      systemPrompt: buildReverificationSystemPrompt(),
-      userPrompt: candidate.stem,
-      schema: answerReverificationAiSchema,
-      options: { maxRetries: 1, timeoutMs: 30_000 }
-    });
-    reverificationMetadata = result.metadata;
-    reverification = compareReverification({ candidateAnswer: candidate.correctAnswer, reDerivedAnswer: result.data.derivedAnswer });
-  } catch (error) {
-    const aiError = error instanceof AiGenerationError ? error : null;
-    reverificationMetadata = aiError?.metadata ?? null;
-    reverification = fail("answer_mismatch", "reDerivedAnswer", `Independent re-derivation call failed: ${aiError?.message ?? "unknown error"}`);
+  if (overBudget()) {
+    reverificationMetadata = null;
+    reverification = fail(
+      "budget_exceeded",
+      "reverification",
+      `Skipped: running estimated cost ($${runningCostUsd.toFixed(4)}) already exceeds maxEstimatedBudgetUsd ($${limits.maxEstimatedBudgetUsd})`
+    );
+  } else {
+    try {
+      const result = await generateStructured(input.aiProvider, {
+        task: "answer-reverification",
+        promptVersion: "answer-reverification-v1",
+        systemPrompt: buildReverificationSystemPrompt(),
+        userPrompt: buildReverificationUserPrompt(toPresentedQuestionView(candidate)),
+        schema: answerReverificationAiSchema,
+        options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
+      });
+      reverificationMetadata = result.metadata;
+      trackCost(reverificationMetadata);
+      reverification = compareReverification({ candidateAnswer: candidate.correctAnswer, reDerivedAnswer: result.data.derivedAnswer });
+    } catch (error) {
+      const aiError = error instanceof AiGenerationError ? error : null;
+      reverificationMetadata = aiError?.metadata ?? null;
+      trackCost(reverificationMetadata);
+      reverification = fail("answer_mismatch", "reDerivedAnswer", `Independent re-derivation call failed: ${aiError?.message ?? "unknown error"}`);
+    }
   }
 
   const duplicateRisk = checkDuplicateRisk(candidate.stem, input.existingQuestionStems);
 
   let judge: ValidationResult;
   let judgeMetadata: AiResultMetadata | null;
-  try {
-    const result = await generateStructured(input.aiProvider, {
-      task: "validation-judge",
-      promptVersion: "validation-judge-v1",
-      systemPrompt: buildJudgeSystemPrompt(),
-      userPrompt: buildJudgeUserPrompt(candidate),
-      schema: validationJudgeAiSchema,
-      options: { maxRetries: 1, timeoutMs: 30_000 }
-    });
-    judgeMetadata = result.metadata;
-    judge = interpretJudgeVerdict(result.data);
-  } catch (error) {
-    const aiError = error instanceof AiGenerationError ? error : null;
-    judgeMetadata = aiError?.metadata ?? null;
-    judge = fail("judge_ambiguous", "judge", `Validation-judge call failed: ${aiError?.message ?? "unknown error"}`);
+  if (overBudget()) {
+    judgeMetadata = null;
+    judge = fail(
+      "budget_exceeded",
+      "judge",
+      `Skipped: running estimated cost ($${runningCostUsd.toFixed(4)}) already exceeds maxEstimatedBudgetUsd ($${limits.maxEstimatedBudgetUsd})`
+    );
+  } else {
+    try {
+      const result = await generateStructured(input.aiProvider, {
+        task: "validation-judge",
+        promptVersion: "validation-judge-v1",
+        systemPrompt: buildJudgeSystemPrompt(),
+        userPrompt: buildJudgeUserPrompt(toJudgeView(candidate)),
+        schema: validationJudgeAiSchema,
+        options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
+      });
+      judgeMetadata = result.metadata;
+      trackCost(judgeMetadata);
+      judge = interpretJudgeVerdict(result.data);
+    } catch (error) {
+      const aiError = error instanceof AiGenerationError ? error : null;
+      judgeMetadata = aiError?.metadata ?? null;
+      trackCost(judgeMetadata);
+      judge = fail("judge_ambiguous", "judge", `Validation-judge call failed: ${aiError?.message ?? "unknown error"}`);
+    }
   }
 
   const checks = { structural, computation, reverification, duplicateRisk, judge };

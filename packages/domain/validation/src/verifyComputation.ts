@@ -65,8 +65,20 @@ export function verifyComputation(input: {
     );
   }
 
+  // Fail closed (Phase 3.1 §3): a correctAnswer that cannot be parsed as a
+  // plain number is NOT skipped — it cannot be independently verified, so
+  // it is rejected outright. Silently accepting an unparseable answer
+  // (the previous behavior) meant a candidate could pass verification
+  // despite never actually having its stated answer checked at all.
   const correctAnswerNumeric = parseNumeric(input.correctAnswer);
-  if (correctAnswerNumeric !== null && Math.abs(recomputed - correctAnswerNumeric) > EPSILON) {
+  if (correctAnswerNumeric === null) {
+    return fail(
+      "unverifiable_answer",
+      "correctAnswer",
+      `correctAnswer "${input.correctAnswer}" could not be parsed as a plain number and cannot be independently verified`
+    );
+  }
+  if (Math.abs(recomputed - correctAnswerNumeric) > EPSILON) {
     return fail(
       "answer_mismatch",
       "correctAnswer",
@@ -77,9 +89,24 @@ export function verifyComputation(input: {
   return ok();
 }
 
-/** Parses a numeric answer string that may carry commas/units (e.g. "20,000" or "20000"). Returns null if not parseable as a plain number, in which case the numeric cross-check is skipped rather than falsely failed. */
+/**
+ * Parses a numeric answer string. Supports the common legitimate formats
+ * this project's questions actually use — plain integers/decimals,
+ * thousands separators, a leading ₹/$/Rs. currency marker, and a trailing
+ * `%` sign (Phase 3.1 §3: "support common legitimate formats where
+ * practical, but do not over-engineer this phase"). Anything else —
+ * fractions, ranges, units other than currency, "approximately", etc. —
+ * returns null, which the caller now treats as a hard failure
+ * (`unverifiable_answer`), never a silent skip.
+ */
 function parseNumeric(value: string): number | null {
-  const cleaned = value.replace(/,/g, "").trim();
+  const cleaned = value
+    .trim()
+    .replace(/^(₹|\$|Rs\.?)\s*/i, "")
+    .replace(/%$/, "")
+    .replace(/,/g, "")
+    .trim();
+  if (cleaned.length === 0 || !/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }

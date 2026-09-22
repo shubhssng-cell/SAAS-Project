@@ -1,6 +1,18 @@
 import type { DifficultyTier, PatternTaxonomyCellData, QuestionPatternFamilyData, TestingMode } from "./types.js";
 
 /**
+ * How much trust to put in a set of difficulty dimension values (Phase
+ * 3.1 §4). `provisional` means exactly one thing: a formula, not a
+ * measurement — see `tierBaselineDimensions()` below. Nothing in this
+ * codebase currently produces `expert_reviewed` or `empirically_calibrated`
+ * values; those statuses exist so the type is ready for real calibration
+ * work later without another schema change, not because that work has
+ * happened. Do not treat a `provisional` blueprint's numbers as
+ * representative of real IPMAT difficulty (docs/DECISIONS.md D-021).
+ */
+export type DifficultyCalibrationStatus = "provisional" | "expert_reviewed" | "empirically_calibrated";
+
+/**
  * A blueprint is NOT a question — it is the specification from which a
  * question may be generated (docs/QUESTION_ENGINE.md §5). It is built
  * deterministically from an existing PatternTaxonomyCell + its pattern
@@ -31,6 +43,8 @@ export interface QuestionBlueprint {
     timePressure: number;
     multiStepDepth: number;
   };
+  /** See DifficultyCalibrationStatus — always "provisional" from buildBlueprintFromCell today. */
+  difficultyCalibrationStatus: DifficultyCalibrationStatus;
   expectedTimeSeconds: number;
   transformationDescription: string | null;
   trapErrorTaxonomyCode: string | null;
@@ -51,11 +65,13 @@ export interface BuildBlueprintOptions {
 /**
  * Builds one QuestionBlueprint from one concrete PatternTaxonomyCell —
  * "start with IPMAT Quant -> Percentages -> one taxonomy cell" (Phase 3
- * §5). The blueprint's difficultyDimensions come from the CELL's
- * difficulty tier position, not an arbitrary guess — Phase 2's fixtures
- * don't carry per-cell dimensions yet, so this derives a baseline that
- * scales the family's expected tier; a real per-cell dimension vector is
- * future authoring work, not a structural gap.
+ * §5). The blueprint's difficultyDimensions come from `tierBaselineDimensions()`
+ * below, which is an IMPLEMENTATION PLACEHOLDER, not empirical calibration
+ * (Phase 3.1 §4) — that's why `difficultyCalibrationStatus` is always
+ * "provisional" here. Real calibration needs actual question-attempt data
+ * and/or expert review, neither of which exists yet; inventing a more
+ * "scientific-looking" formula would not fix that, only hide it, so none
+ * was attempted (docs/DECISIONS.md D-021).
  */
 export function buildBlueprintFromCell(
   cell: PatternTaxonomyCellData,
@@ -74,6 +90,7 @@ export function buildBlueprintFromCell(
     combinationConcepts: cell.combination,
     difficultyTier: cell.difficultyTier,
     difficultyDimensions: tierBaselineDimensions(cell.difficultyTier),
+    difficultyCalibrationStatus: "provisional",
     expectedTimeSeconds: cell.targetTimeSeconds,
     transformationDescription: options.transformationDescription ?? null,
     trapErrorTaxonomyCode: cell.trapErrorTaxonomyCode,
@@ -82,6 +99,15 @@ export function buildBlueprintFromCell(
   };
 }
 
+/**
+ * PLACEHOLDER FORMULA — not empirically calibrated (Phase 3.1 §4). Scales
+ * a hand-picked baseline linearly by tier index. It has never been
+ * checked against a real question's measured difficulty, because no such
+ * measurement exists yet (that needs real student attempt data, Phase 5+).
+ * Every value this function returns is `difficultyCalibrationStatus:
+ * "provisional"` on the blueprint it's attached to — do not read these
+ * numbers as a claim about real IPMAT difficulty.
+ */
 function tierBaselineDimensions(tier: DifficultyTier) {
   const index = ["standard", "advanced", "hard", "extreme", "novel"].indexOf(tier);
   const scale = (base: number) => Math.min(1, base + index * 0.15);

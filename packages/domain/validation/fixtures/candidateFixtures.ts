@@ -10,7 +10,11 @@ import type { BlueprintExpectation } from "../src/qualityValidators.js";
 export const demoBlueprintExpectation: BlueprintExpectation = {
   id: "bp-percentages-reverse-ratio-advanced-1",
   conceptName: "Percentages",
-  patternFamilyName: "Reverse Percentage"
+  patternFamilyName: "Reverse Percentage",
+  difficultyTier: "advanced",
+  requiredTestingModes: ["reverse"],
+  trapErrorTaxonomyCode: "base_confusion",
+  combinationConcepts: ["Ratio"]
 };
 
 export const existingQuestionStems: string[] = [
@@ -82,6 +86,26 @@ export const wrongAnswerCandidate: QuestionCandidateAiOutput = baseCandidate({
 /** Targets a different pattern family than the blueprint specified — the generator silently changed the blueprint. */
 export const blueprintViolationCandidate: QuestionCandidateAiOutput = baseCandidate({
   questionDna: { ...baseCandidate().questionDna, patternFamilyName: "Successive Percentage Change" }
+});
+
+/** Claims a different difficulty tier than the blueprint specified (Phase 3.1 §7). */
+export const difficultyTierViolationCandidate: QuestionCandidateAiOutput = baseCandidate({
+  questionDna: { ...baseCandidate().questionDna, difficultyTier: "standard" }
+});
+
+/** Drops the testing mode the blueprint required, even though it added a different one (Phase 3.1 §7). */
+export const testingModeViolationCandidate: QuestionCandidateAiOutput = baseCandidate({
+  questionDna: { ...baseCandidate().questionDna, testingModes: ["direct"] }
+});
+
+/** Builds in a different trap than the blueprint required (Phase 3.1 §7). */
+export const trapViolationCandidate: QuestionCandidateAiOutput = baseCandidate({
+  questionDna: { ...baseCandidate().questionDna, trapErrorTaxonomyCode: "careless_arithmetic" }
+});
+
+/** Combines with a concept the blueprint never specified, instead of the one it did (Phase 3.1 §7). */
+export const combinationViolationCandidate: QuestionCandidateAiOutput = baseCandidate({
+  questionDna: { ...baseCandidate().questionDna, combinesWithConcepts: ["Algebra"] }
 });
 
 /** References a concept that does not exist anywhere in the seeded graph. */
