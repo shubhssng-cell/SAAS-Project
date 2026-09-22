@@ -35,14 +35,15 @@ One deployable app, internally organized into domain modules with enforced bound
   /domain              Framework-agnostic business logic, split by bounded context:
     /concept-graph        [built, Phase 1-2] Concept Universe: 8-type relationship graph, Concept Depth
     /examiner-lens        [built, Phase 2] Examiner Lens: WhatIsTested, TestingMode, error modes, combination derivation
-    /question-engine      [built, Phase 2] Pattern families, taxonomy cells, coverage ladder, Question DNA validation
-    /validation           [not built, Phase 3] Validation pipeline rules (math correctness, ambiguity, dedup)
-    /attempts             [not built, Phase 4] Attempt recording, scoring
-    /autopsy              [not built, Phase 5] Autopsy hypothesis orchestration, repair planning
-    /mastery              [not built, Phase 5] Mastery computation (pure functions over attempt history)
+    /question-engine      [built, Phase 2-3] Pattern families, taxonomy cells, coverage ladder, Question DNA validation, generation pipeline
+    /validation           [built, Phase 3] Validation pipeline rules (math correctness, ambiguity, dedup)
+    /attempt              [built, Phase 4A] Attempt lifecycle state machine, canonical AttemptEvent vocabulary
+    /autopsy              [built, Phase 5A-5B] OBSERVATION -> EVIDENCE -> HYPOTHESIS -> CONFIRMED DIAGNOSIS, RepairPlan
+    /mastery              [built, Phase 5B] Multidimensional mastery computation (pure functions over attempt history)
+    /repair-selection     [built, Phase 5C-2] Deterministic TARGETED repair question selection from a confirmed RepairPlan (NOT the global adaptive engine — that's Phase 5C-3)
     /prep-phase           [built, Phase 1] Calendar-aware phase + catch-up layer
-  /ai                  [not built, Phase 3] Provider abstraction, prompt templates, Zod schemas for every AI call shape
-  /db                  [built] Prisma schema (full domain model), migrations, seed data, generated client
+  /ai                  [built, Phase 3] Provider abstraction, prompt templates, Zod schemas for every AI call shape
+  /db                  [built, schema+seed; persistence adapters built Phase 5C-1] Prisma schema (full domain model), migrations, seed data, generated client, repository/adapter layer
   /jobs                [not built, Phase 3] BullMQ job definitions + workers (one worker per expensive AI task type)
 /docs                  This directory
 ```

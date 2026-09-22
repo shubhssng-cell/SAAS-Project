@@ -1,0 +1,19 @@
+{
+  "name": "@ipmat/repair-selection",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ipmat/ai": "*",
+    "@ipmat/attempt": "*",
+    "@ipmat/autopsy": "*",
+    "@ipmat/examiner-lens": "*",
+    "@ipmat/question-engine": "*"
+  }
+}
