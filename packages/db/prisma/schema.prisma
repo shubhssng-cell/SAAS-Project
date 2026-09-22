@@ -656,23 +656,31 @@ model RepairPlan {
 // Mastery — derived only, never input (docs/DATABASE.md "Mastery" rule)
 // ---------------------------------------------------------------------
 
-// componentDetail (Phase 5B, docs/DECISIONS.md D-04x) holds the rich,
+// componentDetail (Phase 5B, docs/DECISIONS.md D-040) holds the rich,
 // never-discarded breakdown @ipmat/mastery's MasteryComponentDetail
 // computes alongside the 5 scalar columns below — total/correct/incorrect
 // counts, speed statistics, accuracy stability (stddev, not just mean),
 // difficulty/novelty/pressure breakdowns, error-recurrence streaks, and
-// coverage detail. The 5 scalar columns are kept exactly as they were
-// (docs/MASTER_PLAN.md Phase 5B: "use existing fields where possible") —
-// this is an additive migration, not a redesign.
+// coverage detail.
+//
+// The 5 scalar columns are nullable as of Phase 5C-1 (docs/DECISIONS.md
+// D-043, migration 0005_mastery_state_nullable_measures) — this is the
+// resolution to the tension D-042 left open. NULL means exactly what
+// `MasteryComponentMeasures`'s `null` means: insufficient data for that
+// specific dimension (fewer than MASTERY_CONSTANTS.MIN_OBSERVATIONS_FOR_
+// COMPONENT relevant observations), never coerced to 0. A real 0.0 means
+// the dimension WAS measured and the measured value is genuinely zero.
+// See @ipmat/mastery's toMasteryStatePersistenceRecord() for the full
+// three-state model (row absent / column NULL / column a real number).
 model MasteryState {
   id                  String   @id @default(uuid())
   studentId           String   @map("student_id")
   conceptId           String   @map("concept_id")
-  accuracy            Float
-  speedRatio          Float    @map("speed_ratio")
-  noveltyHandling     Float    @map("novelty_handling")
-  pressurePerformance Float    @map("pressure_performance")
-  patternCoverage     Float    @map("pattern_coverage")
+  accuracy            Float?
+  speedRatio          Float?   @map("speed_ratio")
+  noveltyHandling     Float?   @map("novelty_handling")
+  pressurePerformance Float?   @map("pressure_performance")
+  patternCoverage     Float?   @map("pattern_coverage")
   componentDetail     Json     @map("component_detail")
   computedAt          DateTime @map("computed_at")
 

@@ -179,19 +179,33 @@ export interface MasteryStateResult {
 }
 
 // ---------------------------------------------------------------------
-// Persistence-ready contract — shape only, no adapter (mirrors Phase 5B
-// §5's treatment of the Autopsy tables)
+// Persistence-ready contract — shape only, real repository lives in
+// `@ipmat/db` (Phase 5C-1)
 // ---------------------------------------------------------------------
 
-/** The exact shape a Prisma adapter would write to `mastery_states` — requires the NEW `componentDetail` column (migration `0004_mastery_component_detail`, generated but not applied — no live database has ever been reachable). */
+/**
+ * The exact shape a Prisma adapter writes to `mastery_states`. Phase 5C-1
+ * (docs/DECISIONS.md D-043) widened the 5 scalar columns to nullable
+ * `Float?` specifically so this type could carry `number | null` per
+ * measure, matching `MasteryComponentMeasures` field-for-field with no
+ * translation — a measure that is `null` here means EXACTLY what it means
+ * in `MasteryComponentMeasures`: insufficient data (fewer than
+ * `MASTERY_CONSTANTS.MIN_OBSERVATIONS_FOR_COMPONENT` relevant
+ * observations), never a coerced `0`. A real `0` here means the dimension
+ * WAS measured and the measured value is genuinely zero. See
+ * `toMasteryStatePersistenceRecord()` in `persistence.ts` for the full
+ * three-state model (row absent / component null / component a real
+ * number, possibly 0) and D-043 for why this was chosen over a
+ * companion "is this measured" status column.
+ */
 export interface MasteryStatePersistenceRecord {
   studentId: string;
   conceptId: string;
-  accuracy: number;
-  speedRatio: number;
-  noveltyHandling: number;
-  pressurePerformance: number;
-  patternCoverage: number;
+  accuracy: number | null;
+  speedRatio: number | null;
+  noveltyHandling: number | null;
+  pressurePerformance: number | null;
+  patternCoverage: number | null;
   componentDetail: Record<string, unknown>;
   computedAt: string;
 }
