@@ -1,3 +1,4 @@
+import type { AttemptState } from "@ipmat/attempt";
 import type { AutopsyHypothesis, AutopsyOutput, AutopsyPersistenceRecord, RepairPlan, RepairPlanPersistenceRecord } from "@ipmat/autopsy";
 import type { MasteryStatePersistenceRecord, MasteryStateResult } from "@ipmat/mastery";
 
@@ -50,4 +51,34 @@ export interface MasteryStateRepository {
   /** Upserts on `(studentId, conceptId)` (the real schema's unique constraint). Returns `null` — writes nothing — when `toMasteryStatePersistenceRecord()` returns `null` (zero contributing attempts; see @ipmat/mastery/src/persistence.ts). */
   save(result: MasteryStateResult): Promise<StoredMasteryState | null>;
   findByStudentAndConcept(studentId: string, conceptId: string): Promise<StoredMasteryState | null>;
+}
+
+/**
+ * Phase 4B-1 — the persistence boundary for `@ipmat/attempt`, unlike
+ * Autopsy/RepairPlan/MasteryState above, persists a PARENT row (`attempts`)
+ * plus a variable-length CHILD collection (`attempt_events`), and
+ * `AttemptState` already carries its own `id` (assigned by the caller via
+ * `startAttempt({id, ...})`, never by this layer) — so there is no separate
+ * `StoredAttempt` wrapper type here; `save()`/`findById()` traffic directly
+ * in the domain's own `AttemptState`, and reconstructing one from persisted
+ * rows IS the faithfulness contract this repository exists to prove.
+ */
+export interface AttemptRepository {
+  /**
+   * Upserts on `id` (the same id `startAttempt()` assigned). A brand-new id
+   * creates a row after verifying the referenced `Student`/`Question`/
+   * `Enrollment` (and `retryOfAttemptId`, if set) actually exist; an
+   * existing id updates it in place after verifying ownership hasn't
+   * changed and the existing row isn't already finalized to a DIFFERENT
+   * status (see `assertAttemptOwnershipUnchanged()`/
+   * `assertAttemptNotRegressingFromFinalized()` in `validation.ts`).
+   * ALWAYS fully replaces the persisted `AttemptEvent` rows to match
+   * `state.events` exactly, in the SAME canonical timeline order
+   * `@ipmat/attempt`'s own `getEventTimeline()` computes — never an
+   * incremental diff, so "what's persisted" can never silently drift from
+   * "what the domain state actually says happened."
+   */
+  save(state: AttemptState): Promise<AttemptState>;
+  /** Reconstructs a full, faithful `AttemptState` (including its ordered event timeline) from the persisted rows, or `null` if no attempt with this id exists. */
+  findById(attemptId: string): Promise<AttemptState | null>;
 }

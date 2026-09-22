@@ -1,3 +1,4 @@
+import type { AttemptState, AttemptStatus } from "@ipmat/attempt";
 import { HypothesisError, type AutopsyHypothesis, type AutopsyOutput, type RepairPlan } from "@ipmat/autopsy";
 import type { MasteryStatePersistenceRecord } from "@ipmat/mastery";
 import { PersistenceError } from "./errors.js";
@@ -103,4 +104,107 @@ export function assertValidMasteryStateRecord(record: MasteryStatePersistenceRec
   assertValidMasteryMeasure("noveltyHandling", record.noveltyHandling);
   assertValidMasteryMeasure("pressurePerformance", record.pressurePerformance);
   assertValidMasteryMeasure("patternCoverage", record.patternCoverage);
+}
+
+const TERMINAL_ATTEMPT_STATUSES: AttemptStatus[] = ["submitted", "skipped", "abandoned"];
+
+/**
+ * Shared by `AttemptRepository.save()` implementations (Phase 4B-1) —
+ * re-checks the SAME status/chosenAnswer/isCorrect/finalizedAt/
+ * timeSpentSeconds nullability rules `@ipmat/attempt`'s own
+ * `applyFinalization()` already guarantees for anything it produces
+ * (`in_progress` implies every terminal field is null; `submitted`
+ * implies chosenAnswer/isCorrect are non-null; `skipped`/`abandoned` imply
+ * they stay null). This is NOT a claim the domain layer's own guarantee is
+ * insufficient — it defends against an `AttemptState`-shaped value that
+ * merely has the right TypeScript shape without ever having gone through a
+ * real lifecycle function, the same "never trust a value merely typed as
+ * X" discipline D-043/D-044 already established for `RepairPlan`.
+ */
+export function assertAttemptStateInternallyConsistent(state: AttemptState): void {
+  if (!state.id) throw new PersistenceError("invalid_record", "Cannot persist an Attempt without an id.");
+  if (!state.studentId) throw new PersistenceError("invalid_record", "Cannot persist an Attempt without a studentId.");
+  if (!state.questionId) throw new PersistenceError("invalid_record", "Cannot persist an Attempt without a questionId.");
+  if (!state.enrollmentId) throw new PersistenceError("invalid_record", "Cannot persist an Attempt without an enrollmentId.");
+  if (!Number.isInteger(state.hintsUsed) || state.hintsUsed < 0) {
+    throw new PersistenceError("invalid_record", `Attempt.hintsUsed must be a non-negative integer, got ${String(state.hintsUsed)}.`);
+  }
+
+  if (state.status === "in_progress") {
+    if (state.finalizedAt !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null finalizedAt.");
+    if (state.submittedAt !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null submittedAt.");
+    if (state.chosenAnswer !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null chosenAnswer.");
+    if (state.isCorrect !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null isCorrect.");
+    if (state.timeSpentSeconds !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null timeSpentSeconds.");
+    return;
+  }
+
+  if (state.finalizedAt === null) {
+    throw new PersistenceError("invalid_record", `A "${state.status}" Attempt must have a non-null finalizedAt.`);
+  }
+  if (state.timeSpentSeconds === null) {
+    throw new PersistenceError("invalid_record", `A "${state.status}" Attempt must have a non-null timeSpentSeconds.`);
+  }
+
+  if (state.status === "submitted") {
+    if (state.submittedAt === null) throw new PersistenceError("invalid_record", "A submitted Attempt must have a non-null submittedAt.");
+    if (state.chosenAnswer === null) throw new PersistenceError("invalid_record", "A submitted Attempt must have a non-null chosenAnswer.");
+    if (state.isCorrect === null) throw new PersistenceError("invalid_record", "A submitted Attempt must have a non-null isCorrect.");
+  } else {
+    // skipped | abandoned
+    if (state.submittedAt !== null) throw new PersistenceError("invalid_record", `A "${state.status}" Attempt must have a null submittedAt.`);
+    if (state.chosenAnswer !== null) throw new PersistenceError("invalid_record", `A "${state.status}" Attempt must have a null chosenAnswer.`);
+    if (state.isCorrect !== null) throw new PersistenceError("invalid_record", `A "${state.status}" Attempt must have a null isCorrect.`);
+  }
+}
+
+/**
+ * Shared by `AttemptRepository.save()` implementations — an attempt's
+ * identity (who it belongs to, which question, which enrollment, and
+ * which attempt — if any — it is a retry of) must never change once a row
+ * exists. This is a persistence-boundary invariant the domain layer alone
+ * cannot enforce: `@ipmat/attempt`'s own `assertOwnership()` only checks
+ * an in-memory state against a CALLER-SUPPLIED claim, never against a
+ * separately-stored prior version of the row — that comparison is only
+ * possible once persistence exists. `retryOfAttemptId` is included here
+ * (Phase 4B-1 review finding) specifically because `PrismaAttemptRepository`'s
+ * `upsert()` never includes it in its `update` data (it is set once at
+ * creation and never rewritten) — without this check, a caller passing a
+ * DIFFERENT `retryOfAttemptId` on a later save would have that
+ * discrepancy silently discarded rather than rejected.
+ */
+export function assertAttemptOwnershipUnchanged(
+  existing: { studentId: string; questionId: string; enrollmentId: string; retryOfAttemptId: string | null },
+  incoming: AttemptState
+): void {
+  if (
+    existing.studentId !== incoming.studentId ||
+    existing.questionId !== incoming.questionId ||
+    existing.enrollmentId !== incoming.enrollmentId ||
+    existing.retryOfAttemptId !== incoming.retryOfAttemptId
+  ) {
+    throw new PersistenceError(
+      "invalid_record",
+      `Cannot persist Attempt "${incoming.id}": studentId/questionId/enrollmentId/retryOfAttemptId would change from (${existing.studentId}, ${existing.questionId}, ${existing.enrollmentId}, ${existing.retryOfAttemptId}) to (${incoming.studentId}, ${incoming.questionId}, ${incoming.enrollmentId}, ${incoming.retryOfAttemptId}) — an attempt's identity is immutable once persisted.`
+    );
+  }
+}
+
+/**
+ * Shared by `AttemptRepository.save()` implementations — "no code path
+ * re-opens a finalized attempt" (docs/DECISIONS.md D-035) is a domain
+ * invariant `@ipmat/attempt`'s own lifecycle functions already enforce
+ * against an in-memory `AttemptState`, but only THIS layer knows whether
+ * an EARLIER save already finalized this id, so it is re-checked here too.
+ * Saving the SAME terminal status again (an idempotent resave) is allowed;
+ * only an actual regression — finalized to a DIFFERENT status, or back
+ * toward `in_progress` — is refused.
+ */
+export function assertAttemptNotRegressingFromFinalized(existingStatus: AttemptStatus, incomingStatus: AttemptStatus): void {
+  if (TERMINAL_ATTEMPT_STATUSES.includes(existingStatus) && existingStatus !== incomingStatus) {
+    throw new PersistenceError(
+      "invalid_record",
+      `Cannot persist Attempt: it is already finalized as "${existingStatus}" — refusing to change its status to "${incomingStatus}".`
+    );
+  }
 }

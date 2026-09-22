@@ -1,6 +1,11 @@
+import { getEventTimeline, type AttemptState } from "@ipmat/attempt";
 import { toAutopsyPersistenceRecord, toRepairPlanPersistenceRecord, type AutopsyHypothesis, type AutopsyOutput, type RepairPlan } from "@ipmat/autopsy";
 import { toMasteryStatePersistenceRecord, type MasteryStateResult } from "@ipmat/mastery";
+import { PersistenceError } from "../../src/repositories/errors.js";
 import {
+  assertAttemptNotRegressingFromFinalized,
+  assertAttemptOwnershipUnchanged,
+  assertAttemptStateInternallyConsistent,
   assertAutopsyLinkage,
   assertConceptResolved,
   assertErrorTaxonomyResolved,
@@ -9,6 +14,7 @@ import {
   assertValidMasteryStateRecord
 } from "../../src/repositories/validation.js";
 import type {
+  AttemptRepository,
   AutopsyRepository,
   MasteryStateRepository,
   RepairPlanRepository,
@@ -132,5 +138,57 @@ export class InMemoryMasteryStateRepository implements MasteryStateRepository {
 
   async findByStudentAndConcept(studentId: string, conceptId: string): Promise<StoredMasteryState | null> {
     return this.byStudentAndConcept.get(this.key(studentId, conceptId)) ?? null;
+  }
+}
+
+export interface InMemoryAttemptRepositoryOptions {
+  /** Omit any of these three to skip that reference check entirely (the common case for tests that don't care about FK validation); supply a Set (even empty) to exercise the SAME `missing_reference` fail-closed path `PrismaAttemptRepository` exercises via real queries. */
+  knownStudentIds?: Set<string>;
+  knownQuestionIds?: Set<string>;
+  knownEnrollmentIds?: Set<string>;
+}
+
+export class InMemoryAttemptRepository implements AttemptRepository {
+  private readonly byId = new Map<string, AttemptState>();
+
+  constructor(private readonly options: InMemoryAttemptRepositoryOptions = {}) {}
+
+  async save(state: AttemptState): Promise<AttemptState> {
+    assertAttemptStateInternallyConsistent(state);
+
+    const existing = this.byId.get(state.id);
+    if (existing) {
+      assertAttemptOwnershipUnchanged(
+        { studentId: existing.studentId, questionId: existing.questionId, enrollmentId: existing.enrollmentId, retryOfAttemptId: existing.retryOfAttemptId },
+        state
+      );
+      assertAttemptNotRegressingFromFinalized(existing.status, state.status);
+    } else {
+      this.assertReferencesExist(state);
+    }
+
+    // Same canonical timeline order the Prisma-backed repository persists in — never the raw, possibly caller-reordered state.events array.
+    const stored: AttemptState = { ...state, events: getEventTimeline(state) };
+    this.byId.set(state.id, stored);
+    return stored;
+  }
+
+  async findById(attemptId: string): Promise<AttemptState | null> {
+    return this.byId.get(attemptId) ?? null;
+  }
+
+  private assertReferencesExist(state: AttemptState): void {
+    if (this.options.knownStudentIds && !this.options.knownStudentIds.has(state.studentId)) {
+      throw new PersistenceError("missing_reference", `No Student found with id "${state.studentId}".`);
+    }
+    if (this.options.knownQuestionIds && !this.options.knownQuestionIds.has(state.questionId)) {
+      throw new PersistenceError("missing_reference", `No Question found with id "${state.questionId}".`);
+    }
+    if (this.options.knownEnrollmentIds && !this.options.knownEnrollmentIds.has(state.enrollmentId)) {
+      throw new PersistenceError("missing_reference", `No Enrollment found with id "${state.enrollmentId}".`);
+    }
+    if (state.retryOfAttemptId && !this.byId.has(state.retryOfAttemptId)) {
+      throw new PersistenceError("missing_reference", `No Attempt found with id "${state.retryOfAttemptId}" for retryOfAttemptId.`);
+    }
   }
 }

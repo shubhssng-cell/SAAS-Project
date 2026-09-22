@@ -43,7 +43,7 @@ One deployable app, internally organized into domain modules with enforced bound
     /repair-selection     [built, Phase 5C-2] Deterministic TARGETED repair question selection from a confirmed RepairPlan (NOT the global adaptive engine — that's Phase 5C-3)
     /prep-phase           [built, Phase 1] Calendar-aware phase + catch-up layer
   /ai                  [built, Phase 3] Provider abstraction, prompt templates, Zod schemas for every AI call shape
-  /db                  [built, schema+seed; persistence adapters built Phase 5C-1] Prisma schema (full domain model), migrations, seed data, generated client, repository/adapter layer
+  /db                  [built, schema+seed; persistence adapters built Phase 5C-1 (Autopsy/RepairPlan/MasteryState) and Phase 4B-1 (Attempt)] Prisma schema (full domain model), migrations, seed data, generated client, repository/adapter layer
   /jobs                [not built, Phase 3] BullMQ job definitions + workers (one worker per expensive AI task type)
 /docs                  This directory
 ```
