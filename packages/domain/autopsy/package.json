@@ -7,7 +7,8 @@
   "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "smoke:anthropic": "tsx demo/runRealAnthropicSmokeTest.ts"
   },
   "dependencies": {
     "@ipmat/ai": "*",
@@ -15,5 +16,8 @@
     "@ipmat/concept-graph": "*",
     "@ipmat/examiner-lens": "*",
     "@ipmat/question-engine": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1"
   }
 }
