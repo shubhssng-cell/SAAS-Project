@@ -1,0 +1,85 @@
+import { evaluate } from "mathjs";
+import { fail, ok, type ValidationResult } from "./types.js";
+
+const EPSILON = 1e-6;
+
+/**
+ * `computation` comes from AI output — untrusted input — and mathjs's
+ * `evaluate()` has had property-injection advisories (GHSA-29qv-4j9f-fjw5,
+ * GHSA-jvff-x2qm-6286; fixed in mathjs 15.2.0, which this package pins).
+ * As defense in depth regardless of the patched version, only plain
+ * arithmetic characters are allowed through at all — no identifiers, no
+ * object/property syntax, nothing mathjs's expression parser could
+ * interpret as anything other than a number. A computation that needs
+ * more than digits and + - * / ^ ( ) . , is rejected outright, not
+ * evaluated.
+ */
+const SAFE_ARITHMETIC_PATTERN = /^[\d\s+\-*/^().,]+$/;
+
+/**
+ * Independent, deterministic re-derivation (docs/QUESTION_ENGINE.md §5a) —
+ * this is the ONLY check that decides whether the numeric answer is
+ * correct. "The LLM says the answer is X" is never sufficient on its own;
+ * mathjs evaluates the candidate's own stated computation expression
+ * (plain arithmetic — numbers, + - * / ^ (), no free variables) completely
+ * independently of the LLM, and the result must match both the
+ * candidate's `expectedAnswer` and (numerically) its `correctAnswer`.
+ */
+export function verifyComputation(input: {
+  computation: string;
+  expectedAnswer: number;
+  correctAnswer: string;
+}): ValidationResult {
+  if (!SAFE_ARITHMETIC_PATTERN.test(input.computation)) {
+    return fail(
+      "impossible_computation",
+      "groundTruthDerivation.computation",
+      "Computation contains characters outside plain arithmetic (digits, + - * / ^ ( ) . ,) and was rejected without evaluation"
+    );
+  }
+
+  let recomputed: unknown;
+  try {
+    recomputed = evaluate(input.computation);
+  } catch (error) {
+    return fail(
+      "impossible_computation",
+      "groundTruthDerivation.computation",
+      `Computation could not be evaluated: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (typeof recomputed !== "number" || !Number.isFinite(recomputed)) {
+    return fail(
+      "impossible_computation",
+      "groundTruthDerivation.computation",
+      `Computation did not evaluate to a finite number (got ${JSON.stringify(recomputed)})`
+    );
+  }
+
+  if (Math.abs(recomputed - input.expectedAnswer) > EPSILON) {
+    return fail(
+      "answer_mismatch",
+      "groundTruthDerivation.expectedAnswer",
+      `Independently recomputed value (${recomputed}) does not match the candidate's stated expectedAnswer (${input.expectedAnswer})`
+    );
+  }
+
+  const correctAnswerNumeric = parseNumeric(input.correctAnswer);
+  if (correctAnswerNumeric !== null && Math.abs(recomputed - correctAnswerNumeric) > EPSILON) {
+    return fail(
+      "answer_mismatch",
+      "correctAnswer",
+      `Independently recomputed value (${recomputed}) does not match the stated correctAnswer ("${input.correctAnswer}")`
+    );
+  }
+
+  return ok();
+}
+
+/** Parses a numeric answer string that may carry commas/units (e.g. "20,000" or "20000"). Returns null if not parseable as a plain number, in which case the numeric cross-check is skipped rather than falsely failed. */
+function parseNumeric(value: string): number | null {
+  const cleaned = value.replace(/,/g, "").trim();
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}

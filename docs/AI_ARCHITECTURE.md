@@ -1,51 +1,139 @@
 # AI Architecture
 
+Phase 3 (docs/MASTER_PLAN.md) implemented the provider abstraction (`@ipmat/ai`), independent answer verification and quality validation (`@ipmat/validation`), and the single-question generation pipeline (`@ipmat/question-engine`). No live AI provider was reachable in the implementing environment (no API key configured) — everything below is exercised through a deterministic `FixtureProvider` in tests and demo scripts; the real `AnthropicProvider` is fully implemented and typechecked but unexercised. See the Phase 3 report for details. **This is a proof-of-concept pipeline for one blueprint at a time — not a production content factory** (docs/MASTER_PLAN.md Phase 3 explicitly excludes large-scale generation).
+
 ## 1. Provider abstraction
 
-No call site in the app talks to Anthropic/OpenAI/etc. SDKs directly. All AI calls go through one interface in `/packages/ai`:
+No call site outside `@ipmat/ai/src/providers/` talks to a concrete SDK directly. Every AI call in the product goes through one function:
 
 ```ts
-interface AiProvider {
-  generateStructured<T>(input: {
-    task: string            // e.g. "examiner-lens-analysis", "question-generation", "autopsy-hypothesis"
-    promptVersion: string
-    context: Record<string, unknown>
-    schema: ZodSchema<T>
-  }): Promise<T>            // throws on validation failure after retries — never returns unvalidated data
+function generateStructured<T>(
+  provider: AiProvider,
+  input: {
+    task: string; promptVersion: string;
+    systemPrompt: string; userPrompt: string;
+    schema: ZodSchema<T>;
+    options?: { temperature?: number; timeoutMs?: number; maxRetries?: number };
+  }
+): Promise<{ data: T; metadata: AiResultMetadata }>   // throws AiGenerationError after retries — never returns unvalidated data
+```
+
+`AiProvider` is a two-method interface (`name`, `model`, `complete()`) implemented by:
+- **`AnthropicProvider`** — the real provider, calls the Anthropic Messages API. Requires `ANTHROPIC_API_KEY`; never logs or exposes it.
+- **`FixtureProvider`** — a deterministic, FIFO canned-response provider for tests and demonstrations. No network call, no key required (docs/QUESTION_ENGINE.md §8: the domain layer must be testable without a live AI provider).
+
+`@ipmat/ai` has **no dependency on any domain package** (concept-graph, examiner-lens, question-engine) — its Zod schemas restate the shapes they mirror rather than importing the domain types, so the boundary between "untrusted AI JSON" and "trusted domain model" is a fixed, independently-validated contract, not something that silently drifts if a domain type changes (docs/DECISIONS.md D-017). Domain packages depend on `@ipmat/ai`, never the reverse.
+
+Reasons this exists even with effectively one provider exercised today: (1) every structured-output call is forced through schema validation by construction, not by convention; (2) swapping or A/B-testing providers later touches one file, not every call site; (3) it's the seam that makes `FixtureProvider` possible at all.
+
+## 2. AI result metadata
+
+Every `generateStructured` call — success or failure — carries an `AiResultMetadata`:
+
+```ts
+interface AiResultMetadata {
+  provider: string; model: string; promptVersion: string; task: string;
+  timestamp: string; latencyMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number } | null;
+  estimatedCostUsd: number | null;
+  success: boolean; validationOutcome: "valid" | "invalid" | "not_applicable";
+  attempts: number;
 }
 ```
 
-Reasons this exists even with one provider today: (1) every structured-output call is forced through schema validation by construction, not by convention; (2) swapping or A/B-testing providers later (e.g. cost/quality tradeoffs between tasks) touches one file, not every call site; (3) it's the natural seam for recording prompt/response fixtures for tests.
+`estimatedCostUsd` comes from a small, hand-maintained per-model USD/million-token table in `@ipmat/ai/src/costEstimation.ts` — **not a live pricing API**. An unrecognized model returns `null` cost rather than a guess. This is retained on every generation for reproducibility/debugging and is the seam a future usage-logging job would persist to a database table (not built yet — see §7). It never includes the API key or raw provider credentials.
 
-## 2. Schema-validated outputs, everywhere
+## 3. Schema-validated outputs, everywhere
 
-Every AI task type (Examiner Lens analysis, question generation, validation-judge, autopsy hypothesis) has a Zod schema living in `/packages/ai/schemas`. The flow is always:
+The flow inside `generateStructured` is always:
 
-1. Build a typed `context` object (never a raw string) from domain data.
-2. Call `generateStructured` with the schema for that task.
-3. On schema validation failure: retry once with the validation error fed back into the prompt; on second failure, the job fails loudly and is queued for human review — it never falls back to storing unvalidated output.
-4. Persist only the validated, typed result.
+1. Call the provider with a system/user prompt built by a typed function (never string concatenation of raw domain objects — see `@ipmat/question-engine/src/prompts.ts`).
+2. Parse the raw text as JSON (stripping markdown fences some models add despite instructions not to) — a parse failure retries with the error fed back into the prompt.
+3. Validate against the task's Zod schema — a validation failure also retries with the specific error fed back, so the model can self-correct.
+4. Exhausting retries throws `AiGenerationError` carrying the failed attempt's metadata — it never falls back to storing unvalidated output.
+5. Only a fully validated result is returned.
 
-This is what makes "no fake AI" and "no fake analytics" enforceable rather than aspirational: there is no code path that lets a hand-written stub masquerade as a model response, because production code only ever calls `generateStructured`, and tests explicitly mock at that boundary (visibly, in test files) rather than downstream.
+Retries use exponential backoff with jitter (`@ipmat/ai/src/util.ts`); a call-level timeout wraps every attempt so a hung provider can't stall the pipeline indefinitely (Phase 3 §11 — "a failed generation must terminate safely"). This is what makes "no fake AI" enforceable rather than aspirational: there is no code path that lets a hand-written stub masquerade as a model response in production code, and `FixtureProvider` makes that boundary visible in test files rather than hidden downstream.
 
-## 3. Question generation pipeline
+## 4. Task types implemented
+
+| Task | Schema | Purpose |
+|---|---|---|
+| `examiner-lens-analysis` | `examinerLensAnalysisAiSchema` | Regenerate a concept's Examiner Lens for comparison against the human baseline (§5). |
+| `question-generation` | `questionCandidateAiSchema` | Generate one question candidate from one `QuestionBlueprint` (§6). |
+| `answer-reverification` | `answerReverificationAiSchema` | A SECOND, independent call given only the question stem, asked to re-derive the answer from scratch (§6). |
+| `validation-judge` | `validationJudgeAiSchema` | Catches ambiguity and contradictory conditions — the one thing no deterministic check can substitute for, since it requires reading and understanding natural language (§6). |
+
+Every schema forbids nothing about *content* except: `testingModes`/`errorModes.category` must be drawn from the fixed controlled vocabularies (never free text), and — enforced separately, not by the schema — no free-text field may assert literal completeness (`findCompletenessClaims()` in `@ipmat/examiner-lens`, reused across every task's output).
+
+## 5. Examiner Lens regeneration — human baseline vs AI
+
+The AI is given the concept's name/description and its neighbors' names/descriptions **without being told the real relationship types or rationale** — otherwise it would just echo the graph, not propose anything (docs/QUESTION_ENGINE.md §2a). Its output uses the same `TestingMode`/`ErrorCategory` vocabulary as the human-authored Lens but a **lighter combinations shape** (`{ concept, rationale }`) — the AI proposes candidates, it never gets to unilaterally mint a governed `ConceptRelation` edge (with `certainty`/`requirementLevel`/`source`), because those are curation decisions, not something an LLM's confidence should determine.
+
+`buildLensComparisonReport()` (`@ipmat/question-engine`) never modifies the human baseline or the graph. It reports, per concept:
+- Skill focus and prerequisite agreement (exact-match comparison)
+- Testing modes: agreed / human-only (AI under-discovered) / AI-only (AI over-discovered)
+- Difficulty dimensions: numeric deltas per dimension, not just pass/fail
+- Error categories: agreed / human-only / AI-only
+- **Combinations, split into `supportedByGraph` (the AI's proposal happens to match a real edge) vs `unsupportedByGraph` (the AI invented a relationship with no corresponding edge anywhere in the graph) vs `missedByAi` (a real, useful-for-generation edge the AI never mentioned)**
+- Whether the AI's own text asserts a completeness claim
+
+This operationalizes "do not assume AI is correct" (Phase 3 §9) as a structured, re-runnable comparison rather than a one-time manual read. See the Phase 3 report for the actual comparison result against Percentages.
+
+## 6. Question generation pipeline
 
 ```
-PatternTaxonomyCell (input: concept + pattern + difficulty + trap + combination)
-  → generateStructured("question-generation", schema=QuestionDraftSchema)
-       - draft includes: body, options, stated answer, solution_steps, AND ground_truth_derivation
-  → deterministic re-derivation check
-       - the ground_truth_derivation is independently recomputed (numeric/symbolic, not by asking the LLM again)
-       - if recomputation disagrees with the stated answer, reject — do not "trust" the LLM's arithmetic
-  → generateStructured("validation-judge", schema=ValidationJudgeSchema)
-       - checks: syllabus relevance, ambiguity, single-correct-answer, difficulty-tier fit
-  → duplicate/near-duplicate check (embedding similarity against existing published questions in the same concept)
-  → validation_state transitions: draft -> ai_validated -> (human_reviewed, optional gate for Phase 1) -> published
+QuestionBlueprint (deterministic — built from one PatternTaxonomyCell + its pattern family; NO AI involved)
+  → generateStructured("question-generation")
+       - candidate MUST echo blueprintId back; must not change concept/pattern family
+       - candidate MUST include groundTruthDerivation: { computation: <plain arithmetic string>, expectedAnswer: <number> }
+  → deterministic re-derivation (@ipmat/validation's verifyComputation, via mathjs)
+       - computation is UNTRUSTED (AI-generated) input: first checked against a strict
+         arithmetic-only character allowlist, THEN evaluated — defense in depth against
+         mathjs's own property-injection advisories (docs/DECISIONS.md D-018), regardless
+         of whether the specific expression would have been dangerous
+       - mismatch (or an expression that fails the allowlist) = automatic rejection;
+         "the LLM says the answer is X" is NEVER sufficient on its own
+  → SECOND, independent generateStructured("answer-reverification") call
+       - given ONLY the stem — no access to the first candidate's answer or reasoning
+       - compareReverification() rejects on disagreement, catching cases where the
+         arithmetic is internally consistent but the question means something different
+         than the first model thought
+  → validateCandidateStructurally() (@ipmat/validation): blueprint compliance, syllabus
+    compatibility (every referenced concept must exist in the graph), exactly-one-correct-
+    answer, no completeness claim, provenance present
+  → checkDuplicateRisk(): token-overlap (Jaccard) similarity against existing question
+    bodies — a deliberately lightweight stand-in for real embedding-based dedup, which
+    needs an embedding model and remains future work (docs/DECISIONS.md D-019)
+  → generateStructured("validation-judge") → interpretJudgeVerdict(): ambiguity,
+    contradictory conditions, syllabus relevance, difficulty-tier honesty
+  → computeLifecycleStatus(): rejected | validated | review_required (never "published" directly)
 ```
 
-All of the above runs as a background job (see §5), never inline in a student-facing request.
+A rejection at ANY step is recorded with its specific reason (`RejectionCode` + field + message) — never a silent discard. A failure in the generation call itself (the AI errors out after retries) is caught and converted into a `rejected` result, not an unhandled exception (Phase 3 §11).
 
-## 4. Question Autopsy pipeline
+## 7. Question lifecycle
+
+```
+draft → generated → validated ─────────────→ published → deprecated
+                  ↘ rejected            ↗
+                    review_required → approved
+```
+
+`generated` AI questions never automatically become `published` (Phase 3 §8). Standard/Advanced-tier candidates that pass every check go straight to `validated` and CAN reach `published` directly (matching docs/DECISIONS.md D-008's auto-publish allowance); Hard/Extreme/Novel-tier candidates always land in `review_required` regardless of how clean the validation results are, and can only reach `published` via `approved`. `rejected`, `published`, and `deprecated` are terminal except for the one explicit edge each is allowed (`published → deprecated`).
+
+## 8. Background jobs, not inline calls (design carried over from Phase 1, not built yet)
+
+Every AI call that isn't needed to render the *current* screen synchronously is meant to run through a job queue (BullMQ, per docs/ARCHITECTURE.md) — this infrastructure is **not built in Phase 3** (explicitly excluded: "no full generation job yet"). The pipeline in §6 runs as a plain async function today, invoked directly by a demo script or test, one blueprint at a time. When a real queue is added, it wraps `runGenerationPipeline()` without needing to change its signature — the function already takes an injected `AiProvider` and returns a complete, serializable result.
+
+## 9. Cost and failure control
+
+- Every `generateStructured` call has a timeout (default 30s) and bounded retries (default 2) with exponential backoff + jitter — no unbounded retry loop is possible.
+- A generation pipeline run makes at most 3 AI calls (generation, reverification, judge) regardless of outcome — there is no loop that could re-invoke itself on failure.
+- `estimatedCostUsd` is computed per call (§2); a future usage-logging job would sum these into per-day/per-task cost dashboards — the metadata shape already supports this, the aggregation job is not built.
+- Prompt/response fixtures for each task type are used in tests instead of live calls, so the test suite makes zero paid API calls (see [ARCHITECTURE.md](ARCHITECTURE.md) §3, Testing row).
+
+## 10. Question Autopsy pipeline (Phase 5 design, unchanged from Phase 1)
 
 ```
 Attempt (wrong answer)
@@ -68,25 +156,4 @@ Attempt (wrong answer)
     that target the confirmed error_taxonomy_id for the confirmed concept
 ```
 
-More evidence does not mean a stronger claim of certainty — richer evidence changes what the hypothesis can *ask about* ("you opened the solution 4 seconds after your first click — were you checking your approach or just looking for the answer?"), not whether the system asserts it knows the answer. The `confirmed` gate in [DATABASE.md](DATABASE.md) §Question Autopsy is unaffected by how much evidence went in.
-
-The confirm/correct loop is also the mechanism for improving the hypothesis prompt over time: corrections are a labeled dataset (hypothesis vs. actual reason) that can be reviewed periodically to revise `promptVersion` — this is a manual review process in Phase 1, not an automated fine-tuning loop (that would be premature).
-
-## 5. Background jobs, not inline calls
-
-Every AI call that isn't needed to render the *current* screen synchronously runs through BullMQ:
-
-| Job | Trigger | Blocks student? |
-|---|---|---|
-| Examiner Lens analysis | Admin/authoring action on a concept | No — authoring-time only |
-| Question generation | Authoring action or scheduled top-up when a taxonomy cell's bank runs low | No |
-| Validation pipeline | Enqueued automatically after generation | No |
-| Autopsy hypothesis | Attempt marked incorrect | UI shows a pending state on that single attempt's feedback panel only; the student can continue practicing other questions immediately |
-
-Question *selection* for a live practice session only ever reads already-`published` questions — it never triggers generation synchronously. If a taxonomy cell is under-covered, that's a background top-up job, not a request-time fallback.
-
-## 6. Cost and latency discipline
-
-- Generation and validation are batchable and are run ahead of demand (top-up jobs keyed off `PatternTaxonomyCell.coverage_status`), not per-student-request.
-- Autopsy hypothesis is the one AI call in the student-facing path; it is scoped to a single attempt's evidence (not the student's full history) to keep context small and latency predictable.
-- Prompt/response fixtures for each task type are recorded for tests so the test suite does not make live paid calls (see [ARCHITECTURE.md](ARCHITECTURE.md) §3, Testing row).
+More evidence does not mean a stronger claim of certainty — richer evidence changes what the hypothesis can *ask about*, not whether the system asserts it knows the answer. The `confirmed` gate in [DATABASE.md](DATABASE.md) §Question Autopsy is unaffected by how much evidence went in. Not built yet (Phase 5); `@ipmat/ai`'s `generateStructured` and metadata shape are already generic enough to serve this task without change when that phase starts.

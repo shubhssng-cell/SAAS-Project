@@ -2,7 +2,7 @@
 
 ## Current state (2026-09-22)
 
-Phase 1 and Phase 2 foundations implemented. Phase 1: full Prisma schema, initial migration, concept graph + error taxonomy + prep-phase seed data, `prep-phase` domain package. Phase 2: the concept graph deepened to 12 concepts / 16 richly-typed relationships across 8 chapters, `ConceptDepth` structure (full for Percentages, light for Ratio), `@ipmat/examiner-lens` (Examiner Lens domain model + combination derivation + structural validation), `@ipmat/question-engine` (4 pattern families, 8 taxonomy cells, the coverage readiness ladder, finalized Question DNA + validator, and a runnable deterministic demonstration). 44 unit tests passing, typecheck/lint/build clean across all 6 workspaces. Not yet done: applying either migration or running the seed script against a live Postgres instance — no database has been reachable in the implementing environment through either phase (see the Phase 1 and Phase 2 implementation reports). No student-facing UI, no AI provider integration, no real question generation yet — that's Phase 3+.
+Phase 1, 2, and 3 implemented. Phase 1: full Prisma schema, initial migration, concept graph + error taxonomy + prep-phase seed data, `prep-phase` domain package. Phase 2: the concept graph deepened to 12 concepts / 16 richly-typed relationships across 8 chapters, `ConceptDepth`, `@ipmat/examiner-lens`, `@ipmat/question-engine` (pattern families, taxonomy cells, coverage ladder, finalized Question DNA). Phase 3: `@ipmat/ai` (provider-agnostic AI abstraction, 4 task schemas, cost/metadata tracking), `@ipmat/validation` (independent computation verification, quality validators), and a full single-blueprint generation pipeline with lifecycle management — proven via `FixtureProvider` (no live AI provider reachable in this environment; see the Phase 3 report). 92 unit tests passing, typecheck/lint/build clean across all 7 workspaces. Not yet done: applying any migration or running the seed script against a live Postgres instance (no database has ever been reachable across all three phases); any live AI provider call; filling the remaining 7 `uncovered` Percentages taxonomy cells (Phase 3.5, not started); any student-facing UI.
 
 ## Build phases
 
@@ -38,14 +38,23 @@ Repository audit (trivial — nothing existed), product spec, architecture, data
 
 **Exit criteria:** ✅ a human-authored, structurally-validated `ExaminerLensAnalysis` exists for Percentages; ✅ the pattern-family/taxonomy-cell tables exist with a coverage number that is true (1 of 8 cells `covered`, honestly); ✅ 44 unit tests prove relationship typing, directionality, combination derivation, coverage computation, and DNA validation; ✅ typecheck/lint/build clean. Not applied to a live database (see Phase 2 report).
 
-### Phase 3 — AI provider abstraction + question generation + validation pipeline
-- AI provider abstraction (`/packages/ai`) with the Zod schema for exactly one task type first (`examiner-lens-analysis` — regenerating Percentages' Lens via AI, checked against the Phase 2 human-authored version), proven end-to-end, before adding the rest.
-- Generation job targeting the 7 currently-`uncovered` Percentages taxonomy cells: independent re-derivation check, AI-judge pass, dedup check, human review gate for `hard`/`extreme`/`novel` tiers.
-- Fill taxonomy cells for Percentages until each has a minimum viable question count across at least Standard/Advanced/Hard.
+### Phase 3 — AI provider + question generation + validation (proof of concept) ✅ done (this pass)
+Deliberately scoped as a proof-of-concept, not a content factory (explicit instruction this phase): prove the pipeline is reliable for ONE blueprint before scaling it to fill the taxonomy.
 
-**Exit criterion:** a queryable, published question bank for Percentages exists where every row satisfies the Question DNA invariant (no nulls, provenance required), and the Phase 2 coverage ladder shows real families reaching `practice_ready` from actual generated (not hand-authored) content.
+- `@ipmat/ai`: provider-agnostic `generateStructured()` (retries with validation-error feedback, exponential backoff, timeout, per-call metadata including estimated cost), `FixtureProvider` (deterministic, used everywhere in this repo) and `AnthropicProvider` (real, implemented, unexercised — no API key configured in this environment). Zod schemas for 4 task types: `examiner-lens-analysis`, `question-generation`, `answer-reverification`, `validation-judge`. Has zero dependency on any domain package (docs/DECISIONS.md D-017).
+- Examiner Lens regeneration + comparison: `buildLensComparisonReport()` diffs an AI-regenerated Lens against the Phase 2 human baseline (never overwritten), surfacing agreement, invented (`unsupportedByGraph`) and missed (`missedByAi`) relationships, and completeness-claim detection.
+- `@ipmat/validation`: independent computation verification (`mathjs`, with an untrusted-input allowlist guard — docs/DECISIONS.md D-018), independent re-derivation comparison, structural quality validators (blueprint compliance, syllabus compatibility, single-correct-answer, no-completeness-claim, provenance), and a token-overlap duplicate-risk check (interim, docs/DECISIONS.md D-019).
+- `@ipmat/question-engine` additions: `QuestionBlueprint` (deterministic, built from one real `PatternTaxonomyCell`, no AI involved), `runGenerationPipeline()` (the full blueprint → AI generation → independent verification → quality validation → candidate chain), and the question lifecycle (`draft → generated → validated/review_required → approved → published/rejected → deprecated`).
+- Three runnable demonstrations: a valid generation run, a deliberately invalid candidate being rejected with a readable report, and the human-vs-AI Lens comparison.
+- 9 deterministic fixtures covering every rejection path named in the phase brief (malformed, ambiguous, multiple-correct-answer, wrong-answer, blueprint-violation, out-of-syllabus, duplicate, unsupported-completeness-claim, plus the valid path).
+
+**Exit criteria:** ✅ one AI-generated candidate passes the full pipeline end-to-end (via `FixtureProvider`) and reaches `validated`; ✅ one deliberately invalid candidate is rejected with specific, itemized reasons; ✅ the Lens comparison report runs against real fixture data and correctly flags an invented relationship and missed ones; ✅ 92 unit tests (up from 44) covering every rejection path; ✅ typecheck/lint/build clean across all 7 workspaces. **Explicitly NOT done** (by design, not oversight): filling the 7 remaining `uncovered` Percentages taxonomy cells, any live AI provider call, any background job/queue, any automated publishing.
+
+### Phase 3.5 (recommended, not started) — Scale generation for Percentages
+The natural next step before Phase 4 has enough real content to be useful: run the Phase 3 pipeline (unmodified) against the remaining 7 taxonomy cells, with a real API key, producing a small but real Percentages question bank. This is infrastructure-light (no new packages needed) but needs: an `ANTHROPIC_API_KEY`, a decision on Phase 3's human-review-gate staffing for the `hard`/`extreme` cells that will hit `review_required`, and basic run logging (which cells were attempted, cost per run). Not a new domain package — just actually running what Phase 3 built, repeatedly, with real credentials.
 
 ### Phase 4 — Student practice loop
+Depends on Phase 3.5 having produced more than one published question — with only the single Phase 2 demonstration question, a "practice loop" would have nothing to practice.
 - `Student`/`Enrollment` already exist from Phase 1; `Attempt`/`AttemptEvent` tables already exist from Phase 1 — this phase is the first to actually write rows into them.
 - Bare practice UI: serve a question from the published bank (filtered by concept, not yet by mastery gaps — that needs Phase 5's mastery computation), record the attempt (including `AttemptEvent` rows for at least `question_opened` and `answer_submitted` — richer event capture can be added incrementally without a schema change).
 - No mastery, no autopsy yet — just correct/incorrect feedback and the correct solution shown.
@@ -71,13 +80,15 @@ Dogfood internally, fix correctness issues found in generated content, tighten v
 
 ## What should be implemented FIRST
 
-Phase 1 → 2 are done (this pass and the previous one). Phase 3 next: the `/packages/ai` provider abstraction proven against exactly one task type (`examiner-lens-analysis`) before anything else touches AI, since every later generation/validation/autopsy task depends on that abstraction existing and being trustworthy.
+Phase 1 → 2 → 3 are done. Next: Phase 3.5 (run the existing, unmodified Phase 3 pipeline against the remaining 7 Percentages taxonomy cells with a real API key) before Phase 4's practice loop, since Phase 4 needs more than one published question to be a meaningful loop.
 
 ## What should explicitly NOT be built yet
 
 - Payments, subscriptions, or any pricing logic
 - Parent portal or any secondary-account model
 - Full question-bank buildout (pattern families, taxonomy cells, generated content) for any exam other than IPMAT, any section other than Quant, or any chapter other than Percentages. This does NOT mean the concept graph must pretend other chapters don't exist — Phase 2 deliberately reaches into Ratio, Averages, Profit and Loss, Data Interpretation, Algebra, and others as *neighbors in Percentages' graph*, each with a real chapter row and a real relationship. The restriction is on building those chapters out as first-class content targets themselves, not on acknowledging they exist.
+- Massive/automated question-generation batches, thousands of questions, or automated publishing (Phase 3 explicitly proved the pipeline on one blueprint at a time; scaling it up is Phase 3.5's job, still bounded to Percentages)
+- A full BullMQ job queue/worker system for AI generation (Phase 3's pipeline is a plain async function today — see docs/AI_ARCHITECTURE.md §8)
 - Social features (leaderboards, sharing, cohorts)
 - SEO/marketing site
 - Mock-test assembly engine or a large pre-built mock library
@@ -86,6 +97,7 @@ Phase 1 → 2 are done (this pass and the previous one). Phase 3 next: the `/pac
 - Multi-tenant / coaching-org accounts
 - Automated fine-tuning of any AI prompt from autopsy correction data (manual review only, for now)
 - A polished admin UI — internal tooling for Phase 1–3 can be CLI scripts or bare pages
+- A full coaching-material ingestion pipeline or general-purpose AI chatbot
 
 ## Explicit go/no-go gate before starting chapter two
 

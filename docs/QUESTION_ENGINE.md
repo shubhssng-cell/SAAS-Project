@@ -2,7 +2,7 @@
 
 This document specifies the systems that turn "Percentages" into a servable, trustworthy question bank: Concept Universe, Concept Depth, Examiner Lens, Question Pattern Families, Question Universe (coverage), and Question DNA — plus the two systems that close the loop with the student: Validation and Question Autopsy.
 
-Phase 2 (docs/MASTER_PLAN.md) built the first five of these as domain packages (`@ipmat/concept-graph`, `@ipmat/examiner-lens`, `@ipmat/question-engine`) with deterministic, hand-authored fixtures for Percentages — no AI generation yet, no student-facing UI beyond a runnable demonstration script (`npm run demo:percentages --workspace @ipmat/question-engine`).
+Phase 2 (docs/MASTER_PLAN.md) built the first five of these as domain packages (`@ipmat/concept-graph`, `@ipmat/examiner-lens`, `@ipmat/question-engine`) with deterministic, hand-authored fixtures for Percentages. Phase 3 added real (provider-agnostic) AI generation for two of the tasks Phase 1 always intended (`@ipmat/ai`), independent answer verification and quality validation (`@ipmat/validation`), and a runnable single-question generation pipeline — still no student-facing UI, and still only one hand-authored + one AI-attempted question, not a content factory (docs/MASTER_PLAN.md Phase 3 explicitly excludes large-scale generation).
 
 ## 1. Concept Universe
 
@@ -44,11 +44,17 @@ Every edge also carries: `rationale` (why it exists — never a bare label), `sh
 
 **Difficulty is dimensional, not a label:** `difficultyDimensions` is a fixed 6-field struct (`conceptualLoad`, `computationalLoad`, `trapDensity`, `representationNovelty`, `timePressure`, `multiStepDepth`, each 0-1), calibrated as a standard-tier baseline that harder tiers are characterized by pushing up specific dimensions of, not by a vaguer "harder" claim.
 
-**Authorship is tracked honestly:** `authoredBy` (`human`/`ai`) is separate from `status` (the review workflow). Percentages' Lens analysis is `authoredBy: human` — Phase 2 explicitly does not do AI generation yet (docs/MASTER_PLAN.md), so `generatedByProvider`/`promptVersion` stay null until that changes.
+**Authorship is tracked honestly:** `authoredBy` (`human`/`ai`) is separate from `status` (the review workflow). Percentages' canonical, seeded Lens analysis is `authoredBy: human` and remains the evaluation baseline (§2a) — an AI regeneration is never allowed to overwrite it; it is stored/compared separately.
 
 **Structural validation without a live AI provider:** `validateExaminerLensAnalysis()` in `@ipmat/examiner-lens` checks the analysis references real concepts, uses only vocabulary-sanctioned testing modes, and — via `findCompletenessClaims()` — that no free-text field asserts literal completeness ("every possible question," "mathematically complete," etc.). This runs against deterministic fixtures in tests; no live AI call is needed to validate structure (docs/QUESTION_ENGINE.md §8 below).
 
 **Versioning:** re-running the Lens on a concept produces a new version; old pattern families/questions keep their original `examiner_lens_analysis_id` reference so provenance never breaks.
+
+## 2a. Examiner Lens regeneration — human baseline vs AI
+
+Phase 3 built the actual AI regeneration task and comparison report (docs/AI_ARCHITECTURE.md §5) — the human-authored analysis from §2 is the fixed evaluation baseline, never overwritten. `buildLensComparisonReport()` (`@ipmat/question-engine`) diffs a human `ExaminerLensAnalysisData` against an AI `ExaminerLensAnalysisAiOutput`, reporting testing-mode and error-category agreement, numeric difficulty-dimension deltas, and — the part that matters most — **which of the AI's proposed combinations correspond to a real `ConceptRelation` edge (`supportedByGraph`), which don't correspond to anything in the graph at all (`unsupportedByGraph` — an invented relationship), and which real, useful edges the AI never mentioned (`missedByAi`)**.
+
+Run against a deterministic AI-output fixture standing in for a live call (docs/AI_ARCHITECTURE.md — no API key configured in this environment), the comparison found: the AI correctly identified the `Ratio` prerequisite and 3 real combination concepts, but also proposed one relationship (`Time and Work`) that has no supporting edge anywhere in the seeded graph, and missed 3 real, useful combinations (`Discount`, `Population Growth and Decline`, `Algebra`). It made no completeness claim in this run — a second fixture with one deliberately injected confirms the guard catches it when present. **The comparison never modifies the human baseline or the graph** — an AI's proposal being `supportedByGraph` means only that it happens to match an edge that already exists, not that the AI's reasoning is now authoritative (docs/MASTER_PLAN.md Phase 3 §9: "do not assume AI is correct").
 
 ## 3. Question Pattern Families and the Question Universe
 
@@ -81,27 +87,44 @@ Given a family's taxonomy cells and the questions referencing them, `computePatt
 
 **Question DNA** is the mandatory, normalized metadata set on every `Question` row (full field list in [DATABASE.md](DATABASE.md) §Question). Fields that get queried frequently are their own typed columns, not buried in JSON: `noveltyLevel` and `examRelevance` are normalized enums; `testingModes` is a real array column; `trapErrorTaxonomyId` is a foreign key into `ErrorTaxonomy`, not a free-form string (docs/DECISIONS.md D-012, extended in D-013 to Question as well as Autopsy). It is enforced structurally: `validation_state` cannot become `published` while any DNA field is null or `provenance_id` is unset.
 
-`validateQuestionDna()` (in `@ipmat/question-engine`) checks a DNA object's `conceptName`, `subconcepts`, `prerequisites`, and `combinesWithConcepts` all reference real concepts in the supplied graph, and that `patternFamilyName` names a family that actually exists for that concept — this is what makes "Question DNA references valid concepts/patterns" a checkable fact, demonstrated end-to-end by the one worked example in `percentagesQuestionDnaExample.ts` (a Reverse-Percentage, Ratio-combined, `published` question with full provenance).
+`validateQuestionDna()` (in `@ipmat/question-engine`) checks a DNA object's `conceptName`, `subconcepts`, `prerequisites`, and `combinesWithConcepts` all reference real concepts in the supplied graph, and that `patternFamilyName` names a family that actually exists for that concept — this is what makes "Question DNA references valid concepts/patterns" a checkable fact, demonstrated end-to-end by the one hand-authored worked example in `percentagesQuestionDnaExample.ts` (a Reverse-Percentage, Ratio-combined, `published` question with full provenance) and by the one AI-generated candidate in §5b.
 
-**Validation pipeline** (Phase 3, not built yet), in order, for every generated draft:
-1. **Independent re-derivation** — the draft includes the generator's own `ground_truth_derivation`; the system recomputes it deterministically and rejects on mismatch.
-2. **AI-judge pass** — a second, schema-validated call checks syllabus relevance, ambiguity, and whether the difficulty tier claim is honest.
-3. **Duplicate/near-duplicate check** — embedding similarity against already-published questions in the same concept.
-4. **Human review gate** — configurable per difficulty tier.
+## 5a. Question Blueprint
 
-A question that fails step 1 or 2 is `rejected`, not silently discarded — a pattern of rejections at a given taxonomy cell is a signal the Examiner Lens analysis for that cell needs review, not just the generator prompt.
+**A blueprint is NOT a question — it is the specification from which a question may be generated** (Phase 3 §4). `buildBlueprintFromCell()` (`@ipmat/question-engine`) builds one `QuestionBlueprint` deterministically from one existing `PatternTaxonomyCell` + its `QuestionPatternFamily` — **no AI is involved in producing a blueprint**, only in filling one. It carries: concept, pattern family, target skill, difficulty tier and dimensions, expected time, combination concepts, trap, a controlled-vocabulary testing-mode list, a free-text `transformationDescription` (a specific elaboration like "hide the original value, express it only via a ratio to a second quantity" — distinct from the `testingMode` category; see docs/DECISIONS.md D-017), and the required answer format. It has no `body`, `options`, or `correctAnswer` field — those don't exist until generation happens.
+
+## 5b. Question generation pipeline — independent verification, never trust the stated answer
+
+`runGenerationPipeline()` (`@ipmat/question-engine`) is the full chain from one blueprint to one final candidate (docs/AI_ARCHITECTURE.md §6 has the exact call sequence). The critical design point, repeated because it's the one rule this whole pipeline exists to enforce: **"the LLM says the answer is X" is never sufficient.** Two genuinely independent checks exist specifically to catch this:
+
+1. **Deterministic recomputation** (`verifyComputation()`, `@ipmat/validation`) — the candidate's own `groundTruthDerivation.computation` (a plain arithmetic expression) is evaluated by `mathjs`, completely independently of the LLM, and compared to both `expectedAnswer` and `correctAnswer`. Because `computation` is AI-generated (untrusted) text reaching an expression evaluator, it is first checked against a strict arithmetic-only character allowlist before evaluation — defense in depth against mathjs's own property-injection advisories (docs/DECISIONS.md D-018), regardless of whether a given expression would actually have been exploitable.
+2. **Independent re-derivation** (`compareReverification()`) — a SECOND, separate `generateStructured("answer-reverification")` call is given only the question stem (never the first candidate's answer or reasoning) and asked to solve it from scratch. Disagreement between the two independent answers is a rejection, catching cases where the arithmetic is internally consistent but the question doesn't mean what the first model thought it meant.
+
+Only after both independent checks pass does the pipeline run `validateCandidateStructurally()` (blueprint compliance — "the generator must not be allowed to change the blueprint silently"; syllabus compatibility; exactly-one-correct-answer; no completeness claim; provenance present), `checkDuplicateRisk()` (token-overlap similarity against existing question bodies — a deliberately lightweight, deterministic stand-in for real embedding-based dedup, which needs an embedding model and remains explicitly future work; docs/DECISIONS.md D-019), and the AI-judge pass (`interpretJudgeVerdict()`) for ambiguity and contradictory conditions, which genuinely require reading and understanding natural language and cannot be replaced by a deterministic check.
+
+A rejection at any step carries a specific `RejectionCode` + field + message — never a silent discard. A pattern of rejections at a given taxonomy cell is a signal the Examiner Lens analysis or pattern family for that cell needs review, not just the generator prompt.
+
+## 5c. Question lifecycle
+
+```
+draft → generated → validated ─────────────→ published → deprecated
+                  ↘ rejected            ↗
+                    review_required → approved
+```
+
+`computeLifecycleStatus()` (`@ipmat/question-engine`) decides the ONE status a freshly-generated candidate lands in: any failed check → `rejected`; Standard/Advanced tiers that pass everything → `validated` (which can reach `published` directly, matching docs/DECISIONS.md D-008's auto-publish allowance); Hard/Extreme/Novel tiers that pass everything → `review_required` regardless of how clean the results look, reaching `published` only via `approved`. Generated AI questions never automatically become published content (Phase 3 §8).
 
 ## 6. Question Autopsy → Targeted Repair
 
 Covered in detail in [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) §4. The repair step selects follow-up questions **from the Question Universe taxonomy**, filtered to the confirmed `error_taxonomy_id` (see [DATABASE.md](DATABASE.md) §Error Taxonomy) and `target_concept_id`. The evidence behind a confirmed error can be rich (`AttemptEvent` timing, `reasoning_text`), but repair *selection* only ever consumes the confirmed, stable `error_taxonomy_id` — it never re-derives its own judgment from raw evidence.
 
-## 7. What Phase 2 deliberately did not do
+## 7. What Phase 3 deliberately did not do
 
-No AI generation, no question bank beyond one hand-authored demonstration question, no student-facing practice UI, no Validation pipeline (Phase 3), no `ConceptDepth` content beyond Percentages/Ratio. 7 of 8 seeded taxonomy cells for Percentages are honestly `uncovered` — that gap is visible and queryable (via the coverage ladder in §4), not hidden. This matches docs/MASTER_PLAN.md Phase 2's explicit scope: build the intellectual structure correctly before adding AI generation and student UX.
+No massive generation batches, no thousands of questions, no automated publishing, no full generation job/queue, no public generation UI (Phase 3 §12). Exactly one AI-generated candidate was pushed through the full pipeline in the demonstration; the remaining 7 of 8 seeded Percentages taxonomy cells stay honestly `uncovered`. No live AI provider call was made anywhere in this repository's tests or demos — no API key is configured in the implementing environment; `AnthropicProvider` is implemented and typechecked but unexercised (docs/AI_ARCHITECTURE.md). This matches docs/MASTER_PLAN.md Phase 3's explicit scope: prove the pipeline works reliably before scaling it.
 
 ## 8. Domain-first design, testable without a live AI provider
 
-`@ipmat/concept-graph`, `@ipmat/examiner-lens`, and `@ipmat/question-engine` are plain TypeScript — no Prisma import, no AI provider import (docs/ARCHITECTURE.md §6). Every fixture (the Percentages graph, the Lens analysis, the 4 pattern families, the 8 taxonomy cells, the 1 worked question) is deterministic and hand-authored, so the full structure — relationship typing, combination derivation, coverage computation, DNA validation — is unit-tested (44 tests across the three packages) without calling any model. AI orchestration (when it's built in Phase 3) will sit strictly outside these packages, in `@ipmat/ai` and the jobs layer, and will consume — never redefine — these types.
+`@ipmat/concept-graph`, `@ipmat/examiner-lens`, `@ipmat/question-engine`, and `@ipmat/validation` are plain TypeScript — no Prisma import (docs/ARCHITECTURE.md §6). `@ipmat/ai` has no dependency on any of them (docs/DECISIONS.md D-017) — the dependency direction is domain → ai, never the reverse. Every fixture (the Percentages graph, the human Lens analysis, an AI-Lens-output fixture, the 4 pattern families, the 8 taxonomy cells, the 1 hand-authored worked question, the generation-pipeline candidate fixtures covering every rejection path) is deterministic, so the full structure — relationship typing, combination derivation, coverage computation, DNA validation, independent verification, quality validation, and the generation pipeline's control flow — is unit-tested (92 tests across 7 packages) without ever calling a live model. `FixtureProvider` (`@ipmat/ai`) is what makes this possible: it implements the exact same `AiProvider` interface `AnthropicProvider` does, so pipeline code is identical regardless of which one is injected.
 
 ## 9. How this generalizes beyond Percentages (without building for it yet)
 

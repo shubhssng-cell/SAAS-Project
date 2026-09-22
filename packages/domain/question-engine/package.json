@@ -8,11 +8,16 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
-    "demo:percentages": "tsx demo/printPercentagesDemo.ts"
+    "demo:percentages": "tsx demo/printPercentagesDemo.ts",
+    "demo:generation": "tsx demo/printGenerationDemo.ts",
+    "demo:rejection": "tsx demo/printRejectionDemo.ts",
+    "demo:lens-comparison": "tsx demo/printLensComparisonDemo.ts"
   },
   "dependencies": {
+    "@ipmat/ai": "*",
     "@ipmat/concept-graph": "*",
-    "@ipmat/examiner-lens": "*"
+    "@ipmat/examiner-lens": "*",
+    "@ipmat/validation": "*"
   },
   "devDependencies": {
     "tsx": "^4.19.1"

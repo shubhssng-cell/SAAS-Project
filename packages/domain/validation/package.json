@@ -1,0 +1,18 @@
+{
+  "name": "@ipmat/validation",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ipmat/ai": "*",
+    "@ipmat/concept-graph": "*",
+    "@ipmat/examiner-lens": "*",
+    "mathjs": "^15.2.0"
+  }
+}
