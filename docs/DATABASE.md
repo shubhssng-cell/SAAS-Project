@@ -140,15 +140,22 @@ Enrollment         id, student_id, exam_id, enrolled_at
 ```
 These two tables exist from Phase 1 — not because student-facing practice starts then (it doesn't, see [MASTER_PLAN.md](MASTER_PLAN.md) Phase 4), but because `PrepPhaseTemplate`/`CatchUpPlan` need a real `enrolled_at` to compute against, and Phase 1's single seeded internal test user (see [DECISIONS.md](DECISIONS.md) D-004) already implies a minimal `Student` row. `auth_ref` is nullable/placeholder until the real auth decision lands — it never blocks Phase 1's use of this table for calendar-phase testing.
 
-### Attempt & AttemptEvent (schema finalized now, Phase 4 is when rows start getting written)
+### Attempt & AttemptEvent (schema finalized in Phase 1, lifecycle implemented in Phase 4A — [PHASE_4A_REVIEW.md](PHASE_4A_REVIEW.md))
 ```
 Attempt
   id, student_id, question_id, enrollment_id
   retry_of_attempt_id: uuid | null   -- self-referential; a retry is a new Attempt row, not a counter increment,
                                       -- so each retry carries its own real started_at/submitted_at
-  started_at, submitted_at           -- denormalized from AttemptEvent for query convenience; not the source of truth
-  time_spent_seconds                 -- derived (submitted_at - started_at); never written independently of the events
-  chosen_answer, is_correct
+  status: in_progress | submitted | skipped | abandoned   -- the ONE authoritative lifecycle state (docs/DECISIONS.md D-034);
+                                      -- in_progress is the only non-terminal value
+  started_at, submitted_at, finalized_at
+                                      -- submitted_at is set only when status = submitted; finalized_at is set for
+                                      -- ALL three terminal outcomes and is what time_spent_seconds is computed from
+  time_spent_seconds                 -- derived (finalized_at - started_at), server-computed only — a client-supplied
+                                      -- duration is never accepted anywhere in packages/domain/attempt
+  chosen_answer, is_correct          -- both derived: chosen_answer from the recorded answer_selected/answer_changed
+                                      -- event log (never a raw submit-time parameter), is_correct from comparing it to
+                                      -- the authoritative Question.correct_answer (never a client-supplied flag)
   hints_used: int                    -- convenience count; per-hint timing lives in AttemptEvent
   solution_opened_at: timestamp | null
   working_steps: jsonb | null        -- scratch/computation input, where the input mode supports it; nullable, never fabricated
@@ -159,12 +166,21 @@ Attempt
 
 AttemptEvent
   id, attempt_id
-  event_type: question_opened | option_selected | option_changed | hint_requested
-              | solution_opened | working_input_changed | reasoning_submitted | answer_submitted
-  payload: jsonb | null              -- e.g. { from, to } for option_changed; shape is event_type-specific, not a fixed schema
+  event_type: question_opened | answer_selected | answer_changed | hint_opened | solution_opened
+              | question_skipped | working_input_changed | reasoning_submitted | answer_submitted
+              -- renamed from Phase 1's option_selected/option_changed/hint_requested to the canonical
+              -- names above in Phase 4A (docs/DECISIONS.md D-034) — safe because no environment has ever
+              -- applied a migration against a live database. working_input_changed/reasoning_submitted
+              -- remain reserved for Phase 5 (docs/DECISIONS.md D-011); question_skipped/answer_submitted
+              -- are only ever appended by the lifecycle functions themselves, never accepted as raw
+              -- caller input (packages/domain/attempt/src/types.ts — RecordableAttemptEventInput)
+  payload: jsonb | null              -- e.g. { selectedAnswer } for answer_selected/answer_changed/answer_submitted;
+                                      -- shape is event_type-specific, not a fixed schema
   occurred_at
 ```
-This is the event model that makes time a first-class, extensible signal: time-before-first-interaction, time-between-actions, hint timing, time-after-hint, and retry timing are all derivable from `AttemptEvent` rows plus the `retry_of_attempt_id` chain — none of them required a bespoke column, and none of them will the next time a new timing question comes up. `Attempt`'s own timestamp/count fields exist purely so common queries (leaderbords excluded — just "how long did this take") don't need to replay the event log every time.
+This is the event model that makes time a first-class, extensible signal: time-before-first-interaction, time-between-actions, hint timing, time-after-hint, and retry timing are all derivable from `AttemptEvent` rows plus the `retry_of_attempt_id` chain — none of them required a bespoke column, and none of them will the next time a new timing question comes up. `Attempt`'s own timestamp/count fields exist purely so common queries (leaderbords excluded — just "how long did this take") don't need to replay the event log every time. Answer-change history (initial answer, final answer, number of changes, full sequence) is deliberately NOT a stored column either — it's computed on every read from the `AttemptEvent` log (`deriveAnswerChangeHistory()`), the same "derive, don't cache" discipline `MasteryState` and pattern-family coverage already follow (docs/DECISIONS.md D-015).
+
+`packages/domain/attempt` (Phase 4A) is the pure, database-free implementation of this lifecycle — see [PHASE_4A_REVIEW.md](PHASE_4A_REVIEW.md) for the state machine, the exact trust boundaries (what's derived vs. what a client could otherwise forge), and the Autopsy/Mastery evidence contracts a finalized `Attempt` now exposes.
 
 ### Error Taxonomy
 ```

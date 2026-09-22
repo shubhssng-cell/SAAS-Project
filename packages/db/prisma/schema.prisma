@@ -483,14 +483,30 @@ enum ReasoningInputMode {
   voice
 }
 
+// The attempt lifecycle (docs/QUESTION_ENGINE.md / docs/DECISIONS.md D-034):
+// an attempt is `in_progress` from startAttempt() until exactly one terminal
+// transition finalizes it. `submitted` and `skipped` are both reached only
+// through an explicit student action; `abandoned` is reserved for a future
+// session/timeout close-out path (Phase 4A does not build that trigger, only
+// the state it would set — see packages/domain/attempt). All three terminal
+// states are equally final: no code path re-opens a finalized attempt.
+enum AttemptStatus {
+  in_progress
+  submitted
+  skipped
+  abandoned
+}
+
 model Attempt {
   id                 String             @id @default(uuid())
   studentId          String             @map("student_id")
   questionId         String             @map("question_id")
   enrollmentId       String             @map("enrollment_id")
   retryOfAttemptId   String?            @map("retry_of_attempt_id")
+  status             AttemptStatus      @default(in_progress)
   startedAt          DateTime           @map("started_at")
   submittedAt        DateTime?          @map("submitted_at")
+  finalizedAt        DateTime?          @map("finalized_at")
   timeSpentSeconds   Int?               @map("time_spent_seconds")
   chosenAnswer       String?            @map("chosen_answer")
   isCorrect          Boolean?           @map("is_correct")
@@ -514,15 +530,28 @@ model Attempt {
   @@index([questionId])
   @@index([enrollmentId])
   @@index([retryOfAttemptId])
+  @@index([status])
   @@map("attempts")
 }
 
+// Canonical observable-behavior vocabulary (docs/DECISIONS.md D-034,
+// Phase 4A). Renamed from Phase 1's `option_selected`/`option_changed`/
+// `hint_requested` to `answer_selected`/`answer_changed`/`hint_opened` to
+// match the canonical names used across the domain layer and docs — safe
+// because no environment has ever applied a migration against a live
+// database (see docs/MASTER_PLAN.md "Current state"), so this is a rename,
+// not a backward-incompatible data migration. `working_input_changed` and
+// `reasoning_submitted` are unchanged and remain reserved for Phase 5
+// (docs/DECISIONS.md D-011) — Phase 4A's domain logic does not read or
+// write them. Every value here names an OBSERVABLE ACTION, never an
+// inferred mental state — see packages/domain/attempt/src/types.ts.
 enum AttemptEventType {
   question_opened
-  option_selected
-  option_changed
-  hint_requested
+  answer_selected
+  answer_changed
+  hint_opened
   solution_opened
+  question_skipped
   working_input_changed
   reasoning_submitted
   answer_submitted
