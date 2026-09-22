@@ -4,6 +4,8 @@
 
 **Headline result:** every signal, contract, and boundary named in the phase brief is implemented, deterministic, and tested — including all 4 explicit regression tests. 253 tests pass (up from 192; +61 new), typecheck/lint/build are clean across all 9 workspaces (a new one, `@ipmat/autopsy`, added this phase).
 
+**Update (Phase 5B):** the HYPOTHESIS and CONFIRMED DIAGNOSIS layers this document describes as type-only/unimplemented (§9, §11, the `AutopsyHypothesis` type, `RepairPlan`) are now real — see [PHASE_5B_REVIEW.md](PHASE_5B_REVIEW.md) and docs/DECISIONS.md D-038 through D-042. The rest of this document is left exactly as originally written, as the historical record of what Phase 5A itself did — every claim below about what was and wasn't built is accurate as of the end of Phase 5A, not as of today.
+
 ---
 
 ## 1. Implementation summary

@@ -4,3 +4,7 @@ export * from "./historicalSignals.js";
 export * from "./errorEvidence.js";
 export * from "./autopsyOutput.js";
 export * from "./repairContext.js";
+export * from "./hypothesisPrompts.js";
+export * from "./hypothesis.js";
+export * from "./repairPlan.js";
+export * from "./persistence.js";

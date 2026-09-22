@@ -1,0 +1,29 @@
+-- Phase 5B: Hypothesis + Confirmation + Mastery + Targeted Repair
+-- (docs/MASTER_PLAN.md, docs/DECISIONS.md). Generated via
+-- `prisma migrate diff --from-schema-datamodel <Phase 5A schema snapshot
+-- from git> --to-schema-datamodel prisma/schema.prisma --script`, the
+-- same no-live/shadow-database approach used for 0002/0003 — no
+-- environment has ever applied a migration against a live database (see
+-- docs/MASTER_PLAN.md "Current state"), so this is safe to apply to a
+-- fresh database or directly after 0003.
+--
+-- This is the ONLY schema change Phase 5B required. The `autopsies` and
+-- `repair_plans` tables (Phase 1) needed no migration at all: the existing
+-- `confirmed: Boolean?` + `student_correction_text: String?` pair on
+-- `autopsies` already jointly encodes all 4 confirmation states
+-- @ipmat/autopsy's HypothesisConfirmationStatus needs (awaiting/confirmed/
+-- rejected/corrected) — see packages/domain/autopsy/src/persistence.ts.
+--
+-- `mastery_states.component_detail` holds the rich, never-discarded
+-- breakdown @ipmat/mastery computes alongside the 5 existing scalar
+-- columns (accuracy/speed_ratio/novelty_handling/pressure_performance/
+-- pattern_coverage, all UNCHANGED) — total/correct/incorrect counts,
+-- speed statistics, accuracy stability, difficulty/novelty/pressure
+-- breakdowns, error-recurrence streaks, and coverage detail. NOT NULL
+-- with no default: because no database has ever held a MasteryState row
+-- (mastery computation was never implemented before this phase), no
+-- backfill is needed — this would need one if any target database
+-- already had rows in this table.
+
+-- AlterTable
+ALTER TABLE "mastery_states" ADD COLUMN     "component_detail" JSONB NOT NULL;

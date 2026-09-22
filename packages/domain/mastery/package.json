@@ -1,5 +1,5 @@
 {
-  "name": "@ipmat/autopsy",
+  "name": "@ipmat/mastery",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,8 +12,7 @@
   "dependencies": {
     "@ipmat/ai": "*",
     "@ipmat/attempt": "*",
-    "@ipmat/concept-graph": "*",
-    "@ipmat/examiner-lens": "*",
+    "@ipmat/autopsy": "*",
     "@ipmat/question-engine": "*"
   }
 }

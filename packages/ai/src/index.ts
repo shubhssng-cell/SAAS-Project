@@ -8,3 +8,4 @@ export * from "./schemas/examinerLensAnalysis.js";
 export * from "./schemas/questionCandidate.js";
 export * from "./schemas/answerReverification.js";
 export * from "./schemas/validationJudge.js";
+export * from "./schemas/autopsyHypothesis.js";

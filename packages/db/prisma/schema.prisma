@@ -656,6 +656,14 @@ model RepairPlan {
 // Mastery — derived only, never input (docs/DATABASE.md "Mastery" rule)
 // ---------------------------------------------------------------------
 
+// componentDetail (Phase 5B, docs/DECISIONS.md D-04x) holds the rich,
+// never-discarded breakdown @ipmat/mastery's MasteryComponentDetail
+// computes alongside the 5 scalar columns below — total/correct/incorrect
+// counts, speed statistics, accuracy stability (stddev, not just mean),
+// difficulty/novelty/pressure breakdowns, error-recurrence streaks, and
+// coverage detail. The 5 scalar columns are kept exactly as they were
+// (docs/MASTER_PLAN.md Phase 5B: "use existing fields where possible") —
+// this is an additive migration, not a redesign.
 model MasteryState {
   id                  String   @id @default(uuid())
   studentId           String   @map("student_id")
@@ -665,6 +673,7 @@ model MasteryState {
   noveltyHandling     Float    @map("novelty_handling")
   pressurePerformance Float    @map("pressure_performance")
   patternCoverage     Float    @map("pattern_coverage")
+  componentDetail     Json     @map("component_detail")
   computedAt          DateTime @map("computed_at")
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
