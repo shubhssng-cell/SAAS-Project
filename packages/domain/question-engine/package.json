@@ -12,6 +12,7 @@
     "demo:generation": "tsx demo/printGenerationDemo.ts",
     "demo:rejection": "tsx demo/printRejectionDemo.ts",
     "demo:lens-comparison": "tsx demo/printLensComparisonDemo.ts",
+    "demo:coverage-expansion": "tsx demo/printCoverageExpansionDemo.ts",
     "smoke:anthropic": "tsx demo/runRealAnthropicSmokeTest.ts"
   },
   "dependencies": {

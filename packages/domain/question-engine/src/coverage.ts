@@ -3,8 +3,10 @@ import type {
   PatternFamilyCoverage,
   PatternTaxonomyCellData,
   QuestionPatternFamilyData,
+  QuestionRefForCellCoverage,
   QuestionRefForCoverage,
-  QuestionUniverseSnapshot
+  QuestionUniverseSnapshot,
+  TaxonomyCellCoverage
 } from "./types.js";
 
 /**
@@ -40,6 +42,60 @@ export function computePatternFamilyReadiness(
     validatedQuestionCount: validated.length,
     publishedQuestionCount: published.length
   };
+}
+
+function sameConceptSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((item) => setB.has(item));
+}
+
+function cellMatches(cell: PatternTaxonomyCellData, ref: QuestionRefForCellCoverage): boolean {
+  return (
+    cell.patternFamilyName === ref.patternFamilyName &&
+    cell.testingMode === ref.testingMode &&
+    cell.trapErrorTaxonomyCode === ref.trapErrorTaxonomyCode &&
+    cell.difficultyTier === ref.difficultyTier &&
+    sameConceptSet(cell.combination, ref.combination)
+  );
+}
+
+/**
+ * The per-cell counterpart to `computePatternFamilyReadiness()` (Phase
+ * 3.5) — narrows "does this pattern family have questions" down to "does
+ * this ONE taxonomy cell." Matches a question to a cell by the SAME
+ * natural key the real schema's unique constraint uses
+ * (`[conceptId, patternFamilyId, testingMode, trapErrorTaxonomyId,
+ * difficultyTier]`) rather than an opaque id, since `PatternTaxonomyCellData`
+ * fixtures (like real `Question` rows before this phase) never needed one.
+ * Never stored — recomputed fresh from whatever `questions` the caller
+ * currently has, the same "derived, never input" discipline as every
+ * other coverage function in this file.
+ */
+export function computeTaxonomyCellCoverage(
+  cells: PatternTaxonomyCellData[],
+  questions: QuestionRefForCellCoverage[]
+): TaxonomyCellCoverage[] {
+  return cells.map((cell) => {
+    const matches = questions.filter((question) => cellMatches(cell, question));
+    const published = matches.filter((question) => question.validationState === "published");
+
+    let status: TaxonomyCellCoverage["status"] = "uncovered";
+    if (published.length > 0) status = "covered";
+    else if (matches.length > 0) status = "underrepresented";
+
+    return {
+      patternFamilyName: cell.patternFamilyName,
+      conceptName: cell.conceptName,
+      combination: cell.combination,
+      testingMode: cell.testingMode,
+      trapErrorTaxonomyCode: cell.trapErrorTaxonomyCode,
+      difficultyTier: cell.difficultyTier,
+      existingQuestionCount: matches.length,
+      publishedQuestionCount: published.length,
+      status
+    };
+  });
 }
 
 /**

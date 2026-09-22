@@ -86,6 +86,46 @@ export interface QuestionRefForCoverage {
   validationState: ValidationState;
 }
 
+/**
+ * `QuestionRefForCoverage` widened with the remaining fields of a
+ * `PatternTaxonomyCellData`'s natural key (Phase 3.5) — a real `Question`
+ * row already carries all of these (`combines_with_concept_ids`,
+ * `testing_modes`, `trap_error_taxonomy_id`, `difficulty_tier`), so this is
+ * a restatement of existing Question DNA fields for cell-level matching,
+ * never a parallel identity scheme. `combination` is compared as a SET
+ * (order-independent), matching how `validateBlueprintCompliance()`
+ * already compares `combinesWithConcepts` against a blueprint.
+ */
+export interface QuestionRefForCellCoverage extends QuestionRefForCoverage {
+  combination: string[];
+  testingMode: TestingMode | null;
+  trapErrorTaxonomyCode: string | null;
+  difficultyTier: DifficultyTier;
+}
+
+/**
+ * Per-cell coverage is a strictly finer-grained view of the SAME ladder
+ * `PatternFamilyCoverage`/`CoverageStage` already established, scoped down
+ * from "does this family have questions" to "does this ONE taxonomy cell."
+ * `"covered"` requires at least one PUBLISHED question for that exact
+ * cell — a cell with only `validated`/`review_required` candidates is
+ * `"underrepresented"`, not `"covered"`, so this can never overstate real
+ * publication-ready coverage (docs/DECISIONS.md D-007).
+ */
+export type TaxonomyCellCoverageStatus = "uncovered" | "underrepresented" | "covered";
+
+export interface TaxonomyCellCoverage {
+  patternFamilyName: string;
+  conceptName: string;
+  combination: string[];
+  testingMode: TestingMode | null;
+  trapErrorTaxonomyCode: string | null;
+  difficultyTier: DifficultyTier;
+  existingQuestionCount: number;
+  publishedQuestionCount: number;
+  status: TaxonomyCellCoverageStatus;
+}
+
 export interface PatternFamilyCoverage {
   patternFamilyName: string;
   stage: CoverageStage;
