@@ -4,11 +4,12 @@
   "version": "0.0.0",
   "workspaces": [
     "packages/*",
-    "packages/domain/*"
+    "packages/domain/*",
+    "apps/*"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint . --ext .ts",
+    "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
     "db:generate": "npm run generate --workspace @ipmat/db",
