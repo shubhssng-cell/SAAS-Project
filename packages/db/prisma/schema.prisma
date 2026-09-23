@@ -462,10 +462,11 @@ model Enrollment {
   examId     String   @map("exam_id")
   enrolledAt DateTime @map("enrolled_at")
 
-  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
-  attempts     Attempt[]
-  catchUpPlans CatchUpPlan[]
+  student          Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam             Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  attempts         Attempt[]
+  catchUpPlans     CatchUpPlan[]
+  practiceSessions PracticeSession[]
 
   @@unique([studentId, examId])
   @@index([examId])
@@ -516,22 +517,105 @@ model Attempt {
   reasoningText      String?            @map("reasoning_text")
   reasoningInputMode ReasoningInputMode @default(text) @map("reasoning_input_mode")
   reasoningAudioRef  String?            @map("reasoning_audio_ref")
-  createdAt          DateTime           @default(now()) @map("created_at")
+  // Grouped-practice membership (docs/DECISIONS.md D-060) -- nullable FK
+  // pair, the direct precedent being retryOfAttemptId's own nullable
+  // self-FK above. blockSequenceNumber is server-assigned (never caller-
+  // supplied), unique per block. A hand-written CHECK constraint
+  // (practice_block_id IS NULL) = (block_sequence_number IS NULL), added
+  // by hand in the migration SQL (Prisma's DSL has no CHECK syntax, same
+  // as questions_published_requires_provenance in 0001_init), backstops
+  // what @ipmat/attempt's AttemptState.blockMembership already makes
+  // structurally unrepresentable as a partial pair at the type level.
+  // Deliberately NO practiceSessionId column here -- session is derived
+  // via practiceBlockId -> PracticeBlock.practiceSessionId, never a second,
+  // independently-mutable path to the same fact.
+  practiceBlockId     String?        @map("practice_block_id")
+  blockSequenceNumber Int?           @map("block_sequence_number")
+  createdAt           DateTime       @default(now()) @map("created_at")
 
-  student    Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  question   Question       @relation(fields: [questionId], references: [id])
-  enrollment Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  retryOf    Attempt?       @relation("AttemptRetry", fields: [retryOfAttemptId], references: [id])
-  retries    Attempt[]      @relation("AttemptRetry")
-  events     AttemptEvent[]
-  autopsy    Autopsy?
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  question      Question       @relation(fields: [questionId], references: [id])
+  enrollment    Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  retryOf       Attempt?       @relation("AttemptRetry", fields: [retryOfAttemptId], references: [id])
+  retries       Attempt[]      @relation("AttemptRetry")
+  practiceBlock PracticeBlock? @relation(fields: [practiceBlockId], references: [id], onDelete: Restrict)
+  events        AttemptEvent[]
+  autopsy       Autopsy?
 
+  @@unique([practiceBlockId, blockSequenceNumber])
   @@index([studentId])
   @@index([questionId])
   @@index([enrollmentId])
   @@index([retryOfAttemptId])
   @@index([status])
+  @@index([practiceBlockId])
   @@map("attempts")
+}
+
+// ---------------------------------------------------------------------
+// Practice Session / Block -- grouped-practice foundation (docs/DECISIONS.md
+// D-060). Enrollment -> PracticeSession -> PracticeBlock -> Attempt, held
+// alongside the pre-existing, unchanged Enrollment -> Attempt path (ordinary,
+// ungrouped practice remains valid). This is schema only, mirroring the pure
+// lifecycle rules in @ipmat/practice-session and @ipmat/practice-block --
+// see those packages for what each field/transition actually means.
+// ---------------------------------------------------------------------
+
+// `active` is the only non-terminal value; `completed`/`abandoned` are both
+// equally final -- the same discipline as AttemptStatus (D-035).
+enum PracticeSessionStatus {
+  active
+  completed
+  abandoned
+}
+
+enum PracticeBlockStatus {
+  active
+  completed
+  abandoned
+}
+
+model PracticeSession {
+  id                       String                @id @default(uuid())
+  enrollmentId             String                @map("enrollment_id")
+  status                   PracticeSessionStatus @default(active)
+  startedAt                DateTime              @map("started_at")
+  endedAt                  DateTime?             @map("ended_at")
+  sessionTimeBudgetSeconds Int?                  @map("session_time_budget_seconds")
+  createdAt                DateTime              @default(now()) @map("created_at")
+
+  // Restrict, not Cascade (docs/DECISIONS.md D-060, Round 4): no
+  // application code ever deletes a PracticeSession, so this never fires
+  // in practice, but it deliberately does not depend on any assumption
+  // about cascade-ordering interaction with Attempt's own
+  // student/enrollment Cascade -- each of the three new FK relationships
+  // here is independently trivial.
+  enrollment Enrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  blocks     PracticeBlock[]
+
+  @@index([enrollmentId])
+  @@index([status])
+  @@map("practice_sessions")
+}
+
+model PracticeBlock {
+  id                     String              @id @default(uuid())
+  practiceSessionId      String              @map("practice_session_id")
+  sequenceNumber         Int                 @map("sequence_number")
+  status                 PracticeBlockStatus @default(active)
+  startedAt              DateTime            @map("started_at")
+  endedAt                DateTime?           @map("ended_at")
+  targetQuestionCount    Int?                @map("target_question_count")
+  blockTimeBudgetSeconds Int?                @map("block_time_budget_seconds")
+  createdAt              DateTime            @default(now()) @map("created_at")
+
+  practiceSession PracticeSession @relation(fields: [practiceSessionId], references: [id], onDelete: Restrict)
+  attempts        Attempt[]
+
+  @@unique([practiceSessionId, sequenceNumber])
+  @@index([practiceSessionId])
+  @@index([status])
+  @@map("practice_blocks")
 }
 
 // Canonical observable-behavior vocabulary (docs/DECISIONS.md D-034,

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AttemptLifecycleError, finalizeAttempt, recordAttemptEvent, skipAttempt, startAttempt, submitAttempt } from "@ipmat/attempt";
-import type { AttemptRepository, CanonicalQuestion, QuestionReader } from "@ipmat/db";
+import type { AttemptRepository, CanonicalQuestion, PracticeBlockReader, QuestionReader } from "@ipmat/db";
 import { PracticeLoopError, type AttemptOwnershipClaim, type AttemptQuestionContext, type AttemptState, type PracticeSubmitResult, type RecordableAttemptEventInput } from "./types.js";
 
 /**
@@ -37,7 +37,9 @@ import { PracticeLoopError, type AttemptOwnershipClaim, type AttemptQuestionCont
 export class PracticeLoopService {
   constructor(
     private readonly attemptRepository: AttemptRepository,
-    private readonly questionReader: QuestionReader
+    private readonly questionReader: QuestionReader,
+    /** Optional (docs/DECISIONS.md D-060) — only required by callers that ever pass `practiceBlockId` to `startAttempt()`. Omitted entirely by every pre-D-060 caller, which never touches grouped practice. */
+    private readonly practiceBlockReader?: PracticeBlockReader
   ) {}
 
   /**
@@ -59,6 +61,20 @@ export class PracticeLoopService {
    * pure-function testability, and this is the first layer above it where
    * generating a fresh one is genuinely this layer's own responsibility,
    * not something to push onto a not-yet-built HTTP layer.
+   *
+   * `practiceBlockId` (docs/DECISIONS.md D-060) is optional — omitting it
+   * is ordinary, ungrouped practice, entirely unchanged. When supplied,
+   * this method performs the FAST, non-transactional ownership pre-check
+   * (mirroring the question lookup just above it): the block must exist,
+   * be `active`, AND (security-fix addendum) resolve — via the injected
+   * `PracticeBlockReader`'s own `PracticeBlock -> PracticeSession ->
+   * Enrollment` join — to the SAME `enrollmentId`/`studentId` this request
+   * itself claims. This is explicitly NOT the authoritative check —
+   * `@ipmat/attempt`'s `startAttempt()` itself stays entirely block-unaware
+   * (no parameter here reaches it), and the real ownership re-verification
+   * + allocation happens FROM SCRATCH inside `AttemptRepository.save()`'s
+   * own transaction, one call below — this pre-check exists only to fail
+   * fast with a clear error; it is never the last line of defense.
    */
   async startAttempt(input: {
     studentId: string;
@@ -67,6 +83,7 @@ export class PracticeLoopService {
     retryOfAttemptId?: string | null;
     now: string;
     id?: string;
+    practiceBlockId?: string | null;
   }): Promise<AttemptState> {
     const question = await this.questionReader.findById(input.questionId);
     if (!question) {
@@ -79,6 +96,28 @@ export class PracticeLoopService {
       );
     }
 
+    if (input.practiceBlockId) {
+      if (!this.practiceBlockReader) {
+        throw new Error("PracticeLoopService was constructed without a PracticeBlockReader — cannot start an attempt with a practiceBlockId.");
+      }
+      const block = await this.practiceBlockReader.findById(input.practiceBlockId);
+      if (!block) {
+        throw new PracticeLoopError("practice_block_not_found", `No PracticeBlock found with id "${input.practiceBlockId}".`);
+      }
+      if (block.status !== "active") {
+        throw new PracticeLoopError(
+          "practice_block_not_active",
+          `Cannot start an attempt in PracticeBlock "${input.practiceBlockId}": it is "${block.status}", not "active".`
+        );
+      }
+      if (block.enrollmentId !== input.enrollmentId || block.studentId !== input.studentId) {
+        throw new PracticeLoopError(
+          "practice_block_ownership_mismatch",
+          `Cannot start an attempt in PracticeBlock "${input.practiceBlockId}": it belongs to enrollmentId="${block.enrollmentId}"/studentId="${block.studentId}", not enrollmentId="${input.enrollmentId}"/studentId="${input.studentId}".`
+        );
+      }
+    }
+
     const attempt = startAttempt({
       id: input.id ?? randomUUID(),
       studentId: input.studentId,
@@ -88,7 +127,7 @@ export class PracticeLoopService {
       now: input.now
     });
 
-    return this.attemptRepository.save(attempt);
+    return this.attemptRepository.save(attempt, input.practiceBlockId ? { practiceBlockId: input.practiceBlockId } : undefined);
   }
 
   /**

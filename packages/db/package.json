@@ -24,6 +24,8 @@
     "@ipmat/examiner-lens": "*",
     "@ipmat/mastery": "*",
     "@ipmat/prep-phase": "*",
+    "@ipmat/practice-block": "*",
+    "@ipmat/practice-session": "*",
     "@ipmat/question-engine": "*",
     "@prisma/client": "^5.20.0"
   },

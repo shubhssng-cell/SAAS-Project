@@ -124,7 +124,8 @@ export function startAttempt(input: {
     hintsUsed: 0,
     solutionOpenedAt: null,
     timeSpentSeconds: null,
-    events: []
+    events: [],
+    blockMembership: null
   };
 }
 

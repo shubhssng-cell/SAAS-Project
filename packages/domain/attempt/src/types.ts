@@ -98,6 +98,22 @@ export interface AttemptState {
   /** `finalizedAt - startedAt` in whole seconds, computed by the finalization step — never accepted from a caller as a duration. Null while `in_progress`. */
   timeSpentSeconds: number | null;
   events: AttemptEventRecord[];
+  /**
+   * Grouped-practice membership (docs/DECISIONS.md D-060) — a single
+   * nullable object, not two independently-nullable fields, so the illegal
+   * partial-pair state (a block id with no sequence number, or vice versa)
+   * is structurally unrepresentable at the type level, the same exclusion
+   * technique `TrainingSystemSelectionOutcome` already uses. `startAttempt()`
+   * always sets this to `null` — this package stays entirely block-unaware;
+   * the ONLY place a non-null value is ever constructed is
+   * `AttemptRepository.save()`'s optional `blockAllocationRequest`
+   * parameter (`@ipmat/db`), inside its existing transaction, after
+   * allocating a real `blockSequenceNumber`. Every lifecycle function here
+   * (`recordAttemptEvent`, `submitAttempt`, `skipAttempt`, `finalizeAttempt`)
+   * preserves whatever value it was given unchanged via object spread —
+   * none of them read or branch on it.
+   */
+  blockMembership: { practiceBlockId: string; blockSequenceNumber: number } | null;
 }
 
 /**

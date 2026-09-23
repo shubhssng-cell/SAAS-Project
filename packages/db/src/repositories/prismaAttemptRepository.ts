@@ -1,9 +1,16 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { getEventTimeline, type AttemptEventRecord, type AttemptState } from "@ipmat/attempt";
+import { PracticeBlockLifecycleError } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
 import { asJson } from "./json.js";
+import { runSerializableTransaction } from "./serializable.js";
 import type { AttemptRepository } from "./types.js";
-import { assertAttemptNotRegressingFromFinalized, assertAttemptOwnershipUnchanged, assertAttemptStateInternallyConsistent } from "./validation.js";
+import {
+  assertAttemptBlockMembershipUnchanged,
+  assertAttemptNotRegressingFromFinalized,
+  assertAttemptOwnershipUnchanged,
+  assertAttemptStateInternallyConsistent
+} from "./validation.js";
 
 /**
  * The Phase 4B-1 persistence boundary for `@ipmat/attempt`. `save()`
@@ -34,11 +41,23 @@ import { assertAttemptNotRegressingFromFinalized, assertAttemptOwnershipUnchange
  *   code in this codebase) it has never been exercised against a live
  *   database to confirm it empirically; it is correct by construction
  *   against documented Postgres/Prisma transaction semantics.
+ *
+ * `blockAllocationRequest` (docs/DECISIONS.md D-060) extends this SAME
+ * transaction — never a second, separate one — with the ONLY code path in
+ * the system that ever writes a non-null `practice_block_id`/
+ * `block_sequence_number` pair: it re-verifies the referenced
+ * `PracticeBlock` is `active`, allocates the next `blockSequenceNumber` as
+ * `(current max for that block) + 1`, and verifies a retry inherits its
+ * retried attempt's `practiceBlockId` exactly — all read-then-write inside
+ * the same `Serializable` transaction, so a concurrent allocation for the
+ * same block is a genuine conflict Postgres detects (mapped to
+ * `SerializationFailureError` by `runSerializableTransaction()`), not a
+ * silently-duplicated sequence number.
  */
 export class PrismaAttemptRepository implements AttemptRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async save(state: AttemptState): Promise<AttemptState> {
+  async save(state: AttemptState, blockAllocationRequest?: { practiceBlockId: string }): Promise<AttemptState> {
     assertAttemptStateInternallyConsistent(state);
 
     // Computed once, OUTSIDE the transaction — pure, deterministic, and
@@ -46,89 +65,100 @@ export class PrismaAttemptRepository implements AttemptRepository {
     // transaction could race against.
     const timeline = getEventTimeline(state);
 
-    await this.prisma.$transaction(
-      async (tx) => {
-        const existing = await tx.attempt.findUnique({ where: { id: state.id } });
+    await runSerializableTransaction(this.prisma, async (tx) => {
+      const existing = await tx.attempt.findUnique({ where: { id: state.id } });
+      let resolvedBlockMembership = state.blockMembership;
 
-        if (existing) {
-          assertAttemptOwnershipUnchanged(
-            {
-              studentId: existing.studentId,
-              questionId: existing.questionId,
-              enrollmentId: existing.enrollmentId,
-              retryOfAttemptId: existing.retryOfAttemptId
-            },
-            state
+      if (existing) {
+        if (blockAllocationRequest) {
+          throw new PersistenceError(
+            "invalid_record",
+            `Cannot allocate a PracticeBlock for Attempt "${state.id}": it already exists — block membership is immutable once an attempt is created.`
           );
-          assertAttemptNotRegressingFromFinalized(existing.status, state.status);
-        } else {
-          await this.assertReferencesExist(tx, state);
         }
-
-        await tx.attempt.upsert({
-          where: { id: state.id },
-          create: {
-            id: state.id,
-            studentId: state.studentId,
-            questionId: state.questionId,
-            enrollmentId: state.enrollmentId,
-            retryOfAttemptId: state.retryOfAttemptId,
-            status: state.status,
-            startedAt: new Date(state.startedAt),
-            submittedAt: state.submittedAt ? new Date(state.submittedAt) : null,
-            finalizedAt: state.finalizedAt ? new Date(state.finalizedAt) : null,
-            timeSpentSeconds: state.timeSpentSeconds,
-            chosenAnswer: state.chosenAnswer,
-            isCorrect: state.isCorrect,
-            hintsUsed: state.hintsUsed,
-            solutionOpenedAt: state.solutionOpenedAt ? new Date(state.solutionOpenedAt) : null
+        assertAttemptOwnershipUnchanged(
+          {
+            studentId: existing.studentId,
+            questionId: existing.questionId,
+            enrollmentId: existing.enrollmentId,
+            retryOfAttemptId: existing.retryOfAttemptId
           },
-          // retryOfAttemptId is deliberately NOT included here — it is
-          // immutable once a row exists (validated above by
-          // assertAttemptOwnershipUnchanged, which now checks it
-          // alongside studentId/questionId/enrollmentId), so an update
-          // never needs to, and never does, touch it.
-          update: {
-            status: state.status,
-            submittedAt: state.submittedAt ? new Date(state.submittedAt) : null,
-            finalizedAt: state.finalizedAt ? new Date(state.finalizedAt) : null,
-            timeSpentSeconds: state.timeSpentSeconds,
-            chosenAnswer: state.chosenAnswer,
-            isCorrect: state.isCorrect,
-            hintsUsed: state.hintsUsed,
-            solutionOpenedAt: state.solutionOpenedAt ? new Date(state.solutionOpenedAt) : null
+          state
+        );
+        assertAttemptNotRegressingFromFinalized(existing.status, state.status);
+        assertAttemptBlockMembershipUnchanged(
+          { practiceBlockId: existing.practiceBlockId, blockSequenceNumber: existing.blockSequenceNumber },
+          state
+        );
+      } else {
+        await this.assertReferencesExist(tx, state);
+        resolvedBlockMembership = await this.resolveBlockMembershipForNewAttempt(tx, state, blockAllocationRequest);
+      }
+
+      await tx.attempt.upsert({
+        where: { id: state.id },
+        create: {
+          id: state.id,
+          studentId: state.studentId,
+          questionId: state.questionId,
+          enrollmentId: state.enrollmentId,
+          retryOfAttemptId: state.retryOfAttemptId,
+          status: state.status,
+          startedAt: new Date(state.startedAt),
+          submittedAt: state.submittedAt ? new Date(state.submittedAt) : null,
+          finalizedAt: state.finalizedAt ? new Date(state.finalizedAt) : null,
+          timeSpentSeconds: state.timeSpentSeconds,
+          chosenAnswer: state.chosenAnswer,
+          isCorrect: state.isCorrect,
+          hintsUsed: state.hintsUsed,
+          solutionOpenedAt: state.solutionOpenedAt ? new Date(state.solutionOpenedAt) : null,
+          practiceBlockId: resolvedBlockMembership?.practiceBlockId ?? null,
+          blockSequenceNumber: resolvedBlockMembership?.blockSequenceNumber ?? null
+        },
+        // retryOfAttemptId/practiceBlockId/blockSequenceNumber are
+        // deliberately NOT included here — all three are immutable once a
+        // row exists (validated above by assertAttemptOwnershipUnchanged/
+        // assertAttemptBlockMembershipUnchanged), so an update never needs
+        // to, and never does, touch them.
+        update: {
+          status: state.status,
+          submittedAt: state.submittedAt ? new Date(state.submittedAt) : null,
+          finalizedAt: state.finalizedAt ? new Date(state.finalizedAt) : null,
+          timeSpentSeconds: state.timeSpentSeconds,
+          chosenAnswer: state.chosenAnswer,
+          isCorrect: state.isCorrect,
+          hintsUsed: state.hintsUsed,
+          solutionOpenedAt: state.solutionOpenedAt ? new Date(state.solutionOpenedAt) : null
+        }
+      });
+
+      await tx.attemptEvent.deleteMany({ where: { attemptId: state.id } });
+
+      // Written with an explicit, write-order-preserving id
+      // (`${attemptId}:${zero-padded index}`) instead of letting Prisma's
+      // `@default(uuid())` assign a random one, specifically so
+      // findById()'s read-back ordering has a fully deterministic
+      // secondary sort key for events that share the EXACT same
+      // `occurredAt` (the domain layer permits equal-but-never-decreasing
+      // timestamps — see @ipmat/attempt's assertTimestampIsCoherent()).
+      // `ORDER BY occurred_at ASC` alone is not guaranteed to preserve
+      // insertion order for tied values; this closes that gap without a
+      // schema change, rather than silently relying on unspecified
+      // database tie-break behavior.
+      for (let i = 0; i < timeline.length; i++) {
+        const event = timeline[i];
+        if (!event) continue;
+        await tx.attemptEvent.create({
+          data: {
+            id: `${state.id}:${String(i).padStart(6, "0")}`,
+            attemptId: state.id,
+            eventType: event.type,
+            occurredAt: new Date(event.occurredAt),
+            payload: event.payload === null ? Prisma.DbNull : asJson(event.payload)
           }
         });
-
-        await tx.attemptEvent.deleteMany({ where: { attemptId: state.id } });
-
-        // Written with an explicit, write-order-preserving id
-        // (`${attemptId}:${zero-padded index}`) instead of letting Prisma's
-        // `@default(uuid())` assign a random one, specifically so
-        // findById()'s read-back ordering has a fully deterministic
-        // secondary sort key for events that share the EXACT same
-        // `occurredAt` (the domain layer permits equal-but-never-decreasing
-        // timestamps — see @ipmat/attempt's assertTimestampIsCoherent()).
-        // `ORDER BY occurred_at ASC` alone is not guaranteed to preserve
-        // insertion order for tied values; this closes that gap without a
-        // schema change, rather than silently relying on unspecified
-        // database tie-break behavior.
-        for (let i = 0; i < timeline.length; i++) {
-          const event = timeline[i];
-          if (!event) continue;
-          await tx.attemptEvent.create({
-            data: {
-              id: `${state.id}:${String(i).padStart(6, "0")}`,
-              attemptId: state.id,
-              eventType: event.type,
-              occurredAt: new Date(event.occurredAt),
-              payload: event.payload === null ? Prisma.DbNull : asJson(event.payload)
-            }
-          });
-        }
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+      }
+    });
 
     const saved = await this.findById(state.id);
     if (!saved) {
@@ -162,6 +192,86 @@ export class PrismaAttemptRepository implements AttemptRepository {
       }
     }
   }
+
+  /**
+   * The block-allocation half of D-060's `save()` extension, isolated to
+   * its own method for readability — always called from INSIDE the same
+   * transaction `save()` already opened, for a BRAND-NEW attempt id only
+   * (an existing row is rejected earlier, in `save()` itself).
+   */
+  private async resolveBlockMembershipForNewAttempt(
+    tx: Prisma.TransactionClient,
+    state: AttemptState,
+    blockAllocationRequest: { practiceBlockId: string } | undefined
+  ): Promise<{ practiceBlockId: string; blockSequenceNumber: number } | null> {
+    const retryOf = state.retryOfAttemptId ? await tx.attempt.findUnique({ where: { id: state.retryOfAttemptId } }) : null;
+
+    if (!blockAllocationRequest) {
+      if (state.blockMembership !== null) {
+        throw new PersistenceError(
+          "invalid_record",
+          `Cannot persist Attempt "${state.id}" with a pre-populated blockMembership — it must be allocated via save()'s blockAllocationRequest parameter.`
+        );
+      }
+      if (retryOf && retryOf.practiceBlockId !== null) {
+        throw new PersistenceError(
+          "invalid_record",
+          `Retry attempt "${state.id}" must inherit its retried attempt's practiceBlockId ("${retryOf.practiceBlockId}") — this attempt was saved with none.`
+        );
+      }
+      return null;
+    }
+
+    const block = await tx.practiceBlock.findUnique({ where: { id: blockAllocationRequest.practiceBlockId } });
+    if (!block) {
+      throw new PersistenceError("missing_reference", `No PracticeBlock found with id "${blockAllocationRequest.practiceBlockId}".`);
+    }
+    if (block.status !== "active") {
+      throw new PracticeBlockLifecycleError(
+        "already_finalized",
+        `Cannot allocate Attempt "${state.id}" to PracticeBlock "${block.id}": it is "${block.status}", not "active".`
+      );
+    }
+
+    // AUTHORITATIVE ownership check (security-fix addendum, docs/DECISIONS.md
+    // D-060) — re-derived from scratch via the real chain PracticeBlock ->
+    // PracticeSession -> Enrollment -> Student, inside THIS transaction,
+    // regardless of whether PracticeLoopService's fast PracticeBlockReader
+    // pre-check already ran (an eventual HTTP/API caller could bypass it, or
+    // call save() directly). Never trusts state.studentId/state.enrollmentId
+    // as given — they are cross-checked against the real, resolved chain.
+    const session = await tx.practiceSession.findUnique({ where: { id: block.practiceSessionId } });
+    if (!session) {
+      throw new PersistenceError(
+        "missing_reference",
+        `PracticeBlock "${block.id}" references a nonexistent PracticeSession "${block.practiceSessionId}".`
+      );
+    }
+    const enrollment = await tx.enrollment.findUnique({ where: { id: session.enrollmentId } });
+    if (!enrollment) {
+      throw new PersistenceError(
+        "missing_reference",
+        `PracticeSession "${session.id}" references a nonexistent Enrollment "${session.enrollmentId}".`
+      );
+    }
+    if (enrollment.id !== state.enrollmentId || enrollment.studentId !== state.studentId) {
+      throw new PersistenceError(
+        "ownership_mismatch",
+        `Cannot allocate Attempt "${state.id}" to PracticeBlock "${block.id}": it resolves to enrollmentId="${enrollment.id}"/studentId="${enrollment.studentId}", but this attempt claims enrollmentId="${state.enrollmentId}"/studentId="${state.studentId}".`
+      );
+    }
+
+    if (retryOf && retryOf.practiceBlockId !== block.id) {
+      throw new PersistenceError(
+        "invalid_record",
+        `Retry attempt "${state.id}" must inherit its retried attempt's practiceBlockId ("${retryOf.practiceBlockId ?? "none"}") — got "${block.id}".`
+      );
+    }
+
+    const maxRow = await tx.attempt.aggregate({ where: { practiceBlockId: block.id }, _max: { blockSequenceNumber: true } });
+    const blockSequenceNumber = (maxRow._max.blockSequenceNumber ?? 0) + 1;
+    return { practiceBlockId: block.id, blockSequenceNumber };
+  }
 }
 
 function toAttemptState(row: {
@@ -179,6 +289,8 @@ function toAttemptState(row: {
   isCorrect: boolean | null;
   hintsUsed: number;
   solutionOpenedAt: Date | null;
+  practiceBlockId: string | null;
+  blockSequenceNumber: number | null;
   events: Array<{ eventType: string; occurredAt: Date; payload: unknown }>;
 }): AttemptState {
   const events: AttemptEventRecord[] = row.events.map((event) => ({
@@ -202,6 +314,9 @@ function toAttemptState(row: {
     hintsUsed: row.hintsUsed,
     solutionOpenedAt: row.solutionOpenedAt ? row.solutionOpenedAt.toISOString() : null,
     timeSpentSeconds: row.timeSpentSeconds,
-    events
+    events,
+    blockMembership: row.practiceBlockId !== null && row.blockSequenceNumber !== null
+      ? { practiceBlockId: row.practiceBlockId, blockSequenceNumber: row.blockSequenceNumber }
+      : null
   };
 }

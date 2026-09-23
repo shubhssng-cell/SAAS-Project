@@ -130,6 +130,18 @@ export function assertAttemptStateInternallyConsistent(state: AttemptState): voi
     throw new PersistenceError("invalid_record", `Attempt.hintsUsed must be a non-negative integer, got ${String(state.hintsUsed)}.`);
   }
 
+  if (state.blockMembership !== null) {
+    if (!state.blockMembership.practiceBlockId) {
+      throw new PersistenceError("invalid_record", "Attempt.blockMembership.practiceBlockId must be non-empty when blockMembership is set.");
+    }
+    if (!Number.isInteger(state.blockMembership.blockSequenceNumber) || state.blockMembership.blockSequenceNumber <= 0) {
+      throw new PersistenceError(
+        "invalid_record",
+        `Attempt.blockMembership.blockSequenceNumber must be a positive integer, got ${String(state.blockMembership.blockSequenceNumber)}.`
+      );
+    }
+  }
+
   if (state.status === "in_progress") {
     if (state.finalizedAt !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null finalizedAt.");
     if (state.submittedAt !== null) throw new PersistenceError("invalid_record", "An in_progress Attempt must have a null submittedAt.");
@@ -205,6 +217,29 @@ export function assertAttemptNotRegressingFromFinalized(existingStatus: AttemptS
     throw new PersistenceError(
       "invalid_record",
       `Cannot persist Attempt: it is already finalized as "${existingStatus}" — refusing to change its status to "${incomingStatus}".`
+    );
+  }
+}
+
+/**
+ * Shared by `AttemptRepository.save()` implementations (docs/DECISIONS.md
+ * D-060) — an attempt's `blockMembership` is immutable once a row exists,
+ * the same discipline `assertAttemptOwnershipUnchanged()` already applies
+ * to `retryOfAttemptId`. There is exactly one legitimate way a non-null
+ * `blockMembership` is ever written at all: `save()`'s own
+ * `blockAllocationRequest` parameter, at CREATION time only — never a
+ * later save changing it.
+ */
+export function assertAttemptBlockMembershipUnchanged(
+  existing: { practiceBlockId: string | null; blockSequenceNumber: number | null },
+  incoming: AttemptState
+): void {
+  const incomingBlockId = incoming.blockMembership?.practiceBlockId ?? null;
+  const incomingSequence = incoming.blockMembership?.blockSequenceNumber ?? null;
+  if (existing.practiceBlockId !== incomingBlockId || existing.blockSequenceNumber !== incomingSequence) {
+    throw new PersistenceError(
+      "invalid_record",
+      `Cannot persist Attempt "${incoming.id}": blockMembership would change from (${String(existing.practiceBlockId)}, ${String(existing.blockSequenceNumber)}) to (${String(incomingBlockId)}, ${String(incomingSequence)}) — block membership is immutable once persisted.`
     );
   }
 }
