@@ -63,6 +63,47 @@ export interface TrainingSystemContext {
   errorTaxonomy?: ErrorTaxonomyEntry[];
   prepPhase?: PrepPhaseResult | null;
   candidates: TrainingCandidateQuestion[];
+  /**
+   * Optional, restated block-grouped practice evidence (docs/DECISIONS.md
+   * D-060/D-061) — purely primitive, no import of `@ipmat/practice-block`/
+   * `@ipmat/db`/`@ipmat/practice-session` (this package stays database-free,
+   * exactly like `attemptRecords`/`masteryByConcept` above are restated
+   * rather than imported). Every `attemptId` inside a
+   * `TrainingPracticeBlockContext` MUST also appear in `attemptRecords`
+   * (correlated by `MasteryAttemptRecord.contribution.attemptId`) — a
+   * provider correlates by id, never duplicates correctness/timing into
+   * this shape. Absent or empty means "no block evidence available."
+   * Named generically (not `pressure`-prefixed) so a future Mock/Simulation
+   * provider (named in D-059/D-060 as sharing the same prerequisite) can
+   * read the identical field later without a second contract change.
+   * Assembling a real array of these from persisted data is explicitly NOT
+   * this package's job — no field on `TrainingSystemContext` has ever had
+   * an "assembly" implementation here; that is a future orchestration-layer
+   * concern.
+   */
+  practiceBlocks?: TrainingPracticeBlockContext[];
+}
+
+/**
+ * One `PracticeBlock`'s restated, block-grouped evidence (docs/DECISIONS.md
+ * D-061). `wallClockDurationSeconds`/`activeSolvingTimeSeconds`/
+ * `interAttemptGapsSeconds` are ALWAYS computed by calling
+ * `@ipmat/practice-block`'s existing `deriveBlockWallClockDurationSeconds()`/
+ * `deriveBlockActiveSolvingTimeSeconds()`/`deriveInterAttemptGapsSeconds()`
+ * directly — never a second, independent reimplementation of the same math,
+ * and never cached/persisted anywhere new.
+ */
+export interface TrainingPracticeBlockContext {
+  practiceBlockId: string;
+  /** `attemptId`, in `blockSequenceNumber` order — ordering IS the evidence; no separate sequence-number field is exposed. */
+  attemptIdsInOrder: string[];
+  targetQuestionCount: number | null;
+  blockTimeBudgetSeconds: number | null;
+  /** `null` while the block is still `active` — mirrors `deriveBlockWallClockDurationSeconds()`'s own null-while-active contract exactly. NOT used by any V1 provider trigger formula (docs/DECISIONS.md D-061) — reserved for future diagnostics only. */
+  wallClockDurationSeconds: number | null;
+  activeSolvingTimeSeconds: number;
+  /** One entry per finalized-then-next-started consecutive pair — mirrors `deriveInterAttemptGapsSeconds()`'s own contract exactly (may be shorter than `attemptIdsInOrder.length - 1`, never zero-filled). */
+  interAttemptGapsSeconds: number[];
 }
 
 // ---------------------------------------------------------------------
