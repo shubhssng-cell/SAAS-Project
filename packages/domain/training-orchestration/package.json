@@ -12,9 +12,15 @@
   "dependencies": {
     "@ipmat/adaptive-selection": "*",
     "@ipmat/autopsy": "*",
+    "@ipmat/calculation-gym": "*",
     "@ipmat/mastery": "*",
+    "@ipmat/novelty-training": "*",
     "@ipmat/prep-phase": "*",
+    "@ipmat/pressure-training": "*",
     "@ipmat/question-engine": "*",
-    "@ipmat/repair-selection": "*"
+    "@ipmat/repair-selection": "*",
+    "@ipmat/speed-lab": "*",
+    "@ipmat/trap-lab": "*",
+    "@ipmat/training-systems": "*"
   }
 }

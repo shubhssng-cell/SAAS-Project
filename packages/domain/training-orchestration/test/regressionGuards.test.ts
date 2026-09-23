@@ -67,16 +67,21 @@ describe("training-orchestration — regression guards: no hidden score/confiden
         excludedUnpublishedCount: 0
       },
       wasFallbackFromRepair: false,
+      wasFallbackFromTrainingSystems: false,
       diagnostics: {
         repairPlansSupplied: 0,
         repairPlansExcludedAsUnconfirmed: 0,
         repairPlanChosen: null,
         repairAttempted: false,
         repairOutcome: null,
+        trainingSystemProviderOutcomes: [],
+        trainingSystemProviderChosen: null,
         adaptiveAttempted: true,
         adaptiveOutcome: null,
         fallbackPermittedByPolicy: true,
-        fallbackOccurred: false
+        fallbackOccurred: false,
+        fallbackPermittedToTrainingSystemsPolicy: true,
+        fallbackPermittedToAdaptiveAfterTrainingSystemsPolicy: true
       }
     };
     // @ts-expect-error -- TrainingOrchestrationSelectedAdaptive has no overallMastery/score field and must never gain one.
