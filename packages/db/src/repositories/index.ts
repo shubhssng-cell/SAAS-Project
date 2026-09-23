@@ -8,3 +8,7 @@ export * from "./prismaAttemptRepository.js";
 export * from "./inMemoryAttemptRepository.js";
 export * from "./prismaQuestionReader.js";
 export * from "./inMemoryQuestionReader.js";
+export * from "./prismaQuestionPublicationRepository.js";
+export * from "./inMemoryQuestionPublicationRepository.js";
+export * from "./prismaQuestionImportRepository.js";
+export * from "./inMemoryQuestionImportRepository.js";

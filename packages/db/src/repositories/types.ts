@@ -1,7 +1,15 @@
 import type { AttemptState } from "@ipmat/attempt";
 import type { AutopsyHypothesis, AutopsyOutput, AutopsyPersistenceRecord, RepairPlan, RepairPlanPersistenceRecord } from "@ipmat/autopsy";
 import type { MasteryStatePersistenceRecord, MasteryStateResult } from "@ipmat/mastery";
-import type { ValidationState } from "@ipmat/question-engine";
+import type {
+  DifficultyTier,
+  ProvenanceSourceType,
+  PublicationDecisionAction,
+  QuestionBlueprint,
+  QuestionCandidateAiOutput,
+  QuestionLifecycleStatus,
+  ValidationState
+} from "@ipmat/question-engine";
 
 /**
  * Repository/adapter contracts (Phase 5C-1) — the FIRST persistence
@@ -113,4 +121,101 @@ export interface CanonicalQuestion {
 export interface QuestionReader {
   /** Loads the canonical Question by id, or `null` if none exists. */
   findById(questionId: string): Promise<CanonicalQuestion | null>;
+}
+
+/**
+ * Phase 3.5 (Content Curation / Publication Workflow) — the narrow subset
+ * of a `Question` row needed to decide and apply an explicit human
+ * "publish"/"reject" decision. Deliberately NOT a general Question
+ * read/write shape (no `body`/`options`/`correctAnswer`/etc.) — this is
+ * not a second Question repository, only a publication-decision boundary
+ * (docs/DECISIONS.md D-049).
+ */
+export interface QuestionPublicationRecord {
+  id: string;
+  validationState: ValidationState;
+  difficultyTier: DifficultyTier;
+  /** Mirrors the DB-level CHECK constraint `questions_published_requires_provenance` (migration 0001_init) — whether a Provenance row is actually attached, never a caller's claim about it. */
+  hasProvenance: boolean;
+}
+
+/**
+ * The ONE write path for a Question's `validationState`, and deliberately
+ * the ONLY one — there is no general Question `save()`/`update()` method
+ * anywhere in this codebase, so an ordinary persistence operation can
+ * never accidentally promote a `rejected` question or bypass
+ * `decidePublication()`'s prerequisites (docs/DECISIONS.md D-049).
+ * `decide()` intentionally takes an ACTION (`"publish" | "reject"`), never
+ * a raw target `ValidationState` — every implementation must load the
+ * CURRENT state itself and run it through `@ipmat/question-engine`'s
+ * `decidePublication()` before writing, so a caller can never construct a
+ * pre-approved target state and skip the check.
+ */
+export interface QuestionPublicationRepository {
+  findById(questionId: string): Promise<QuestionPublicationRecord | null>;
+  /** Throws `PublicationDecisionError` (never partially writes) if the decision is not currently allowed; throws `PersistenceError("missing_reference")` if no such Question exists. */
+  decide(questionId: string, action: PublicationDecisionAction): Promise<QuestionPublicationRecord>;
+}
+
+/**
+ * Phase 3.5 (Candidate -> persisted Question import boundary, docs/DECISIONS.md
+ * D-050) — provenance metadata the CALLER supplies at import time. Never an
+ * existing `provenanceId` (that would let a caller claim false pedigree for
+ * imported content) — a fresh `Provenance` row is always created per import,
+ * using the existing schema's own fields, never a parallel provenance system.
+ */
+export interface QuestionImportProvenanceInput {
+  sourceType: ProvenanceSourceType;
+  sourceRef?: string | null;
+  licenseRef?: string | null;
+  attributedTo?: string | null;
+}
+
+/**
+ * Returned by `QuestionImportRepository.importValidatedCandidate()`.
+ * Deliberately the SAME shape as `QuestionPublicationRecord` (plus
+ * `alreadyExisted`) — an imported record must be immediately usable as
+ * input to `QuestionPublicationRepository.decide()` without a caller
+ * needing a separate read.
+ */
+export interface ImportedQuestionRecord {
+  id: string;
+  validationState: ValidationState;
+  difficultyTier: DifficultyTier;
+  hasProvenance: boolean;
+  /** True when this call matched an already-imported row (same taxonomy cell + exact stem) and returned it unchanged, rather than creating a second one — see D-050's idempotency strategy. */
+  alreadyExisted: boolean;
+}
+
+/**
+ * The ONE write path from a validated generation-pipeline result to a real,
+ * persisted `Question` row — deliberately NOT a general Question CRUD
+ * repository (no update/delete, no arbitrary field overrides). Accepts only
+ * `{ blueprint, candidate, status }` — the exact shape a real
+ * `GenerationPipelineResult` carries — plus provenance metadata; there is no
+ * parameter through which a caller could supply `validationState`,
+ * `correctAnswer`, `difficultyTier`, or an existing `provenanceId` directly
+ * (docs/DECISIONS.md D-050). Implementations MUST call
+ * `@ipmat/question-engine`'s `assertCandidateIsImportable()` themselves
+ * before writing anything, never trust that a caller already did.
+ */
+export interface QuestionImportRepository {
+  /**
+   * Throws `CandidateImportError` if `status !== "validated"` or `candidate`
+   * is null (never partially writes). Throws `PersistenceError("missing_reference")`
+   * if any referenced Exam/Section/Chapter/Concept/PatternFamily/
+   * ErrorTaxonomy/PatternTaxonomyCell cannot be resolved by natural key.
+   * Idempotent: re-importing the same candidate (same resolved
+   * `patternTaxonomyCellId` + exact stem) returns the existing row with
+   * `alreadyExisted: true`, never creates a second one. The persisted
+   * `validationState` is always `"ai_validated"` — never `"published"`; the
+   * only later path to `"published"` remains
+   * `QuestionPublicationRepository.decide(id, "publish")`.
+   */
+  importValidatedCandidate(input: {
+    blueprint: QuestionBlueprint;
+    candidate: QuestionCandidateAiOutput | null;
+    status: QuestionLifecycleStatus;
+    provenance: QuestionImportProvenanceInput;
+  }): Promise<ImportedQuestionRecord>;
 }
