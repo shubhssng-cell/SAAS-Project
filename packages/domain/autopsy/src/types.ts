@@ -397,18 +397,20 @@ export interface RepairPlan {
 // ---------------------------------------------------------------------
 
 /**
- * The exact shape a Prisma adapter would write to the EXISTING `autopsies`
- * table (packages/db/prisma/schema.prisma) — Phase 5B §5 found the
- * current schema needs NO migration: `confirmed: Boolean?` +
- * `studentCorrectionText: String?` already jointly encode all 4
- * `HypothesisConfirmationStatus` values (see `toAutopsyPersistenceRecord()`
- * in `persistence.ts` for the exact mapping). `errorTaxonomyId` is a real
- * database foreign key this package cannot resolve itself (no DB access,
- * no Prisma dependency) — the caller/adapter resolves
- * `proposedErrorTaxonomyCode` to a real `ErrorTaxonomy.id` before writing.
- * NOTHING in this package actually calls `prisma.autopsy.create()` — no
- * adapter exists, and none is implemented this phase (Phase 5B §5: "do
- * not pretend persistence exists if no adapter is implemented").
+ * The exact shape a Prisma adapter writes to the `autopsies` table
+ * (packages/db/prisma/schema.prisma) — Phase 5B §5 found the
+ * confirmation-status side of this needs no migration: `confirmed:
+ * Boolean?` + `studentCorrectionText: String?` already jointly encode all
+ * 4 `HypothesisConfirmationStatus` values (see `toAutopsyPersistenceRecord()`
+ * in `persistence.ts` for the exact mapping). `confirmedAt` (docs/DECISIONS.md
+ * D-039 addendum) was the one field genuinely missing a column — the exact
+ * instant `confirmed` became true/false, distinct from `confirmed` itself,
+ * needed by `RepairPlan.confirmationSource.hypothesisConfirmedAt` and
+ * added by migration `0007_repair_plan_persistence_fidelity`.
+ * `errorTaxonomyId` is a real database foreign key this package cannot
+ * resolve itself (no DB access, no Prisma dependency) — the caller/adapter
+ * resolves `proposedErrorTaxonomyCode` to a real `ErrorTaxonomy.id` before
+ * writing.
  */
 export interface AutopsyPersistenceRecord {
   attemptId: string;
@@ -417,12 +419,25 @@ export interface AutopsyPersistenceRecord {
   likelyRootCause: string | null;
   evidenceUsed: Record<string, unknown>;
   confirmed: boolean | null;
+  /** `hypothesis.respondedAt` verbatim — `null` while still `awaiting_confirmation`. Never inferred from `createdAt`/`updatedAt`/the current time (docs/DECISIONS.md D-039 addendum). */
+  confirmedAt: string | null;
   studentCorrectionText: string | null;
   generatedByProvider: string;
   promptVersion: string;
 }
 
-/** The exact shape a Prisma adapter would write to the EXISTING `repair_plans` table — also needs no migration; `followUpQuestionIds` is always `[]` since this package never selects questions. */
+/**
+ * The exact shape a Prisma adapter writes to the `repair_plans` table.
+ * `followUpQuestionIds` is always `[]` since this package never selects
+ * questions. The six snapshot fields below (docs/DECISIONS.md D-039
+ * addendum) were previously silently dropped by `toRepairPlanPersistenceRecord()`
+ * even though the domain `RepairPlan` always carries them — added by
+ * migration `0007_repair_plan_persistence_fidelity`. They are HISTORICAL
+ * SNAPSHOT data (what was diagnosed, computed once at `buildRepairPlan()`
+ * time), never re-derived from a live join to `Concept`/`QuestionPatternFamily`
+ * at read time — a later rename of either must not rewrite an existing
+ * RepairPlan's recorded target.
+ */
 export interface RepairPlanPersistenceRecord {
   studentId: string;
   autopsyId: string;
@@ -430,4 +445,10 @@ export interface RepairPlanPersistenceRecord {
   targetErrorTaxonomyId: string | null;
   followUpQuestionIds: string[];
   status: "pending";
+  targetConceptName: string;
+  targetPatternFamilyName: string;
+  targetTaxonomyCellId: string;
+  targetErrorCategory: ErrorCategory;
+  recommendedTrainingMode: RecommendedTrainingMode;
+  priority: RepairPriority;
 }

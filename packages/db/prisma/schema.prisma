@@ -698,6 +698,12 @@ model Autopsy {
   likelyRootCause       String?  @map("likely_root_cause")
   evidenceUsed          Json     @map("evidence_used")
   confirmed             Boolean? @map("confirmed")
+  // docs/DECISIONS.md D-039 addendum -- WHEN `confirmed` became true (or
+  // false), distinct from `confirmed` itself (WHETHER). Set from the
+  // domain's own hypothesis.respondedAt, never inferred from createdAt or
+  // the current time. Permanently nullable (an awaiting/rejected-without-
+  // response-time-tracking hypothesis has none), not merely transitional.
+  confirmedAt           DateTime? @map("confirmed_at")
   studentCorrectionText String?  @map("student_correction_text")
   generatedByProvider   String   @map("generated_by_provider")
   promptVersion         String   @map("prompt_version")
@@ -717,6 +723,23 @@ enum RepairStatus {
   completed
 }
 
+// docs/DECISIONS.md D-039 addendum (persistence-fidelity fix) -- these two
+// enums back RepairPlan's own priority/recommendedTrainingMode snapshot
+// fields below, mirroring the domain vocabularies in
+// packages/domain/autopsy/src/types.ts verbatim.
+enum RepairPriority {
+  low
+  medium
+  high
+}
+
+enum RecommendedTrainingMode {
+  standard_practice
+  guided_hint_first
+  timed_pressure_drill
+  novelty_exposure
+}
+
 model RepairPlan {
   id                    String       @id @default(uuid())
   autopsyId             String       @map("autopsy_id")
@@ -726,6 +749,21 @@ model RepairPlan {
   followUpQuestionIds   String[]     @map("follow_up_question_ids")
   status                RepairStatus @default(pending)
   createdAt             DateTime     @default(now()) @map("created_at")
+  // docs/DECISIONS.md D-039 addendum -- historical snapshot fields (Phase
+  // 5B's RepairPlan carries these, but the original persistence mapping
+  // silently dropped them; see toRepairPlanPersistenceRecord()). Nullable
+  // because no pre-existing row can be backfilled with this data -- NULL
+  // on any of these six always means "this row predates the fix," never a
+  // legitimate domain state (a plan actually built via buildRepairPlan()
+  // never omits any of them). Deliberately snapshot strings, not resolved
+  // via a live join to Concept/PatternFamily at read time -- a RepairPlan
+  // describes what was diagnosed, and a later rename must not rewrite it.
+  targetConceptName       String?                  @map("target_concept_name")
+  targetPatternFamilyName String?                  @map("target_pattern_family_name")
+  targetTaxonomyCellId    String?                  @map("target_taxonomy_cell_id")
+  targetErrorCategory     ErrorCategory?           @map("target_error_category")
+  recommendedTrainingMode RecommendedTrainingMode? @map("recommended_training_mode")
+  priority                RepairPriority?
 
   autopsy       Autopsy        @relation(fields: [autopsyId], references: [id], onDelete: Cascade)
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)

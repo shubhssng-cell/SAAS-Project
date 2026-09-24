@@ -128,4 +128,30 @@ describe("PrismaAutopsyRepository semantics (verified against InMemoryAutopsyRep
 
     await expect(repo.save({ hypothesis, output })).rejects.toThrow(/No ErrorTaxonomy found with code "base_confusion"/);
   });
+
+  // docs/DECISIONS.md D-039 addendum -- confirmedAt round-trip coverage.
+  it("confirmedAt round-trips exactly as hypothesis.respondedAt, and is null while awaiting_confirmation", async () => {
+    const repo = new InMemoryAutopsyRepository({ base_confusion: "taxonomy-row-id-1" });
+    const { hypothesis, output } = await freshHypothesis("attempt-repo-confirmedAt");
+
+    const storedAwaiting = await repo.save({ hypothesis, output });
+    expect(storedAwaiting.confirmedAt).toBeNull();
+
+    const confirmed = confirmHypothesis(hypothesis, { now: t(60) });
+    const storedConfirmed = await repo.save({ hypothesis: confirmed, output });
+    expect(storedConfirmed.confirmedAt).toBe(t(60));
+    expect(storedConfirmed.confirmedAt).toBe(confirmed.respondedAt);
+
+    const found = await repo.findByAttemptId("attempt-repo-confirmedAt");
+    expect(found?.confirmedAt).toBe(t(60));
+  });
+
+  it("getById() resolves an Autopsy by its OWN id (not attemptId) -- the cross-lookup InMemoryRepairPlanRepository's join depends on", async () => {
+    const repo = new InMemoryAutopsyRepository({ base_confusion: "taxonomy-row-id-1" });
+    const { hypothesis, output } = await freshHypothesis("attempt-repo-getbyid");
+    const stored = await repo.save({ hypothesis, output });
+
+    expect(repo.getById(stored.id)).toEqual(stored);
+    expect(repo.getById("nonexistent-id")).toBeNull();
+  });
 });

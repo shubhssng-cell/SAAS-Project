@@ -1,5 +1,14 @@
 import type { AttemptState } from "@ipmat/attempt";
-import type { AutopsyHypothesis, AutopsyOutput, AutopsyPersistenceRecord, RepairPlan, RepairPlanPersistenceRecord } from "@ipmat/autopsy";
+import type {
+  AutopsyHypothesis,
+  AutopsyOutput,
+  AutopsyPersistenceRecord,
+  RecommendedTrainingMode,
+  RepairPlan,
+  RepairPlanPersistenceRecord,
+  RepairPriority
+} from "@ipmat/autopsy";
+import type { ErrorCategory } from "@ipmat/examiner-lens";
 import type { MasteryStatePersistenceRecord, MasteryStateResult } from "@ipmat/mastery";
 import type { PracticeBlockState } from "@ipmat/practice-block";
 import type { PracticeSessionState } from "@ipmat/practice-session";
@@ -43,15 +52,57 @@ export interface AutopsyRepository {
   findByAttemptId(attemptId: string): Promise<StoredAutopsy | null>;
 }
 
-export interface StoredRepairPlan extends RepairPlanPersistenceRecord {
+/**
+ * `confirmedAt`/`attemptId` (docs/DECISIONS.md D-039 addendum) are joined
+ * in from the linked `Autopsy` row (via `autopsyId`), never columns on
+ * `RepairPlan` itself — see `RepairPlanRepository.findConfirmedActiveByStudentId()`.
+ *
+ * Unlike `RepairPlanPersistenceRecord` (always constructed from a genuine,
+ * fully-populated domain `RepairPlan`, so its six snapshot fields are
+ * non-optional there), a row actually READ BACK from the database can
+ * legitimately predate migration `0007_repair_plan_persistence_fidelity`
+ * and have any of them `NULL` — this is the one place, at the repository
+ * boundary, nullable database-compatible state is allowed to surface.
+ * `fromRepairPlanPersistenceRecord()` (`@ipmat/autopsy`) is what turns
+ * "any of these is null" into "cannot reconstruct a domain RepairPlan,"
+ * never a fabricated value.
+ */
+export interface StoredRepairPlan
+  extends Omit<
+    RepairPlanPersistenceRecord,
+    "targetConceptName" | "targetPatternFamilyName" | "targetTaxonomyCellId" | "targetErrorCategory" | "recommendedTrainingMode" | "priority" | "status"
+  > {
   id: string;
   createdAt: string;
+  confirmedAt: string | null;
+  attemptId: string;
+  /** Widened from `RepairPlanPersistenceRecord`'s write-only `"pending"` literal (a freshly built plan is always `"pending"`) — a row actually read back may since have progressed to `"in_progress"`/`"completed"`, a fact `findConfirmedActiveByStudentId()`'s own exclusion filter depends on. */
+  status: "pending" | "in_progress" | "completed";
+  targetConceptName: string | null;
+  targetPatternFamilyName: string | null;
+  targetTaxonomyCellId: string | null;
+  targetErrorCategory: ErrorCategory | null;
+  recommendedTrainingMode: RecommendedTrainingMode | null;
+  priority: RepairPriority | null;
+  /** Resolved from `targetErrorTaxonomyId` (when non-null) via `ErrorTaxonomy.code` — the same resolution `toStoredRepairPlan()` and `fromRepairPlanPersistenceRecord()`'s caller already perform for the write side, mirrored here for the read side. `null` when `targetErrorTaxonomyId` is `null` (no trap code resolved — a legitimate domain state, not a gap). */
+  targetErrorTaxonomyCode: string | null;
 }
 
 export interface RepairPlanRepository {
   /** Always inserts a new row — RepairPlan has no uniqueness constraint beyond its id, since a student can legitimately receive more than one repair plan over time. */
   save(input: { plan: RepairPlan; autopsyId: string; studentId: string }): Promise<StoredRepairPlan>;
   findByAutopsyId(autopsyId: string): Promise<StoredRepairPlan | null>;
+  /**
+   * All of this student's RepairPlans whose linked Autopsy is confirmed
+   * (`confirmed === true` — the one authoritative confirmation fact,
+   * docs/DECISIONS.md D-006/D-038) and whose own `status` has not reached
+   * `"completed"` (a separate, orthogonal workflow-progress fact, never
+   * conflated with confirmation). Ordered `createdAt DESC` — callers that
+   * need to choose among several active plans (e.g.
+   * `@ipmat/training-orchestration`'s `selectPlanForOrchestration()`) do
+   * their own priority/recency sort over whatever this returns.
+   */
+  findConfirmedActiveByStudentId(studentId: string): Promise<StoredRepairPlan[]>;
 }
 
 export interface StoredMasteryState extends MasteryStatePersistenceRecord {

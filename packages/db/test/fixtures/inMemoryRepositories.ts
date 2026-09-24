@@ -45,6 +45,20 @@ export class InMemoryAutopsyRepository implements AutopsyRepository {
 
   constructor(private readonly errorTaxonomyIdsByCode: Record<string, string> = {}) {}
 
+  /**
+   * Test-fixture-only cross-lookup by the Autopsy's OWN `id` (not
+   * `attemptId`) so `InMemoryRepairPlanRepository` can join to it the same
+   * way `PrismaRepairPlanRepository` joins through `RepairPlan.autopsyId`
+   * (docs/DECISIONS.md D-039 addendum) — not part of the production
+   * `AutopsyRepository` interface.
+   */
+  getById(id: string): StoredAutopsy | null {
+    for (const stored of this.byAttemptId.values()) {
+      if (stored.id === id) return stored;
+    }
+    return null;
+  }
+
   async save(input: { hypothesis: AutopsyHypothesis; output: AutopsyOutput }): Promise<StoredAutopsy> {
     const { hypothesis, output } = input;
     assertAutopsyLinkage(hypothesis, output);
@@ -77,9 +91,23 @@ export class InMemoryAutopsyRepository implements AutopsyRepository {
 export class InMemoryRepairPlanRepository implements RepairPlanRepository {
   private readonly plansByAutopsyId = new Map<string, StoredRepairPlan>();
 
+  /**
+   * `autopsyRepository` (docs/DECISIONS.md D-039 addendum) is OPTIONAL and
+   * new — when supplied, `save()`/`findConfirmedActiveByStudentId()` join
+   * against its actual stored `confirmed`/`confirmedAt`/`attemptId`
+   * exactly the way `PrismaRepairPlanRepository` joins through
+   * `RepairPlan.autopsyId -> Autopsy`. When omitted (existing tests
+   * constructed before this fix, unmodified), `save()` falls back to
+   * `plan.confirmationSource` for `attemptId`/`confirmedAt` — which
+   * `assertRepairPlanConfirmed()` already guarantees is present — so
+   * behavior for existing callers is unchanged; `findConfirmedActiveByStudentId()`
+   * then has no Autopsy to check `confirmed` against and correctly returns
+   * `[]` (fails closed, never assumes confirmed by default).
+   */
   constructor(
     private readonly conceptIdsByName: Record<string, string> = {},
-    private readonly errorTaxonomyIdsByCode: Record<string, string> = {}
+    private readonly errorTaxonomyIdsByCode: Record<string, string> = {},
+    private readonly autopsyRepository?: InMemoryAutopsyRepository
   ) {}
 
   async save(input: { plan: RepairPlan; autopsyId: string; studentId: string }): Promise<StoredRepairPlan> {
@@ -99,13 +127,41 @@ export class InMemoryRepairPlanRepository implements RepairPlanRepository {
     }
 
     const record = toRepairPlanPersistenceRecord(plan, { studentId, autopsyId, targetConceptId, targetErrorTaxonomyId });
-    const stored: StoredRepairPlan = { ...record, id: nextId("repair-plan"), createdAt: new Date().toISOString() };
+    const linkedAutopsy = this.autopsyRepository?.getById(autopsyId) ?? null;
+    const stored: StoredRepairPlan = {
+      ...record,
+      id: nextId("repair-plan"),
+      createdAt: new Date().toISOString(),
+      attemptId: linkedAutopsy?.attemptId ?? plan.confirmationSource.attemptId,
+      confirmedAt: linkedAutopsy ? linkedAutopsy.confirmedAt : plan.confirmationSource.hypothesisConfirmedAt,
+      targetErrorTaxonomyCode: plan.targetErrorTaxonomyCode
+    };
     this.plansByAutopsyId.set(autopsyId, stored);
     return stored;
   }
 
   async findByAutopsyId(autopsyId: string): Promise<StoredRepairPlan | null> {
     return this.plansByAutopsyId.get(autopsyId) ?? null;
+  }
+
+  /**
+   * docs/DECISIONS.md D-039 addendum. Mirrors `PrismaRepairPlanRepository`'s
+   * semantics exactly: confirmation truth is the LINKED Autopsy's actual
+   * `confirmed` field (via `autopsyRepository`) — never the RepairPlan's
+   * own `confirmationSource`, which only proves the domain object was
+   * built from a confirmed hypothesis at construction time, not that the
+   * linked Autopsy row itself still says so. `status === "completed"` is
+   * excluded independently (orthogonal to confirmation, never conflated).
+   * No application-level filtering across other students' rows — the
+   * `studentId` check happens before anything else.
+   */
+  async findConfirmedActiveByStudentId(studentId: string): Promise<StoredRepairPlan[]> {
+    const matches = [...this.plansByAutopsyId.values()].filter((stored) => {
+      if (stored.studentId !== studentId || stored.status === "completed") return false;
+      const autopsy = this.autopsyRepository?.getById(stored.autopsyId) ?? null;
+      return autopsy?.confirmed === true;
+    });
+    return matches.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }
 }
 

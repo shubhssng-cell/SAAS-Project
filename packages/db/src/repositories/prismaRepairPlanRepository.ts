@@ -51,18 +51,54 @@ export class PrismaRepairPlanRepository implements RepairPlanRepository {
         targetConceptId: record.targetConceptId,
         targetErrorTaxonomyId: record.targetErrorTaxonomyId,
         followUpQuestionIds: record.followUpQuestionIds,
-        status: record.status
-      }
+        status: record.status,
+        targetConceptName: record.targetConceptName,
+        targetPatternFamilyName: record.targetPatternFamilyName,
+        targetTaxonomyCellId: record.targetTaxonomyCellId,
+        targetErrorCategory: record.targetErrorCategory,
+        recommendedTrainingMode: record.recommendedTrainingMode,
+        priority: record.priority
+      },
+      include: REPAIR_PLAN_JOIN_INCLUDE
     });
 
     return toStoredRepairPlan(row);
   }
 
   async findByAutopsyId(autopsyId: string): Promise<StoredRepairPlan | null> {
-    const row = await this.prisma.repairPlan.findFirst({ where: { autopsyId }, orderBy: { createdAt: "desc" } });
+    const row = await this.prisma.repairPlan.findFirst({
+      where: { autopsyId },
+      orderBy: { createdAt: "desc" },
+      include: REPAIR_PLAN_JOIN_INCLUDE
+    });
     return row ? toStoredRepairPlan(row) : null;
   }
+
+  /**
+   * docs/DECISIONS.md D-039 addendum. Confirmation truth is exclusively
+   * `Autopsy.confirmed === true` — never `RepairStatus`, never mere
+   * presence of `confirmedAt`. `status: { not: "completed" }` is a
+   * genuinely separate, orthogonal filter (a plan can be confirmed AND
+   * completed at once; both facts are independently true). No
+   * application-level post-filtering — `where.studentId` scopes the query
+   * itself, so a row belonging to a different student is never fetched at
+   * all.
+   */
+  async findConfirmedActiveByStudentId(studentId: string): Promise<StoredRepairPlan[]> {
+    const rows = await this.prisma.repairPlan.findMany({
+      where: { studentId, status: { not: "completed" }, autopsy: { confirmed: true } },
+      orderBy: { createdAt: "desc" },
+      include: REPAIR_PLAN_JOIN_INCLUDE
+    });
+    return rows.map(toStoredRepairPlan);
+  }
 }
+
+/** Shared `include` for every read that must return a full `StoredRepairPlan` — `attemptId`/`confirmedAt` come from the joined `Autopsy` (via `autopsyId`), `targetErrorTaxonomyCode` from the joined `ErrorTaxonomy` (via the existing `targetErrorTaxonomyId` relation), never a second, separate query per row. */
+const REPAIR_PLAN_JOIN_INCLUDE = {
+  autopsy: { select: { attemptId: true, confirmedAt: true } },
+  errorTaxonomy: { select: { code: true } }
+} as const;
 
 function toStoredRepairPlan(row: {
   id: string;
@@ -73,6 +109,14 @@ function toStoredRepairPlan(row: {
   followUpQuestionIds: string[];
   status: string;
   createdAt: Date;
+  targetConceptName: string | null;
+  targetPatternFamilyName: string | null;
+  targetTaxonomyCellId: string | null;
+  targetErrorCategory: string | null;
+  recommendedTrainingMode: string | null;
+  priority: string | null;
+  autopsy: { attemptId: string; confirmedAt: Date | null };
+  errorTaxonomy: { code: string } | null;
 }): StoredRepairPlan {
   return {
     id: row.id,
@@ -81,7 +125,16 @@ function toStoredRepairPlan(row: {
     targetConceptId: row.targetConceptId,
     targetErrorTaxonomyId: row.targetErrorTaxonomyId,
     followUpQuestionIds: row.followUpQuestionIds,
-    status: row.status as "pending",
-    createdAt: row.createdAt.toISOString()
+    status: row.status as StoredRepairPlan["status"],
+    createdAt: row.createdAt.toISOString(),
+    targetConceptName: row.targetConceptName,
+    targetPatternFamilyName: row.targetPatternFamilyName,
+    targetTaxonomyCellId: row.targetTaxonomyCellId,
+    targetErrorCategory: row.targetErrorCategory as StoredRepairPlan["targetErrorCategory"],
+    recommendedTrainingMode: row.recommendedTrainingMode as StoredRepairPlan["recommendedTrainingMode"],
+    priority: row.priority as StoredRepairPlan["priority"],
+    attemptId: row.autopsy.attemptId,
+    confirmedAt: row.autopsy.confirmedAt ? row.autopsy.confirmedAt.toISOString() : null,
+    targetErrorTaxonomyCode: row.errorTaxonomy?.code ?? null
   };
 }

@@ -46,6 +46,7 @@ export class PrismaAutopsyRepository implements AutopsyRepository {
         likelyRootCause: record.likelyRootCause,
         evidenceUsed: asJson(record.evidenceUsed),
         confirmed: record.confirmed,
+        confirmedAt: record.confirmedAt ? new Date(record.confirmedAt) : null,
         studentCorrectionText: record.studentCorrectionText,
         generatedByProvider: record.generatedByProvider,
         promptVersion: record.promptVersion
@@ -56,6 +57,7 @@ export class PrismaAutopsyRepository implements AutopsyRepository {
         likelyRootCause: record.likelyRootCause,
         evidenceUsed: asJson(record.evidenceUsed),
         confirmed: record.confirmed,
+        confirmedAt: record.confirmedAt ? new Date(record.confirmedAt) : null,
         studentCorrectionText: record.studentCorrectionText,
         generatedByProvider: record.generatedByProvider,
         promptVersion: record.promptVersion
@@ -79,6 +81,7 @@ function toStoredAutopsy(row: {
   likelyRootCause: string | null;
   evidenceUsed: unknown;
   confirmed: boolean | null;
+  confirmedAt: Date | null;
   studentCorrectionText: string | null;
   generatedByProvider: string;
   promptVersion: string;
@@ -92,6 +95,7 @@ function toStoredAutopsy(row: {
     likelyRootCause: row.likelyRootCause,
     evidenceUsed: row.evidenceUsed as Record<string, unknown>,
     confirmed: row.confirmed,
+    confirmedAt: row.confirmedAt ? row.confirmedAt.toISOString() : null,
     studentCorrectionText: row.studentCorrectionText,
     generatedByProvider: row.generatedByProvider,
     promptVersion: row.promptVersion,
