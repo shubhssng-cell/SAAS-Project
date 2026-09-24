@@ -1,6 +1,7 @@
 import type { AttemptState, AttemptStatus } from "@ipmat/attempt";
 import { HypothesisError, type AutopsyHypothesis, type AutopsyOutput, type RepairPlan } from "@ipmat/autopsy";
 import type { MasteryStatePersistenceRecord } from "@ipmat/mastery";
+import type { PracticeSessionState } from "@ipmat/practice-session";
 import { PersistenceError } from "./errors.js";
 
 /**
@@ -242,4 +243,15 @@ export function assertAttemptBlockMembershipUnchanged(
       `Cannot persist Attempt "${incoming.id}": blockMembership would change from (${String(existing.practiceBlockId)}, ${String(existing.blockSequenceNumber)}) to (${String(incomingBlockId)}, ${String(incomingSequence)}) — block membership is immutable once persisted.`
     );
   }
+}
+
+/** Shared by both implementations: `null` for none, the session for exactly one, and a fail-closed `PersistenceError("invalid_record")` for more than one — never a silent pick. */
+export function singleActiveSessionOrNull(enrollmentId: string, activeSessions: PracticeSessionState[]): PracticeSessionState | null {
+  if (activeSessions.length > 1) {
+    throw new PersistenceError(
+      "invalid_record",
+      `Enrollment "${enrollmentId}" has more than one active PracticeSession — refusing to guess which one is "the" active session.`
+    );
+  }
+  return activeSessions[0] ?? null;
 }

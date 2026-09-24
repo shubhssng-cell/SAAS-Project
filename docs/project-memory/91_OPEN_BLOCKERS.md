@@ -9,6 +9,8 @@
 3. **`RepairPlan.targetConceptId` has no `@relation` in the Prisma schema** (unlike `targetErrorTaxonomyId`, which does) — the database itself cannot catch a bad reference; only application-layer `assertConceptResolved()` does. Pre-existing, unrelated to the D-039 addendum, not fixed by it.
 4. **No `ANTHROPIC_API_KEY` has ever been configured in this environment**, across this project's entire history. Every AI-dependent code path has only ever been proven via `FixtureProvider`. This blocks: real AI-validated content, the go/no-go gate for chapter two ([03_MVP_SCOPE.md](03_MVP_SCOPE.md)), and any claim that the generation/autopsy pipelines work against a real model.
 5. **No live database has ever been reachable in this environment.** Blocks: any real persistence verification, the Phase 4B-3+ practice UI/HTTP API, any real student completing the full loop.
+6. **Nothing enforces "at most one active `PracticeSession` per enrollment"** (no unique/partial index, no check in `PracticeSessionRepository.create()`). Found while implementing the Training Recommendation Composition layer (2026-09-24): `findActiveByEnrollmentId()` now fails closed (`PersistenceError("invalid_record")`) when more than one exists, which would block recommendations for that enrollment. The invariant belongs at session-creation time (a design decision, not made here).
+7. **`Concept.status` is `"curated"` for every seeded concept — none is `"published"`.** The composition layer therefore resolves concepts through published questions (`ConceptReader.findWithPublishedQuestionsByExamId`), not `Concept.status`. Whether `ConceptStatus` should ever gate training/mastery is an open product question (2026-09-24).
 
 ## B. Deferred work (a deliberate, named decision to build later, not a gap)
 
@@ -18,6 +20,7 @@
 - Mock Simulation, Revision (named, shapes deliberately kept provider-agnostic for them, not designed).
 - `packages/jobs` (BullMQ) — the generation pipeline is a plain async function by design until a queue exists.
 - The Training Recommendation Composition layer's own PrepPhase/CatchUp assembly (deliberately deferred pending blocker A.1/A.2 above being resolved separately).
+- Training Recommendation Composition follow-ups (layer implemented 2026-09-24): `errorTaxonomy` composition; persisting RepairPlan `behaviorSignals`/target difficulty tier for repair tie-breaks; a batched canonical-question read (mastery mapping currently does one `QuestionReader.findById` per distinct attempted question); `patternCoverage` inputs (`allTaxonomyCellsForConcept`/`questionsForCoverage`) are not supplied, so that mastery component stays `null`.
 - Whether to persist freshly-computed mastery as a side effect of a recommendation call — genuinely undecided, not urgent.
 
 ## C. Future enhancements (named as future, not currently blocking anything)

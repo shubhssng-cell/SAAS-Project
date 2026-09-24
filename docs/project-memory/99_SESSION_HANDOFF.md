@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-09-24
+
+**The Training Recommendation Composition layer is now implemented (uncommitted)** — `packages/training-recommendation` plus six read methods in `@ipmat/db`; 1189/1189 tests, typecheck/lint/build clean. The "Exact next work unit (if backend progression resumes)" section below is therefore DONE; see [37_TRAINING_RECOMMENDATION.md §23](37_TRAINING_RECOMMENDATION.md) for what was built and why it deviates from the design in seven named places. Still deferred from that unit: PrepPhase/CatchUp assembly (`prepPhase: null`), `errorTaxonomy`, persisting computed mastery, any API route/UI wiring (including swapping `apps/web`'s fixture adapter), auth. Two new issues were surfaced — see [91_OPEN_BLOCKERS.md](91_OPEN_BLOCKERS.md) §A.6/§A.7. **Next step is the user's call** (commit this unit first; then e.g. an API layer, the `apps/web` adapter swap, or the live-DB/live-AI blockers) — do not pick one silently.
+
 ## What has been completed
 
 - The full backend vertical slice through Phase 5G: Concept Universe, Examiner Lens, Question Universe/DNA, AI generation + validation pipeline, Attempt lifecycle, full Autopsy chain (OBSERVATION→EVIDENCE→HYPOTHESIS→CONFIRMED DIAGNOSIS), multidimensional Mastery, targeted repair selection, global adaptive selection, training orchestration coordinating all of the above plus five concrete training-system providers (Calculation Gym, Speed Lab, Trap Lab, Novelty Training, Pressure Training).

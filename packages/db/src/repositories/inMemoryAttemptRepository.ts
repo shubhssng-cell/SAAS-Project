@@ -1,7 +1,7 @@
 import { getEventTimeline, type AttemptState } from "@ipmat/attempt";
 import { PracticeBlockLifecycleError, type PracticeBlockStatus } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
-import type { AttemptRepository } from "./types.js";
+import type { AttemptHistoryReader, AttemptRepository } from "./types.js";
 import {
   assertAttemptBlockMembershipUnchanged,
   assertAttemptNotRegressingFromFinalized,
@@ -42,7 +42,7 @@ export interface InMemoryAttemptRepositoryOptions {
   practiceBlocks?: Map<string, { status: PracticeBlockStatus; enrollmentId: string; studentId: string }>;
 }
 
-export class InMemoryAttemptRepository implements AttemptRepository {
+export class InMemoryAttemptRepository implements AttemptRepository, AttemptHistoryReader {
   private readonly byId = new Map<string, AttemptState>();
 
   constructor(private readonly options: InMemoryAttemptRepositoryOptions = {}) {}
@@ -100,6 +100,20 @@ export class InMemoryAttemptRepository implements AttemptRepository {
 
   async findById(attemptId: string): Promise<AttemptState | null> {
     return this.byId.get(attemptId) ?? null;
+  }
+
+  /** Same contract as `PrismaAttemptRepository.findFinalizedByStudentId()`: finalized only, `finalizedAt ASC`, `id ASC` tie-break. */
+  async findFinalizedByStudentId(studentId: string): Promise<AttemptState[]> {
+    return [...this.byId.values()]
+      .filter((attempt) => attempt.studentId === studentId && attempt.status !== "in_progress" && attempt.finalizedAt !== null)
+      .sort((a, b) => Date.parse(a.finalizedAt ?? "") - Date.parse(b.finalizedAt ?? "") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  /** Same contract as `PrismaAttemptRepository.findByPracticeBlockId()`: `blockSequenceNumber ASC`, never timestamp order. */
+  async findByPracticeBlockId(practiceBlockId: string): Promise<AttemptState[]> {
+    return [...this.byId.values()]
+      .filter((attempt) => attempt.blockMembership?.practiceBlockId === practiceBlockId)
+      .sort((a, b) => (a.blockMembership?.blockSequenceNumber ?? 0) - (b.blockMembership?.blockSequenceNumber ?? 0));
   }
 
   private allocateBlockMembership(

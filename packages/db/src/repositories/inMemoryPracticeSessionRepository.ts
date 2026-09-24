@@ -1,6 +1,7 @@
 import { abandonPracticeSession, completePracticeSession, type PracticeSessionState } from "@ipmat/practice-session";
 import { PersistenceError } from "./errors.js";
 import type { InMemoryPracticeBlockRepository } from "./inMemoryPracticeBlockRepository.js";
+import { singleActiveSessionOrNull } from "./validation.js";
 import type { PracticeSessionRepository } from "./types.js";
 
 export interface InMemoryPracticeSessionRepositoryOptions {
@@ -47,6 +48,11 @@ export class InMemoryPracticeSessionRepository implements PracticeSessionReposit
 
   async findById(sessionId: string): Promise<PracticeSessionState | null> {
     return this.byId.get(sessionId) ?? null;
+  }
+
+  async findActiveByEnrollmentId(enrollmentId: string): Promise<PracticeSessionState | null> {
+    const active = [...this.byId.values()].filter((session) => session.enrollmentId === enrollmentId && session.status === "active");
+    return singleActiveSessionOrNull(enrollmentId, active);
   }
 
   async complete(sessionId: string, input: { now: string }): Promise<PracticeSessionState> {

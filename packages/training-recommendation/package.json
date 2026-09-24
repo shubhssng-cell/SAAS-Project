@@ -1,0 +1,22 @@
+{
+  "name": "@ipmat/training-recommendation",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ipmat/attempt": "*",
+    "@ipmat/autopsy": "*",
+    "@ipmat/db": "*",
+    "@ipmat/mastery": "*",
+    "@ipmat/practice-block": "*",
+    "@ipmat/practice-session": "*",
+    "@ipmat/question-engine": "*",
+    "@ipmat/training-orchestration": "*"
+  }
+}

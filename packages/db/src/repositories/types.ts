@@ -2,6 +2,7 @@ import type { AttemptState } from "@ipmat/attempt";
 import type {
   AutopsyHypothesis,
   AutopsyOutput,
+  AutopsyQuestionContext,
   AutopsyPersistenceRecord,
   RecommendedTrainingMode,
   RepairPlan,
@@ -170,6 +171,33 @@ export interface AttemptRepository {
 }
 
 /**
+ * Training Recommendation Composition (docs/project-memory/37_TRAINING_RECOMMENDATION.md
+ * §6) — the two bulk, read-only attempt queries the composition layer needs.
+ * Kept as its OWN narrow interface (implemented by both
+ * `PrismaAttemptRepository` and `InMemoryAttemptRepository`) rather than
+ * widening `AttemptRepository` itself, so existing `AttemptRepository`
+ * implementers that only ever write/look up by id are not forced to grow
+ * bulk-read methods they never use — the same narrow-reader precedent as
+ * `QuestionReader`/`PracticeBlockReader`.
+ */
+export interface AttemptHistoryReader {
+  /**
+   * Every FINALIZED attempt (`status !== "in_progress"`, `finalizedAt` set)
+   * for this student, scoped by the indexed `studentId` column, ordered
+   * `finalizedAt ASC` (tie-broken by `id ASC` for determinism). All-time,
+   * unbounded — a deliberate V1 policy (37_TRAINING_RECOMMENDATION.md §9).
+   * `[]` when there are none.
+   */
+  findFinalizedByStudentId(studentId: string): Promise<AttemptState[]>;
+  /**
+   * Every attempt (finalized or not) in this PracticeBlock, ordered by the
+   * server-assigned `blockSequenceNumber ASC` — never by timestamp. `[]`
+   * when there are none.
+   */
+  findByPracticeBlockId(practiceBlockId: string): Promise<AttemptState[]>;
+}
+
+/**
  * Phase 4B-2's exact `QuestionReader` role (docs/DECISIONS.md D-048),
  * mirrored for PracticeBlock (docs/DECISIONS.md D-060) — the narrow,
  * server-loaded fact `@ipmat/practice-loop`'s fast, NON-transactional
@@ -229,6 +257,16 @@ export interface PracticeSessionRepository {
   complete(sessionId: string, input: { now: string }): Promise<PracticeSessionState>;
   /** Same re-read-check-write contract as `complete()`, for `status: "abandoned"`. */
   abandon(sessionId: string, input: { now: string }): Promise<PracticeSessionState>;
+  /**
+   * Training Recommendation Composition (docs/project-memory/37_TRAINING_RECOMMENDATION.md
+   * §6) — the one `status: "active"` session for this enrollment, or `null`
+   * if none. Nothing in the schema or `create()` enforces "at most one
+   * active session per enrollment", so an implementation must NOT silently
+   * pick one when several exist: it throws
+   * `PersistenceError("invalid_record")` instead (fail closed on an
+   * ambiguous "the active session").
+   */
+  findActiveByEnrollmentId(enrollmentId: string): Promise<PracticeSessionState | null>;
 }
 
 /**
@@ -381,4 +419,68 @@ export interface QuestionImportRepository {
     status: QuestionLifecycleStatus;
     provenance: QuestionImportProvenanceInput;
   }): Promise<ImportedQuestionRecord>;
+}
+
+// ---------------------------------------------------------------------
+// Training Recommendation Composition read models
+// (docs/project-memory/37_TRAINING_RECOMMENDATION.md §6, §8). Every reader
+// below is read-only by construction — no write method exists on any of
+// them.
+// ---------------------------------------------------------------------
+
+/** The authoritative ownership fact for an enrollment: `studentId` is the ONE value every enrollment-scoped read is later trusted against. */
+export interface EnrollmentRecord {
+  id: string;
+  studentId: string;
+  examId: string;
+}
+
+export interface EnrollmentReader {
+  /** `null` when no such enrollment exists — the caller decides how to fail closed. */
+  findById(enrollmentId: string): Promise<EnrollmentRecord | null>;
+}
+
+/**
+ * One published question as training selection sees it. Declared HERE,
+ * independently of `@ipmat/training-orchestration`'s structurally identical
+ * `TrainingCandidateQuestion` — `@ipmat/db` must never depend on
+ * `@ipmat/training-orchestration` (37_TRAINING_RECOMMENDATION.md §2).
+ * `question` is `AutopsyQuestionContext`, which structurally has no
+ * `correctAnswer`/`options`/solution field (docs/DECISIONS.md D-020) — an
+ * implementation must not even LOAD those columns for this read.
+ */
+export interface TrainingQuestionRecord {
+  question: AutopsyQuestionContext;
+  expectedTimeSeconds: number;
+  validationState: ValidationState;
+}
+
+export interface TrainingQuestionReader {
+  /**
+   * Every `validationState === "published"` question for this exam whose
+   * Question DNA resolves completely (see `toTrainingQuestionRecord()`).
+   * A question with malformed/incomplete DNA is EXCLUDED, never coerced.
+   * Ordered by question `id ASC` for determinism. `[]` when there are none.
+   */
+  findPublishedByExamId(examId: string): Promise<TrainingQuestionRecord[]>;
+}
+
+/** A concept as the composition layer needs it for `computeMasteryState()` — the real `Concept.id` and its persisted name, never an invented one. */
+export interface ConceptRecord {
+  id: string;
+  name: string;
+  chapterId: string;
+}
+
+export interface ConceptReader {
+  /**
+   * Every concept that is the PRIMARY concept (`Question.conceptId`) of at
+   * least one `published` question for this exam, resolved through the
+   * persisted `Question -> Concept` relationship. Deliberately NOT a
+   * `Concept.status === "published"` filter — that is a separate
+   * content-curation status (every seeded concept is `"curated"`), and
+   * filtering on it would silently hide mastery for concepts students can
+   * actually practice. Ordered by `id ASC`. `[]` when there are none.
+   */
+  findWithPublishedQuestionsByExamId(examId: string): Promise<ConceptRecord[]>;
 }

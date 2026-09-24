@@ -3,6 +3,7 @@ import { abandonPracticeSession, completePracticeSession, type PracticeSessionSt
 import { PersistenceError } from "./errors.js";
 import { runSerializableTransaction } from "./serializable.js";
 import type { PracticeSessionRepository } from "./types.js";
+import { singleActiveSessionOrNull } from "./validation.js";
 
 function toState(row: {
   id: string;
@@ -56,6 +57,12 @@ export class PrismaPracticeSessionRepository implements PracticeSessionRepositor
   async findById(sessionId: string): Promise<PracticeSessionState | null> {
     const row = await this.prisma.practiceSession.findUnique({ where: { id: sessionId } });
     return row ? toState(row) : null;
+  }
+
+  /** Scoped by the indexed `enrollmentId` + `status` columns. `take: 2` is enough to detect (and fail closed on) the ambiguous "more than one active session" state nothing else currently prevents. */
+  async findActiveByEnrollmentId(enrollmentId: string): Promise<PracticeSessionState | null> {
+    const rows = await this.prisma.practiceSession.findMany({ where: { enrollmentId, status: "active" }, orderBy: { id: "asc" }, take: 2 });
+    return singleActiveSessionOrNull(enrollmentId, rows.map(toState));
   }
 
   async complete(sessionId: string, input: { now: string }): Promise<PracticeSessionState> {

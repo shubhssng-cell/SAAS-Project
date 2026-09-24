@@ -4,7 +4,7 @@ import { PracticeBlockLifecycleError } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
 import { asJson } from "./json.js";
 import { runSerializableTransaction } from "./serializable.js";
-import type { AttemptRepository } from "./types.js";
+import type { AttemptHistoryReader, AttemptRepository } from "./types.js";
 import {
   assertAttemptBlockMembershipUnchanged,
   assertAttemptNotRegressingFromFinalized,
@@ -54,7 +54,7 @@ import {
  * `SerializationFailureError` by `runSerializableTransaction()`), not a
  * silently-duplicated sequence number.
  */
-export class PrismaAttemptRepository implements AttemptRepository {
+export class PrismaAttemptRepository implements AttemptRepository, AttemptHistoryReader {
   constructor(private readonly prisma: PrismaClient) {}
 
   async save(state: AttemptState, blockAllocationRequest?: { practiceBlockId: string }): Promise<AttemptState> {
@@ -173,6 +173,26 @@ export class PrismaAttemptRepository implements AttemptRepository {
       include: { events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
     });
     return row ? toAttemptState(row) : null;
+  }
+
+  /** Scoped by the indexed `studentId` column in the query itself — another student's row is never fetched at all. `finalizedAt ASC`, `id ASC` tie-break. */
+  async findFinalizedByStudentId(studentId: string): Promise<AttemptState[]> {
+    const rows = await this.prisma.attempt.findMany({
+      where: { studentId, status: { not: "in_progress" }, finalizedAt: { not: null } },
+      orderBy: [{ finalizedAt: "asc" }, { id: "asc" }],
+      include: { events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
+    });
+    return rows.map(toAttemptState);
+  }
+
+  /** Scoped by the indexed `practiceBlockId` column; ordered by the server-assigned `blockSequenceNumber`, never by timestamp. */
+  async findByPracticeBlockId(practiceBlockId: string): Promise<AttemptState[]> {
+    const rows = await this.prisma.attempt.findMany({
+      where: { practiceBlockId },
+      orderBy: { blockSequenceNumber: "asc" },
+      include: { events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
+    });
+    return rows.map(toAttemptState);
   }
 
   private async assertReferencesExist(tx: Prisma.TransactionClient, state: AttemptState): Promise<void> {

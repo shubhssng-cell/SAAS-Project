@@ -1,6 +1,6 @@
 # 37 — Training Recommendation Composition Layer (the next architectural unit)
 
-> Part of the [project memory](00_MASTER_CONTEXT.md). **Source: this file is NOT reconstructed from committed docs** — it records a design produced directly in this session, through two full design-review passes plus a supporting persistence-fidelity fix (D-039 addendum), against the actual current repository source. No code for this layer exists yet. Treat the specifics below as an approved, implementation-ready design, not as implemented fact — always verify against actual source before writing code against it, per [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md)'s own rule.
+> Part of the [project memory](00_MASTER_CONTEXT.md). **Source: this file is NOT reconstructed from committed docs** — sections 1–22 record the approved design produced through two full design-review passes plus a supporting persistence-fidelity fix (D-039 addendum). **This layer is now IMPLEMENTED (uncommitted as of 2026-09-24)** — see [§23 "As implemented"](#23-as-implemented-2026-09-24) at the end of this file for exactly what was built and every place the implementation deliberately deviates from §1–22. Where §23 and an earlier section disagree, §23 (and the actual source) wins.
 
 ## What this is, in one sentence
 
@@ -169,3 +169,36 @@ None of these three blocks the **core** recommendation flow — they block only 
 ## Final verdict, as of this design
 
 **IMPLEMENTATION READY: YES.** Smallest safe scope: the 6 new repository methods (§6) plus the new package implementing exactly the flow in §5, with `prepPhase` hardcoded `null` and `errorTaxonomy` omitted — both named, bounded, reversible in a later pass.
+
+## 23. As implemented (2026-09-24)
+
+Implemented on top of commit `1039d5c`, **uncommitted** at the time of writing. Verified: 1189/1189 tests (128 files), full-repo typecheck/lint/build clean. No live database, no AI call — every check ran against `@ipmat/db`'s in-memory doubles or a fake `PrismaClient`.
+
+### Public entry point
+
+`new TrainingRecommendationService(deps).recommendNextTrainingAction({ studentId, enrollmentId }): Promise<TrainingOrchestrationResult>` (`packages/training-recommendation/src/service.ts`) — returns `orchestrateNextTrainingAction()`'s result verbatim. Dependencies are injected `@ipmat/db` ports (the `PracticeLoopService` construction precedent); repository ports are narrowed with `Pick<…>` to their one read method, so the layer structurally cannot write. `composeTrainingOrchestrationInput(deps, request)` (`src/compose.ts`) is exported separately so input assembly is testable on its own. An optional `now: () => string` dependency feeds `computeMasteryState()`'s `now`.
+
+### New `@ipmat/db` read methods (Prisma + in-memory implementations for each)
+
+| Method | Notes |
+|---|---|
+| `EnrollmentReader.findById` | new interface; `select`s only `id/studentId/examId` |
+| `AttemptHistoryReader.findFinalizedByStudentId` | `status != in_progress AND finalizedAt != null`, `finalizedAt ASC, id ASC` |
+| `AttemptHistoryReader.findByPracticeBlockId` | `blockSequenceNumber ASC` |
+| `PracticeSessionRepository.findActiveByEnrollmentId` | throws `PersistenceError("invalid_record")` if >1 active session |
+| `TrainingQuestionReader.findPublishedByExamId` | `select` (never `include`) — answer/solution columns are never loaded; pure `toTrainingQuestionRecord()` excludes malformed DNA |
+| `ConceptReader.findWithPublishedQuestionsByExamId` | concepts via `Question -> Concept` relation |
+
+### Deliberate deviations from §1–22 (each for a reason found in the actual source)
+
+1. **`AttemptHistoryReader` is a separate interface**, implemented by both `PrismaAttemptRepository` and `InMemoryAttemptRepository`, rather than new methods on `AttemptRepository` itself — `@ipmat/practice-loop`'s tests implement `AttemptRepository` as object literals, and §21 forbids touching practice-loop.
+2. **`ConceptReader.findWithPublishedQuestionsByExamId(examId)` replaces `findPublishedByChapterId(chapterId)`.** (a) The enrollment carries only `examId`; no reader exposes chapter ids. (b) Every seeded `Concept` has `status: "curated"`, none `"published"` — a `Concept.status` filter would have silently produced zero mastery. Concepts are now resolved through the persisted `Question.conceptId` relation for this exam's published questions.
+3. **`@ipmat/autopsy` is an additional direct dependency** — `fromRepairPlanPersistenceRecord()` (§5 step 13) lives there and nothing re-exports it.
+4. **Mastery input needs the D-048 `QuestionReader`.** `toMasteryContribution()` requires a full `AttemptQuestionContext` (including `correctAnswer`/`options`). The composition layer loads the canonical question once per distinct attempted question id via the existing `QuestionReader.findById`, uses it only for that mapping, and never forwards it (tests assert the answer key appears nowhere in the composed input or the result). Cost: one query per distinct attempted question (N+1) — acceptable for V1, a candidate for a batched reader later.
+5. **Attempts without a resolvable question context are excluded from `attemptRecords`** (question not in this exam's published, DNA-complete pool — including another exam's questions; no canonical row; canonical `conceptId` not matching the DNA's concept name). Never given invented context.
+6. **PracticeBlock contexts are omitted, not trimmed,** when a block has zero attempts or any attempt missing from `attemptRecords` (typically an `in_progress` attempt): `TrainingSystemContext.practiceBlocks` requires every listed id to appear in `attemptRecords`, and dropping individual attempts would misstate sequence/gap evidence. Only the ACTIVE session's blocks are read (per §15).
+7. **Ownership re-verification beyond the one enrollment check:** every row a reader returns is re-checked against the verified chain (attempt `studentId`; RepairPlan `studentId`; session `enrollmentId`; block `practiceSessionId`; block attempt `studentId` + `enrollmentId` + `blockMembership.practiceBlockId`). A mismatch throws `TrainingRecommendationError("ownership_inconsistency")` — never silently filtered. A "finalized" attempt that is not finalized throws `repository_contract_violation`.
+
+### Unchanged from design
+
+`prepPhase: null` always; `errorTaxonomy` omitted; `behaviorSignals`/`targetDifficultyTier` omitted from `ActiveRepairPlanContext` (not persisted); no transaction; sequential reads; no writes; no persistence of computed mastery; no API/UI/auth/AI.
