@@ -24,3 +24,5 @@ export * from "./prismaTrainingQuestionReader.js";
 export * from "./inMemoryTrainingQuestionReader.js";
 export * from "./prismaConceptReader.js";
 export * from "./inMemoryConceptReader.js";
+export * from "./prismaQuestionContentReader.js";
+export * from "./inMemoryQuestionContentReader.js";

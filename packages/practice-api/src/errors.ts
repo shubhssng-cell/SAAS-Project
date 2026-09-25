@@ -1,0 +1,79 @@
+import { AttemptLifecycleError } from "@ipmat/attempt";
+import { PersistenceError } from "@ipmat/db";
+import { PracticeLoopError } from "@ipmat/practice-loop";
+import { TrainingRecommendationError } from "@ipmat/training-recommendation";
+import { PracticeApiError } from "./types.js";
+
+/**
+ * The ONE place a domain/application/repository error is turned into a
+ * safe, transport-agnostic `PracticeApiError` (E). Every branch below maps
+ * an EXISTING, already-thrown error type's `code` — this function never
+ * inspects `error.message` to decide anything, and the `PracticeApiError`
+ * it builds always carries a hand-authored, generic message, never the
+ * original error's own text (which could otherwise echo back an internal
+ * id, a repository's field name, or similar). An error type this function
+ * does not recognize (a genuine, unexpected repository/infrastructure
+ * failure — a real `PersistenceError` case, a network error, anything
+ * else) maps to `infrastructure_failure`/500 with a fully generic message
+ * — never a stack trace, never a raw driver/ORM error string. Logging the
+ * ORIGINAL error server-side (for operators, never for the client) is a
+ * transport's own job, not this function's.
+ */
+export function toPracticeApiError(error: unknown): PracticeApiError {
+  if (error instanceof TrainingRecommendationError) {
+    switch (error.code) {
+      case "invalid_request":
+        return new PracticeApiError("invalid_request", "The request was missing a required identifier.", 400);
+      case "enrollment_not_found":
+        return new PracticeApiError("not_found", "No matching enrollment was found.", 404);
+      case "enrollment_ownership_mismatch":
+        return new PracticeApiError("ownership_mismatch", "This enrollment does not belong to the requesting student.", 403);
+      case "ownership_inconsistency":
+      case "repository_contract_violation":
+        return new PracticeApiError("infrastructure_failure", "Your recommendation could not be computed right now. Please try again.", 500);
+    }
+  }
+
+  if (error instanceof PracticeLoopError) {
+    switch (error.code) {
+      case "question_not_found":
+      case "practice_block_not_found":
+        return new PracticeApiError("not_found", "No matching question was found.", 404);
+      case "question_not_published":
+        return new PracticeApiError("question_not_published", "This question is not currently available for practice.", 409);
+      case "practice_block_not_active":
+        return new PracticeApiError("invalid_state", "This practice session is no longer active.", 409);
+      case "practice_block_ownership_mismatch":
+        return new PracticeApiError("ownership_mismatch", "This practice session does not belong to the requesting student.", 403);
+    }
+  }
+
+  if (error instanceof AttemptLifecycleError) {
+    switch (error.code) {
+      case "attempt_not_found":
+        return new PracticeApiError("not_found", "No matching attempt was found.", 404);
+      case "ownership_mismatch":
+        return new PracticeApiError("ownership_mismatch", "This attempt does not belong to the requesting student.", 403);
+      case "already_finalized":
+        return new PracticeApiError("invalid_state", "This attempt has already been finalized.", 409);
+      case "malformed_event_payload":
+      case "impossible_timestamp":
+      case "missing_answer":
+      case "invalid_answer_option":
+        return new PracticeApiError("invalid_request", "The request could not be applied to this attempt.", 400);
+    }
+  }
+
+  if (error instanceof PersistenceError) {
+    switch (error.code) {
+      case "missing_reference":
+        return new PracticeApiError("not_found", "A referenced record could not be found.", 404);
+      case "ownership_mismatch":
+        return new PracticeApiError("ownership_mismatch", "This record does not belong to the requesting student.", 403);
+      case "invalid_record":
+        return new PracticeApiError("infrastructure_failure", "This request could not be completed right now. Please try again.", 500);
+    }
+  }
+
+  return new PracticeApiError("infrastructure_failure", "An unexpected error occurred. Please try again.", 500);
+}

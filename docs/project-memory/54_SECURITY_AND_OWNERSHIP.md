@@ -32,9 +32,17 @@ While designing the read contract for confirmed, active RepairPlans, this sessio
 
 Repeated explicitly across many decisions (D-043, D-044, D-046): TypeScript's structural typing cannot stop a caller from constructing a `RepairPlan`-shaped or `AttemptState`-shaped object some other way, bypassing whatever gate the real constructor function enforces. Every persistence boundary re-verifies the same invariant a second time (e.g. `assertRepairPlanConfirmed()` exists **both** inside `@ipmat/repair-selection` and inside `@ipmat/db`'s own validation layer) — defense-in-depth, not a claim that the domain layer's own guarantee is insufficient.
 
-## The Training Recommendation Composition layer's own ownership rule (designed, not yet implemented)
+## The Training Recommendation Composition layer's own ownership rule (implemented — D-063)
 
-Exactly one authoritative check, first, before any other read: `enrollment.studentId === callerStudentId`. Every subsequent read is scoped by `studentId` directly or by an id derived from the already-verified `enrollment` — never a caller-supplied id taken on faith beyond that one check. No transaction is needed for this (a single read has no multi-statement race to protect against) — see [37_TRAINING_RECOMMENDATION.md](37_TRAINING_RECOMMENDATION.md) §10–11 for the full reasoning.
+Exactly one authoritative check, first, before any other read: `enrollment.studentId === callerStudentId`. Every subsequent read is scoped by `studentId` directly or by an id derived from the already-verified `enrollment` — never a caller-supplied id taken on faith beyond that one check. No transaction is needed for this (a single read has no multi-statement race to protect against) — see [37_TRAINING_RECOMMENDATION.md](37_TRAINING_RECOMMENDATION.md) §10–11 for the full reasoning. **Corrected 2026-09-25** — this section previously read "designed, not yet implemented"; it has been implemented and tested since D-063, this heading was simply never updated afterward.
+
+### Two further gaps closed at the new application/API boundary (D-064, implemented)
+
+Neither was enforced by any layer `@ipmat/practice-api` calls:
+1. `PracticeLoopService.startAttempt()` never verified `enrollmentId` belongs to `studentId` for ordinary (non-block) practice — closed by reusing `@ipmat/training-recommendation`'s own `assertEnrollmentOwnership()` directly, never a second, independently-written check.
+2. `AutopsyRepository.findByAttemptId()` has no ownership scoping of its own (a plain id lookup, by design, mirroring `AttemptRepository.findById()`) — `PracticeApiService.getAttemptResult()`/`getAutopsyForConfirmation()` load the attempt first and verify `attempt.studentId === claim.studentId` before returning anything.
+
+A client-supplied `now` is never accepted anywhere in the HTTP transport (`apps/api/src/server.ts`) — the one place `Attempt.timeSpentSeconds` (`finalizedAt - startedAt`) could otherwise be manipulated by a caller. This boundary adds no authentication — D-004 remains open; `studentId`/`enrollmentId` are still explicit, unauthenticated request fields.
 
 ## What must never happen, going forward
 

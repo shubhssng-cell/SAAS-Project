@@ -484,3 +484,37 @@ export interface ConceptReader {
    */
   findWithPublishedQuestionsByExamId(examId: string): Promise<ConceptRecord[]>;
 }
+
+// ---------------------------------------------------------------------
+// Question Content Reader — the student-facing DISPLAY content of a
+// published question (the actual stem/body/options a student reads),
+// for the application/API boundary (docs/project-memory/70_API_AND_APPLICATION_LAYER.md).
+// Genuinely missing before now: `QuestionReader`/`CanonicalQuestion`
+// (D-048) carries the answer key for server-side grading and deliberately
+// has no `body`; `TrainingQuestionReader`/`AutopsyQuestionContext` (D-063)
+// carries Question DNA metadata for selection and also has no `body`.
+// Neither is safe or sufficient to render a question to a student.
+// ---------------------------------------------------------------------
+
+/**
+ * Everything an application boundary needs to RENDER a published question
+ * to a student — and nothing else. Deliberately excludes `correctAnswer`,
+ * `groundTruthDerivation`, and `solutionSteps` (the same D-020 "narrow,
+ * allowlisted view" discipline `AutopsyQuestionContext`/`CanonicalQuestion`
+ * already follow) — a caller that needs the answer key for grading uses
+ * `QuestionReader`/`CanonicalQuestion` instead, never this type.
+ */
+export interface StudentQuestionRecord {
+  id: string;
+  chapterName: string;
+  conceptName: string;
+  prompt: string;
+  answerFormat: "multiple_choice" | "numeric_entry";
+  options: string[] | null;
+  expectedTimeSeconds: number;
+}
+
+export interface QuestionContentReader {
+  /** `null` unless the question exists AND `validationState === "published"` — the same "never render draft/review/rejected content" rule `PracticeLoopService.startAttempt()` already enforces, re-checked here independently rather than assumed from an earlier call. */
+  findPublishedById(questionId: string): Promise<StudentQuestionRecord | null>;
+}
