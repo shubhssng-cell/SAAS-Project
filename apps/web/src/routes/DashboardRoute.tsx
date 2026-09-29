@@ -17,11 +17,15 @@ import { useNavigate } from "../router/router.js";
  * gate-composition regression fails safely (a loading message) instead of
  * crashing on an undefined access.
  *
- * The practice recommendation itself (`adapter.getDashboard()`) is
+ * The practice recommendation preview itself (`adapter.getDashboard()`) is
  * completely UNCHANGED from Unit 5 -- still the same fixture-backed
- * `TrainingRecommendationAdapter`, still the same "Start Practice"
- * navigation target. Unit 8 only adds the real student/enrollment context
- * around it.
+ * `TrainingRecommendationAdapter`. `dashboard.recommendation` is used only
+ * for the on-page preview (headline/explanation/disabled state); the
+ * "Start Practice" action itself no longer navigates to a dashboard-chosen
+ * question id (Product Phase 1 Unit 9) -- it hands off to the real
+ * practice-entry boundary at `/practice/next`, which resolves the next
+ * question itself via the same adapter. Dashboard.tsx never decides what
+ * question comes next.
  */
 export function DashboardRoute() {
   const { adapter } = usePracticeSession();
@@ -50,7 +54,7 @@ export function DashboardRoute() {
       dashboard={dashboard}
       studentEmail={authState.student.email}
       prepStatus={prepStatus}
-      onStart={() => navigate(`/practice/${dashboard.recommendation.questionId ?? "q-reverse-1"}`)}
+      onStart={() => navigate("/practice/next")}
     />
   );
 }

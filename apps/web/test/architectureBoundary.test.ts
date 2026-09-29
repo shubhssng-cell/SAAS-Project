@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice"];
 const EXCLUDED_FILES: string[] = [];
 
 const BANNED_IMPORT_SPECIFIERS = [
@@ -153,11 +153,17 @@ describe("Dashboard: real student/enrollment context, no fabricated data, no new
     expect(source).not.toMatch(/\bfetch\(/);
   });
 
-  it("DashboardRoute still calls the SAME unmodified fixture adapter for the practice recommendation (adapter.getDashboard, same onStart navigation target)", () => {
+  it("DashboardRoute still calls the SAME unmodified fixture adapter for the practice recommendation preview (adapter.getDashboard)", () => {
     const source = readFileSync(join(routesDir, "DashboardRoute.tsx"), "utf-8");
     expect(source).toContain("usePracticeSession");
     expect(source).toContain("adapter.getDashboard()");
-    expect(source).toMatch(/navigate\(`\/practice\/\$\{dashboard\.recommendation\.questionId/);
+  });
+
+  it("DashboardRoute's Start Practice action hands off to the real practice-entry boundary (/practice/next), never a dashboard-chosen question id (Product Phase 1 Unit 9)", () => {
+    const source = readFileSync(join(routesDir, "DashboardRoute.tsx"), "utf-8");
+    expect(source).toMatch(/navigate\(["']\/practice\/next["']\)/);
+    expect(source).not.toMatch(/dashboard\.recommendation\.questionId/);
+    expect(source).not.toContain("q-reverse-1");
   });
 
   it("Dashboard.tsx composes the EXISTING RecommendationCard rather than reimplementing the recommendation display", () => {
@@ -173,6 +179,50 @@ describe("Dashboard: real student/enrollment context, no fabricated data, no new
   it("Dashboard.tsx never fabricates a readiness/confidence claim or hardcodes a percentage in its own source", () => {
     const source = readFileSync(join(componentsDir, "Dashboard.tsx"), "utf-8");
     expect(source.toLowerCase()).not.toMatch(/confidence|% ready|ai recommends|weakest area/);
+  });
+});
+
+describe("Practice entry: the real dashboard -> practice transition, no second decision engine (Product Phase 1 Unit 9)", () => {
+  const routesDir = join(webRoot, "src/routes");
+  const practiceDir = join(webRoot, "src/practice");
+
+  it("PracticeNextRoute asks the EXISTING adapter for the next item, never a new fetch call or a second recommendation engine", () => {
+    const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
+    expect(source).toContain("usePracticeSession");
+    expect(source).toMatch(/adapter\s*\.getNextRecommendation\(\)/);
+    expect(source).not.toMatch(/\bfetch\(/);
+  });
+
+  it("PracticeNextRoute shows an explicit, non-blank loading state while resolving", () => {
+    const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
+    expect(source).toContain("Finding your next question");
+  });
+
+  it("PracticeNextRoute navigates to the resolved question's own id via decidePracticeEntryOutcome, never a hardcoded fallback", () => {
+    const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
+    expect(source).toContain("decidePracticeEntryOutcome");
+    expect(source).toMatch(/navigate\(`\/practice\/\$\{outcome\.questionId\}`\)/);
+    expect(source).not.toContain("q-reverse-1");
+  });
+
+  it("PracticeNextRoute has an explicit unavailable state with a recovery action -- never implies a recommendation exists when it doesn't", () => {
+    const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
+    expect(source).toContain("Practice isn't available right now.");
+    expect(source).toContain('navigate("/dashboard")');
+  });
+
+  it("PracticeNextRoute has an explicit error state with a recovery action, and never exposes raw internals", () => {
+    const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
+    expect(source).toContain(".catch(");
+    expect(source).toContain("Try again");
+    expect(source.toLowerCase()).not.toMatch(/stack|json\.stringify|error\.message/);
+  });
+
+  it("decidePracticeEntryOutcome is a pure function -- no React, no fetch, no adapter import", () => {
+    const source = readFileSync(join(practiceDir, "practiceEntry.ts"), "utf-8");
+    expect(source).not.toMatch(/\breact\b/i);
+    expect(source).not.toMatch(/\bfetch\(/);
+    expect(source).not.toContain("createFixtureTrainingAdapter");
   });
 });
 
