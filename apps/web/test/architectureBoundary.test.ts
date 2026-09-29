@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard"];
 const EXCLUDED_FILES: string[] = [];
 
 const BANNED_IMPORT_SPECIFIERS = [
@@ -139,6 +139,40 @@ describe("Enrollment: the browser never chooses which student is enrolled (Produ
     const source = readFileSync(join(enrollmentDir, "EnrollmentGate.tsx"), "utf-8");
     expect(source).toContain('decision === "redirect"');
     expect(source).not.toContain('decision === "unresolved"'); // never explicitly branches into a redirect for this case
+  });
+});
+
+describe("Dashboard: real student/enrollment context, no fabricated data, no new fetch mechanism (Product Phase 1 Unit 8)", () => {
+  const routesDir = join(webRoot, "src/routes");
+  const componentsDir = join(webRoot, "src/components");
+
+  it("DashboardRoute reads student identity/enrollment from the EXISTING contexts, never a new fetch call", () => {
+    const source = readFileSync(join(routesDir, "DashboardRoute.tsx"), "utf-8");
+    expect(source).toContain("useAuth");
+    expect(source).toContain("useEnrollment");
+    expect(source).not.toMatch(/\bfetch\(/);
+  });
+
+  it("DashboardRoute still calls the SAME unmodified fixture adapter for the practice recommendation (adapter.getDashboard, same onStart navigation target)", () => {
+    const source = readFileSync(join(routesDir, "DashboardRoute.tsx"), "utf-8");
+    expect(source).toContain("usePracticeSession");
+    expect(source).toContain("adapter.getDashboard()");
+    expect(source).toMatch(/navigate\(`\/practice\/\$\{dashboard\.recommendation\.questionId/);
+  });
+
+  it("Dashboard.tsx composes the EXISTING RecommendationCard rather than reimplementing the recommendation display", () => {
+    expect(readFileSync(join(componentsDir, "Dashboard.tsx"), "utf-8")).toContain('from "./RecommendationCard.js"');
+  });
+
+  it("Dashboard.tsx only ever receives the narrow PrepStatusViewModel -- never the raw EnrollmentDto/PrepPhaseDto (which carry examId/enrollment id/raw field names)", () => {
+    const source = readFileSync(join(componentsDir, "Dashboard.tsx"), "utf-8");
+    expect(source).not.toMatch(/EnrollmentDto|PrepPhaseDto/);
+    expect(source).toContain("PrepStatusViewModel");
+  });
+
+  it("Dashboard.tsx never fabricates a readiness/confidence claim or hardcodes a percentage in its own source", () => {
+    const source = readFileSync(join(componentsDir, "Dashboard.tsx"), "utf-8");
+    expect(source.toLowerCase()).not.toMatch(/confidence|% ready|ai recommends|weakest area/);
   });
 });
 

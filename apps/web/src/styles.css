@@ -673,6 +673,11 @@ body {
   margin: 0;
 }
 
+/* Product Phase 1 Unit 8 -- the practice-progress note between the prep-status Card and the RecommendationCard. */
+.dashboard-practice-note {
+  margin-top: var(--space-5);
+}
+
 @media (max-width: 480px) {
   .app-header {
     padding: var(--space-4);
