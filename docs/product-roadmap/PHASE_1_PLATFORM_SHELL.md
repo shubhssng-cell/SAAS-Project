@@ -114,7 +114,7 @@ All of the above already exist as domain/application logic (`@ipmat/practice-api
 
 ### Current Unit
 
-**Current Unit: Unit 1 — audit complete (2026-09-29), see "Unit 1 audit findings" and "Web Architecture Lock" below. Unit 2 is defined and ready to start, but not yet begun.**
+**Current Unit: Unit 2 — implemented (2026-09-29, not yet committed), see "Unit 2 implementation summary" below. Unit 3 is next.**
 
 ## Phase 1 unit plan
 
@@ -157,6 +157,61 @@ Each unit below is documented only at the level of objective / expected student-
 - Real API integration (Unit 10)
 - Any adaptive/orchestration logic (already exists server-side/adapter-side — Unit 2 does not touch it)
 - Payments (out of scope for all of Phase 1)
+
+### Unit 2 implementation summary (2026-09-29)
+
+**What was built.** A minimal, dependency-free client-side router (`history.pushState` + `popstate` + React 18's `useSyncExternalStore` — no routing library was added; the existing route set is small and fixed enough that none was genuinely required), plus route-level page components for every route named above. `App.tsx` no longer owns any screen-state union — it is now purely the shell (header + `<PracticeSessionProvider>` + `<AppRoutes />`).
+
+**Actual routes implemented** (exactly the ten required, no more):
+
+| Path | Component | Kind |
+|---|---|---|
+| `/` | `LandingPage` | new placeholder |
+| `/login` | `LoginPage` | new placeholder |
+| `/signup` | `SignupPage` | new placeholder |
+| `/onboarding` | `OnboardingPage` | new placeholder |
+| `/enroll` | `EnrollPage` | new placeholder |
+| `/dashboard` | `DashboardRoute` | reuses existing `Dashboard` |
+| `/practice/next` | `PracticeNextRoute` | reuses existing `NextTrainingCard` |
+| `/practice/:questionId/result` | `PracticeResultRoute` | reuses existing `ResultScreen` |
+| `/practice/:questionId/autopsy` | `PracticeAutopsyRoute` | reuses existing `AutopsyCard`, `ConfirmationPrompt` |
+| `/practice/:questionId` | `PracticeQuestionRoute` | reuses existing `QuestionPlayer`, `Timer` |
+
+Placeholder screens (`/`, `/login`, `/signup`, `/onboarding`, `/enroll`) each contain only a heading, one short paragraph naming which later unit implements the real behavior, and a plain `Continue`/navigation link — explicitly no form submission, no session/identity creation, no onboarding or enrollment logic. This is disclosed inline in each file's own doc comment.
+
+**Files added:**
+- `apps/web/src/router/match.ts` — pure path/param matcher (no JSX, no DOM access)
+- `apps/web/src/router/routeTable.ts` — pure `{id, pattern}[]` route data (mirrors `apps/api/src/server.ts`'s own `ROUTES` table style), separated from JSX specifically so it's unit-testable without rendering
+- `apps/web/src/router/router.tsx` — `navigate()`, `usePathname()`, `useNavigate()`, `Link`
+- `apps/web/src/router/AppRoutes.tsx` — maps `ROUTE_TABLE` ids to page components, renders `NotFoundPage` on no match
+- `apps/web/src/practice/PracticeSessionContext.tsx` — holds the one adapter instance plus the minimum transient UI-navigation state (see "architectural decisions" below)
+- `apps/web/src/routes/{LandingPage,LoginPage,SignupPage,OnboardingPage,EnrollPage,NotFoundPage,DashboardRoute,PracticeQuestionRoute,PracticeResultRoute,PracticeAutopsyRoute,PracticeNextRoute}.tsx`
+- `apps/web/test/router.test.ts`, `apps/web/test/architectureBoundary.test.ts`
+
+**Files modified:** `apps/web/src/App.tsx` only (rewritten as the shell, described above).
+
+**Files NOT touched:** `apps/web/src/adapter/*` (interface and fixture implementation both untouched, per instruction), all of `apps/web/src/components/*` (reused verbatim, zero edits), `apps/web/src/styles.css`, `apps/web/package.json` (no dependency added), `apps/web/test/service.test.ts` (still passes unmodified), any backend/domain package, any Prisma/schema file.
+
+**How the existing practice flow was preserved.** The dashboard → question → result → autopsy → next sequence is identical in substance to the pre-Unit-2 flow — same components, same adapter calls, same order — the only change is that each step now corresponds to a URL (`navigate(...)` replaces `setScreen(...)`) instead of local component state. `TrainingRecommendationAdapter` and `createFixtureTrainingAdapter()` were not modified at all.
+
+**Architectural decision: a small `PracticeSessionContext` for transient cross-route handoff state.** `TrainingRecommendationAdapter` has no "fetch by id" method — `submitAnswer()` and `getAutopsy()` each return their view model inline, once, not something a later route can re-fetch from a bare URL. Since `/practice/:questionId/result` and `/practice/:questionId/autopsy` are separate routes from `/practice/:questionId`, something has to carry the just-returned `AttemptResultViewModel`/`AutopsyViewModel` from the step that produced it to the step that displays it. `PracticeSessionContext` does exactly that and nothing else: it holds the one `TrainingRecommendationAdapter` instance for the session plus two small maps (`questionId -> last result`, `attemptId -> last autopsy`), populated only with values the adapter itself already returned. It makes no decisions, computes nothing, and is not a second adapter. **Known, disclosed limitation:** because this state is in-memory only, a hard refresh directly on `/practice/:questionId/result` or `/practice/:questionId/autopsy` (without having gone through the flow first) shows an honest "not available, go back to the question" fallback rather than the real result/autopsy — this is a direct consequence of the fixture adapter's shape (no fetch-by-id), not a routing defect, and is the same in-memory-only constraint the pre-Unit-2 `Screen` state already had. It is expected to resolve naturally once Unit 10 wires a real, server-backed adapter that can fetch an attempt's result/autopsy by id.
+
+**Tests added (all pure-function/static-analysis, no new dependency, no jsdom/testing-library):**
+- `router.test.ts` (17 tests): `ROUTE_TABLE` contains exactly the ten required routes; `/practice/next`, `/practice/:questionId/result`, `/practice/:questionId/autopsy` are ordered before the generic `/practice/:questionId` (precedence); `matchPath()` resolves every required route from a raw pathname (deep-linking) and extracts `questionId` correctly; an unknown path resolves to no route; a trailing slash is treated the same as none.
+- `architectureBoundary.test.ts` (24 tests): every file under `src/router/` and `src/routes/` is statically scanned for an import from any of the 17 banned specifiers (`@ipmat/attempt`, `@ipmat/autopsy`, `@ipmat/mastery`, `@ipmat/training-orchestration`, `@ipmat/adaptive-selection`, `@ipmat/repair-selection`, `@ipmat/training-systems`, the five training-system provider packages, `@ipmat/practice-loop`, `@ipmat/training-recommendation`, `@ipmat/db`, `@ipmat/ai`, `@prisma/client`) — all pass with zero offenders; plus checks that each real route composes its corresponding existing component (`Dashboard`, `QuestionPlayer`, `ResultScreen`, `AutopsyCard`, `NextTrainingCard`) and reaches the adapter only via `usePracticeSession()`, never a second `createFixtureTrainingAdapter()` call.
+- `test/service.test.ts` (existing, 6 tests): unmodified, still passing — proves the adapter itself is untouched.
+
+Browser-rendered navigation (actually clicking through the app) was not exercised in this unit — only `tsc`/`vite build`/`vitest` were run, per this unit's own instruction to avoid unrelated expensive validation; manual browser QA of the full journey is Unit 12's explicit job.
+
+**Tests/typecheck/build results:**
+- `vitest run apps/web/test`: 3 files, **47/47 tests passing** (17 new router tests + 24 new architecture-boundary tests + 6 pre-existing adapter tests, all green).
+- `npm run typecheck --workspace @ipmat/web` (`tsc --noEmit`): clean, 0 errors (two rounds of `noUncheckedIndexedAccess`-driven fixes applied to `match.ts`/`AppRoutes.tsx` during implementation, then clean).
+- `npm run build --workspace @ipmat/web` (`tsc --noEmit && vite build`): clean, succeeds (1308 modules transformed, `dist/assets/index-*.js` 323.59 kB / gzip 90.39 kB).
+- `eslint apps/web/src apps/web/test --ext .ts,.tsx`: 0 errors, 0 warnings.
+
+**Deviations from scope:** none identified. No routing dependency was added (a hand-rolled ~90-line router was used instead, consistent with instruction 2's "minimum appropriate routing dependency only if one is genuinely required"); no domain package was imported by any new file; the existing fixture adapter, its interface, and all presentational components were reused unmodified; no auth/onboarding/enrollment/API-integration/adaptive logic was implemented, only navigation stubs to their future routes.
+
+**Unresolved/carried-forward items (expected, not blockers for Unit 2 closure):** the result/autopsy hard-refresh limitation described above (resolves at Unit 10); placeholder screens have no real content (expected — Units 4–7); `apps/web/package.json` still has its Unit-1-documented direct domain-package dependencies, unchanged (expected — those are only removed when Unit 10 retires the fixture adapter, not before).
 
 ### Unit 3 — Design system foundation
 - **Objective:** Establish a minimal, consistent visual/component foundation (tokens, base components) the rest of the shell builds on.
@@ -325,4 +380,5 @@ Updated after every completed unit.
 
 | Unit | Status | Date | Commit | Tests | Files changed | Important discoveries | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | COMPLETE | 2026-09-29 | (not committed yet) | No code changed; audit validated against actual repository content (package.json, adapter/service.ts, adapter/types.ts, adapter/presentation.ts, all components, apps/api/src/server.ts, packages/practice-api/src/types.ts + presentation.ts) | docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md only | `apps/web`'s current adapter imports domain packages (`@ipmat/attempt`, `@ipmat/autopsy`, `@ipmat/mastery`, `@ipmat/training-orchestration`, `@ipmat/ai`) directly and performs grading/timing/orchestration client-side — a deliberate, documented, temporary exception to the target architecture, retired by Unit 10, not to be extended. `@ipmat/practice-api` already independently converged on near-identical student-facing view shapes, narrowing Unit 10's eventual work. | Web Architecture Lock established; Unit 2 scope defined; no router/design-system/auth/onboarding/enrollment exists yet. |
+| 1 | COMPLETE | 2026-09-29 | `41889a2` | No code changed; audit validated against actual repository content (package.json, adapter/service.ts, adapter/types.ts, adapter/presentation.ts, all components, apps/api/src/server.ts, packages/practice-api/src/types.ts + presentation.ts) | docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md only | `apps/web`'s current adapter imports domain packages (`@ipmat/attempt`, `@ipmat/autopsy`, `@ipmat/mastery`, `@ipmat/training-orchestration`, `@ipmat/ai`) directly and performs grading/timing/orchestration client-side — a deliberate, documented, temporary exception to the target architecture, retired by Unit 10, not to be extended. `@ipmat/practice-api` already independently converged on near-identical student-facing view shapes, narrowing Unit 10's eventual work. | Web Architecture Lock established; Unit 2 scope defined; no router/design-system/auth/onboarding/enrollment exists yet. |
+| 2 | COMPLETE | 2026-09-29 | (not committed yet) | 47/47 passing (17 new router tests, 24 new architecture-boundary tests, 6 pre-existing adapter tests unmodified); typecheck clean; build clean; eslint clean | apps/web/src/App.tsx (modified); apps/web/src/router/{match.ts,routeTable.ts,router.tsx,AppRoutes.tsx} (new); apps/web/src/practice/PracticeSessionContext.tsx (new); apps/web/src/routes/*.tsx (11 new files); apps/web/test/{router.test.ts,architectureBoundary.test.ts} (new); docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md | Built a ~90-line dependency-free router (`pushState`/`popstate`/`useSyncExternalStore`) instead of adding a routing library — genuinely not required for 10 fixed routes. `TrainingRecommendationAdapter` has no fetch-by-id method, so result/autopsy routes need a small in-memory `PracticeSessionContext` to carry a just-returned view model across the route boundary — disclosed as a known, temporary, hard-refresh limitation resolved at Unit 10. | No dependency added; adapter/components/styles untouched; no auth/onboarding/enrollment/API-integration/adaptive logic implemented, only navigation stubs. |
