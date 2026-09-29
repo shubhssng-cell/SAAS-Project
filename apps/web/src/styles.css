@@ -651,6 +651,28 @@ body {
   color: var(--ink-muted);
 }
 
+/* Product Phase 1 Unit 6 -- onboarding sections. Reuses .subtext for body
+   copy (margin overridden to 0, spacing handled by the wrapper instead). */
+.onboarding-section {
+  margin-bottom: var(--space-6);
+}
+
+.onboarding-section:last-of-type {
+  margin-bottom: var(--space-4);
+}
+
+.onboarding-section-heading {
+  font-family: var(--font-display);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-2);
+  color: var(--ink);
+}
+
+.onboarding-section-body {
+  margin: 0;
+}
+
 @media (max-width: 480px) {
   .app-header {
     padding: var(--space-4);

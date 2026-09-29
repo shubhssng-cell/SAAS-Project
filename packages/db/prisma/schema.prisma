@@ -455,6 +455,11 @@ model Student {
   email        String? @unique
   passwordHash String? @map("password_hash")
 
+  // Product Phase 1 Unit 6 (Onboarding) -- null until the student completes
+  // the one-time onboarding sequence; set exactly once and never moved
+  // afterward (idempotent completion -- see StudentAccountRepository.completeOnboarding()).
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
+
   enrollments   Enrollment[]
   attempts      Attempt[]
   repairPlans   RepairPlan[]

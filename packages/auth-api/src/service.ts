@@ -87,21 +87,32 @@ export class AuthApiService {
     const now = opts.now ?? new Date().toISOString();
 
     try {
-      const tokenHash = hashSessionToken(input.sessionToken);
-      const session = await this.deps.sessions.findActiveByTokenHash(tokenHash, now);
-      if (!session) {
-        throw new AuthApiError("not_authenticated", "Your session has expired or is no longer valid. Please log in again.", 401);
-      }
-
-      const student = await this.deps.studentAccounts.findById(session.studentId);
-      if (!student) {
-        // The session is real, but the Student row it points to is gone -- an
-        // infrastructure inconsistency, never silently treated as "not logged in"
-        // (that would be a wrong error code for a genuinely different problem).
-        throw new AuthApiError("infrastructure_failure", "Your account could not be loaded right now. Please try again.", 500);
-      }
-
+      const student = await this.resolveAuthenticatedStudent(input.sessionToken, now);
       return { student: toStudentAccountView(student) };
+    } catch (error) {
+      if (error instanceof AuthApiError) throw error;
+      throw toAuthApiError(error);
+    }
+  }
+
+  /**
+   * Marks the CALLING student's onboarding as complete (Product Phase 1
+   * Unit 6) — the student is derived EXCLUSIVELY from the verified session
+   * token via the same `resolveAuthenticatedStudent()` every other
+   * identity-requiring method uses; there is no parameter through which a
+   * caller could supply a different `studentId` directly. Idempotent —
+   * `StudentAccountRepository.completeOnboarding()` never moves an
+   * already-set completion timestamp forward, so calling this twice (a
+   * double-click, a retried request) is always safe.
+   */
+  async completeOnboarding(input: { sessionToken: string }, opts: { now?: string } = {}): Promise<CurrentSessionResult> {
+    assertNonEmptyString(input.sessionToken, "sessionToken");
+    const now = opts.now ?? new Date().toISOString();
+
+    try {
+      const student = await this.resolveAuthenticatedStudent(input.sessionToken, now);
+      const updated = await this.deps.studentAccounts.completeOnboarding(student.id, now);
+      return { student: toStudentAccountView(updated) };
     } catch (error) {
       if (error instanceof AuthApiError) throw error;
       throw toAuthApiError(error);
@@ -127,6 +138,30 @@ export class AuthApiService {
     } catch (error) {
       throw toAuthApiError(error);
     }
+  }
+
+  /**
+   * The ONE place a raw session token is turned into a verified student
+   * row — every method that needs the calling student's real identity
+   * (`getCurrentSession()`, `completeOnboarding()`, and any future
+   * session-authenticated method) goes through this, never re-implements
+   * the lookup. Throws `AuthApiError("not_authenticated", ...)` for a
+   * missing/expired/revoked token; throws `infrastructure_failure` if the
+   * session is valid but its `Student` row is inexplicably gone (a real
+   * infrastructure inconsistency, never silently treated as "not logged in").
+   */
+  private async resolveAuthenticatedStudent(sessionToken: string, now: string) {
+    const tokenHash = hashSessionToken(sessionToken);
+    const session = await this.deps.sessions.findActiveByTokenHash(tokenHash, now);
+    if (!session) {
+      throw new AuthApiError("not_authenticated", "Your session has expired or is no longer valid. Please log in again.", 401);
+    }
+
+    const student = await this.deps.studentAccounts.findById(session.studentId);
+    if (!student) {
+      throw new AuthApiError("infrastructure_failure", "Your account could not be loaded right now. Please try again.", 500);
+    }
+    return student;
   }
 
   private async issueSession(studentId: string, now: string): Promise<{ sessionToken: string; expiresAt: string }> {

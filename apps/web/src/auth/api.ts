@@ -3,10 +3,12 @@ import { mapAuthApiErrorCode, NETWORK_FAILURE, type AuthFailure } from "./failur
 import type { StudentAccountDto } from "./authState.js";
 
 /**
- * The ONLY place `apps/web` talks to the auth HTTP boundary
- * (`/v1/auth/*`, `@ipmat/auth-api` over `apps/api` -- Product Phase 1
- * Unit 4). Uses the EXISTING four endpoints exactly, never a duplicate.
- * The browser never reads or stores the session token itself -- it is an
+ * The ONLY place `apps/web` talks to the auth/onboarding HTTP boundary
+ * (`/v1/auth/*` from Product Phase 1 Unit 4, `/v1/onboarding/complete`
+ * from Unit 6 -- both `@ipmat/auth-api` over `apps/api`, both
+ * cookie-authenticated the same way). Uses the EXISTING endpoints
+ * exactly, never a duplicate. The browser never reads or stores the
+ * session token itself -- it is an
  * `HttpOnly` cookie the browser's own cookie jar handles automatically;
  * `credentials: "include"` is the only thing this file does with it.
  *
@@ -62,9 +64,10 @@ function readStudent(body: unknown): StudentAccountDto | null {
   if (typeof body !== "object" || body === null) return null;
   const student = (body as { student?: unknown }).student;
   if (typeof student !== "object" || student === null) return null;
-  const { id, email, createdAt } = student as Record<string, unknown>;
+  const { id, email, createdAt, onboardingCompletedAt } = student as Record<string, unknown>;
   if (typeof id !== "string" || typeof email !== "string" || typeof createdAt !== "string") return null;
-  return { id, email, createdAt };
+  if (onboardingCompletedAt !== null && typeof onboardingCompletedAt !== "string") return null;
+  return { id, email, createdAt, onboardingCompletedAt: onboardingCompletedAt ?? null };
 }
 
 async function authApiResult(fetchImpl: FetchLike, method: "GET" | "POST", path: string, body?: unknown): Promise<AuthApiResult> {
@@ -90,4 +93,9 @@ export function apiMe(fetchImpl: FetchLike = fetch): Promise<AuthApiResult> {
 export async function apiLogout(fetchImpl: FetchLike = fetch): Promise<LogoutResult> {
   const result = await request(fetchImpl, "POST", "/v1/auth/logout");
   return result.ok ? { ok: true } : { ok: false, failure: result.failure };
+}
+
+/** Product Phase 1 Unit 6 -- the student is derived server-side from the session cookie; this call carries no body and no studentId of any kind. */
+export function apiCompleteOnboarding(fetchImpl: FetchLike = fetch): Promise<AuthApiResult> {
+  return authApiResult(fetchImpl, "POST", "/v1/onboarding/complete");
 }

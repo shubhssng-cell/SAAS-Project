@@ -237,6 +237,24 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
       await authService.logout({ sessionToken });
       return { status: 200, body: { loggedOut: true }, setCookieHeader: clearSessionCookieHeader() };
     }
+  },
+  {
+    // Product Phase 1 Unit 6 (Onboarding) -- not literally under /v1/auth/*, but
+    // authenticated by the EXACT SAME session cookie mechanism as every route
+    // above, so it lives in this same table rather than a parallel one. The
+    // student being updated is derived entirely from the verified session
+    // (AuthApiService.completeOnboarding() -> resolveAuthenticatedStudent()) --
+    // the request body is never read for an identity.
+    method: "POST",
+    pattern: /^\/v1\/onboarding\/complete$/,
+    handler: async (authService, _body, cookies) => {
+      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      if (!sessionToken) {
+        throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
+      }
+      const result = await authService.completeOnboarding({ sessionToken });
+      return { status: 200, body: { student: result.student } };
+    }
   }
 ];
 

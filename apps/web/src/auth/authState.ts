@@ -1,9 +1,11 @@
 import type { AuthFailure } from "./failureMapping.js";
 
+/** `onboardingCompletedAt` (Product Phase 1 Unit 6) is `null` until the server records completion -- this is the ONE server-authoritative fact `OnboardingGate` reads; it is never derived, cached, or overridden client-side. */
 export interface StudentAccountDto {
   id: string;
   email: string;
   createdAt: string;
+  onboardingCompletedAt: string | null;
 }
 
 /**
@@ -23,7 +25,8 @@ export type AuthEvent =
   | { type: "HYDRATE_ERROR"; message: string }
   | { type: "SIGNED_UP"; student: StudentAccountDto }
   | { type: "LOGGED_IN"; student: StudentAccountDto }
-  | { type: "LOGGED_OUT" };
+  | { type: "LOGGED_OUT" }
+  | { type: "ONBOARDING_COMPLETED"; student: StudentAccountDto };
 
 /**
  * Pure state transition function -- no I/O, no React, fully unit-testable
@@ -36,6 +39,7 @@ export function authReducer(_state: AuthState, event: AuthEvent): AuthState {
     case "HYDRATE_AUTHENTICATED":
     case "SIGNED_UP":
     case "LOGGED_IN":
+    case "ONBOARDING_COMPLETED":
       return { status: "authenticated", student: event.student };
     case "HYDRATE_UNAUTHENTICATED":
     case "LOGGED_OUT":

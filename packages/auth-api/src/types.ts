@@ -36,11 +36,16 @@ export class AuthApiError extends Error {
  * The ONLY shape a client-facing response may ever be built from --
  * structurally excludes `passwordHash` (D-020's "narrow, allowlisted view"
  * discipline, applied here to credentials instead of question answer keys).
+ * `onboardingCompletedAt` (Product Phase 1 Unit 6) is `null` until the
+ * student completes the one-time onboarding sequence -- this is the ONE
+ * server-authoritative fact `apps/web` reads to decide whether to show
+ * `/onboarding`, never a frontend-only flag.
  */
 export interface StudentAccountView {
   id: string;
   email: string;
   createdAt: string;
+  onboardingCompletedAt: string | null;
 }
 
 /**

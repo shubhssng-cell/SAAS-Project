@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { authReducer, failureToHydrateEvent, type AuthState, type StudentAccountDto } from "../../src/auth/authState.js";
 
-const STUDENT: StudentAccountDto = { id: "student-1", email: "student@example.com", createdAt: "2026-09-29T00:00:00.000Z" };
+const STUDENT: StudentAccountDto = { id: "student-1", email: "student@example.com", createdAt: "2026-09-29T00:00:00.000Z", onboardingCompletedAt: null };
 const LOADING: AuthState = { status: "loading" };
 
 describe("authReducer", () => {
@@ -29,6 +29,12 @@ describe("authReducer", () => {
   it("LOGGED_OUT -> unauthenticated, from an authenticated state", () => {
     const authenticated: AuthState = { status: "authenticated", student: STUDENT };
     expect(authReducer(authenticated, { type: "LOGGED_OUT" })).toEqual({ status: "unauthenticated" });
+  });
+
+  it("ONBOARDING_COMPLETED -> authenticated with the updated (onboardingCompletedAt-set) student", () => {
+    const updated: StudentAccountDto = { ...STUDENT, onboardingCompletedAt: "2026-09-29T01:00:00.000Z" };
+    const authenticated: AuthState = { status: "authenticated", student: STUDENT };
+    expect(authReducer(authenticated, { type: "ONBOARDING_COMPLETED", student: updated })).toEqual({ status: "authenticated", student: updated });
   });
 });
 

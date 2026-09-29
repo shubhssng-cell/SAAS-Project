@@ -5,10 +5,10 @@ import { InMemoryStudentAccountRepository } from "../../src/repositories/inMemor
 const T0 = "2026-01-01T00:00:00.000Z";
 
 describe("StudentAccountRepository (InMemory)", () => {
-  it("creates a student and returns the public (passwordHash-free) shape", async () => {
+  it("creates a student and returns the public (passwordHash-free) shape, onboarding not yet completed", async () => {
     const repo = new InMemoryStudentAccountRepository();
     const created = await repo.create({ email: "student@example.com", passwordHash: "scrypt:abc:def", now: T0 });
-    expect(created).toEqual({ id: created.id, email: "student@example.com", createdAt: T0 });
+    expect(created).toEqual({ id: created.id, email: "student@example.com", createdAt: T0, onboardingCompletedAt: null });
     expect(created).not.toHaveProperty("passwordHash");
   });
 
@@ -34,7 +34,41 @@ describe("StudentAccountRepository (InMemory)", () => {
     const repo = new InMemoryStudentAccountRepository();
     const created = await repo.create({ email: "student@example.com", passwordHash: "scrypt:abc:def", now: T0 });
     const found = await repo.findById(created.id);
-    expect(found).toEqual({ id: created.id, email: "student@example.com", createdAt: T0 });
+    expect(found).toEqual({ id: created.id, email: "student@example.com", createdAt: T0, onboardingCompletedAt: null });
     expect(await repo.findById("does-not-exist")).toBeNull();
+  });
+
+  describe("completeOnboarding", () => {
+    const T1 = "2026-01-02T00:00:00.000Z";
+    const T2 = "2026-01-03T00:00:00.000Z";
+
+    it("sets onboardingCompletedAt on first call", async () => {
+      const repo = new InMemoryStudentAccountRepository();
+      const created = await repo.create({ email: "student@example.com", passwordHash: "scrypt:abc:def", now: T0 });
+      const updated = await repo.completeOnboarding(created.id, T1);
+      expect(updated.onboardingCompletedAt).toBe(T1);
+    });
+
+    it("is idempotent -- a repeat call never moves the completion timestamp forward", async () => {
+      const repo = new InMemoryStudentAccountRepository();
+      const created = await repo.create({ email: "student@example.com", passwordHash: "scrypt:abc:def", now: T0 });
+      const first = await repo.completeOnboarding(created.id, T1);
+      const second = await repo.completeOnboarding(created.id, T2);
+      expect(second.onboardingCompletedAt).toBe(first.onboardingCompletedAt);
+      expect(second.onboardingCompletedAt).toBe(T1);
+    });
+
+    it("the persisted findById result reflects the completion after a fresh read", async () => {
+      const repo = new InMemoryStudentAccountRepository();
+      const created = await repo.create({ email: "student@example.com", passwordHash: "scrypt:abc:def", now: T0 });
+      await repo.completeOnboarding(created.id, T1);
+      const found = await repo.findById(created.id);
+      expect(found?.onboardingCompletedAt).toBe(T1);
+    });
+
+    it("throws PersistenceError(missing_reference) for a nonexistent student", async () => {
+      const repo = new InMemoryStudentAccountRepository();
+      await expect(repo.completeOnboarding("does-not-exist", T1)).rejects.toThrow(PersistenceError);
+    });
   });
 });

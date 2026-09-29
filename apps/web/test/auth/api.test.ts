@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { apiLogin, apiLogout, apiMe, apiSignup, type FetchLike } from "../../src/auth/api.js";
+import { apiCompleteOnboarding, apiLogin, apiLogout, apiMe, apiSignup, type FetchLike } from "../../src/auth/api.js";
 
-const STUDENT_BODY = { student: { id: "student-1", email: "student@example.com", createdAt: "2026-09-29T00:00:00.000Z" } };
+const STUDENT_BODY = { student: { id: "student-1", email: "student@example.com", createdAt: "2026-09-29T00:00:00.000Z", onboardingCompletedAt: null } };
 
 function fakeFetch(response: { ok: boolean; status: number; body: unknown }): { calls: Array<{ url: string; init?: RequestInit }>; fetchImpl: FetchLike } {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -107,5 +107,25 @@ describe("apiLogout", () => {
     const { fetchImpl } = throwingFetch();
     const result = await apiLogout(fetchImpl);
     expect(result).toEqual({ ok: false, failure: { kind: "network_error" } });
+  });
+});
+
+describe("apiCompleteOnboarding", () => {
+  it("posts to /v1/onboarding/complete with credentials included and no body", async () => {
+    const completedBody = { student: { ...STUDENT_BODY.student, onboardingCompletedAt: "2026-09-29T01:00:00.000Z" } };
+    const { calls, fetchImpl } = fakeFetch({ ok: true, status: 200, body: completedBody });
+    const result = await apiCompleteOnboarding(fetchImpl);
+
+    expect(result).toEqual({ ok: true, student: completedBody.student });
+    expect(calls[0]?.url).toMatch(/\/v1\/onboarding\/complete$/);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.credentials).toBe("include");
+    expect(calls[0]?.init?.body).toBeUndefined();
+  });
+
+  it("maps a 401 (no session) to not_authenticated", async () => {
+    const { fetchImpl } = fakeFetch({ ok: false, status: 401, body: { error: { code: "not_authenticated", message: "You are not logged in." } } });
+    const result = await apiCompleteOnboarding(fetchImpl);
+    expect(result).toEqual({ ok: false, failure: { kind: "not_authenticated" } });
   });
 });

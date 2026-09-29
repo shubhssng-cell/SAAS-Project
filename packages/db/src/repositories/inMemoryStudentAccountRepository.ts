@@ -12,7 +12,7 @@ export class InMemoryStudentAccountRepository implements StudentAccountRepositor
       throw new PersistenceError("invalid_record", "A student with this email already exists.");
     }
     const id = randomUUID();
-    const record: StudentAccountRecord = { id, email: input.email, passwordHash: input.passwordHash, createdAt: input.now };
+    const record: StudentAccountRecord = { id, email: input.email, passwordHash: input.passwordHash, createdAt: input.now, onboardingCompletedAt: null };
     this.byId.set(id, record);
     this.idByEmail.set(input.email, id);
     return toPublicRecord(record);
@@ -28,8 +28,21 @@ export class InMemoryStudentAccountRepository implements StudentAccountRepositor
     const record = this.byId.get(studentId);
     return record ? toPublicRecord(record) : null;
   }
+
+  async completeOnboarding(studentId: string, now: string): Promise<StudentAccountPublicRecord> {
+    const record = this.byId.get(studentId);
+    if (!record) {
+      throw new PersistenceError("missing_reference", "No such student exists.");
+    }
+    if (record.onboardingCompletedAt === null) {
+      const updated: StudentAccountRecord = { ...record, onboardingCompletedAt: now };
+      this.byId.set(studentId, updated);
+      return toPublicRecord(updated);
+    }
+    return toPublicRecord(record); // already completed -- idempotent no-op, returns the ORIGINAL timestamp.
+  }
 }
 
 function toPublicRecord(record: StudentAccountRecord): StudentAccountPublicRecord {
-  return { id: record.id, email: record.email, createdAt: record.createdAt };
+  return { id: record.id, email: record.email, createdAt: record.createdAt, onboardingCompletedAt: record.onboardingCompletedAt };
 }

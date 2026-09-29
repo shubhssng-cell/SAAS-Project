@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { OnboardingGate } from "../auth/OnboardingGate.js";
 import { RequireAuth } from "../auth/RequireAuth.js";
 import { DashboardRoute } from "../routes/DashboardRoute.js";
 import { EnrollPage } from "../routes/EnrollPage.js";
@@ -26,36 +27,60 @@ import { usePathname } from "./router.js";
  * PRESENTATIONAL protection only (a frontend redirect, not a security
  * boundary; the server remains authoritative). `landing`/`login`/`signup`
  * stay public and unwrapped, per this unit's own route classification.
+ *
+ * `onboarding` and the authenticated-shell routes additionally nest
+ * `OnboardingGate` (Product Phase 1 Unit 6) INSIDE `RequireAuth` -- by the
+ * time it renders, auth is already resolved, so it only ever needs to
+ * decide the onboarding-specific branch: `/onboarding` itself redirects an
+ * already-onboarded student to `/dashboard` (`"require-incomplete"`);
+ * everything else redirects a not-yet-onboarded student to `/onboarding`
+ * (`"require-complete"`).
  */
 const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement> = {
   landing: () => <LandingPage />,
   login: () => <LoginPage />,
   signup: () => <SignupPage />,
-  onboarding: () => <OnboardingPage />,
+  onboarding: () => (
+    <RequireAuth>
+      <OnboardingGate mode="require-incomplete">
+        <OnboardingPage />
+      </OnboardingGate>
+    </RequireAuth>
+  ),
   enroll: () => <EnrollPage />,
   dashboard: () => (
     <RequireAuth>
-      <DashboardRoute />
+      <OnboardingGate mode="require-complete">
+        <DashboardRoute />
+      </OnboardingGate>
     </RequireAuth>
   ),
   "practice-next": () => (
     <RequireAuth>
-      <PracticeNextRoute />
+      <OnboardingGate mode="require-complete">
+        <PracticeNextRoute />
+      </OnboardingGate>
     </RequireAuth>
   ),
   "practice-result": (params) => (
     <RequireAuth>
-      <PracticeResultRoute questionId={params.questionId ?? ""} />
+      <OnboardingGate mode="require-complete">
+        <PracticeResultRoute questionId={params.questionId ?? ""} />
+      </OnboardingGate>
     </RequireAuth>
   ),
   "practice-autopsy": (params) => (
     <RequireAuth>
-      <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+      <OnboardingGate mode="require-complete">
+        <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+      </OnboardingGate>
     </RequireAuth>
   ),
   "practice-question": (params) => (
     <RequireAuth>
-      <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+      <OnboardingGate mode="require-complete">
+        <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+      </OnboardingGate>
     </RequireAuth>
   )
 };

@@ -1,23 +1,26 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
-import { apiLogin, apiLogout, apiMe, apiSignup, type AuthApiResult, type LogoutResult } from "./api.js";
+import { apiCompleteOnboarding, apiLogin, apiLogout, apiMe, apiSignup, type AuthApiResult, type LogoutResult } from "./api.js";
 import { authReducer, failureToHydrateEvent, type AuthState } from "./authState.js";
 import { createOperationGuard } from "./operationGuard.js";
 
 /**
  * The smallest clean auth client/state abstraction this unit needs. Owns
- * ONLY: the four API calls (`api.ts`), current presentation state
+ * ONLY: the API calls (`api.ts`), current presentation state
  * (`authReducer`, a pure module — this component is a thin
  * `useReducer` wrapper around it), and race-safety (`operationGuard`). It
  * owns NO authentication logic itself — password validation, hashing,
  * session validation, and identity all remain exclusively server-side
  * (`@ipmat/auth`/`@ipmat/auth-api`, never imported here — see the Web
- * Architecture Lock in PHASE_1_PLATFORM_SHELL.md).
+ * Architecture Lock in PHASE_1_PLATFORM_SHELL.md). `completeOnboarding()`
+ * (Product Phase 1 Unit 6) follows the exact same pattern as
+ * signup/login: call the server, apply its returned student on success.
  */
 interface AuthContextValue {
   state: AuthState;
   signup: (input: { email: string; password: string }) => Promise<AuthApiResult>;
   login: (input: { email: string; password: string }) => Promise<AuthApiResult>;
   logout: () => Promise<LogoutResult>;
+  completeOnboarding: () => Promise<AuthApiResult>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,6 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // for an already-invalid token (see AuthApiService.logout()), so there is no
         // unsafe case this papers over.
         if (guard.isCurrent(token)) dispatch({ type: "LOGGED_OUT" });
+        return result;
+      },
+      async completeOnboarding() {
+        const token = guard.next();
+        const result = await apiCompleteOnboarding();
+        if (result.ok && guard.isCurrent(token)) dispatch({ type: "ONBOARDING_COMPLETED", student: result.student });
         return result;
       }
     }),

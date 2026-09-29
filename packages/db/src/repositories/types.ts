@@ -536,13 +536,15 @@ export interface StudentAccountRecord {
   email: string;
   passwordHash: string;
   createdAt: string;
+  onboardingCompletedAt: string | null;
 }
 
-/** The ONLY shape a client-facing response may ever be built from -- structurally excludes `passwordHash`, the same "narrow, allowlisted view" discipline `StudentQuestionView`/`CanonicalQuestion` already use (D-020). */
+/** The ONLY shape a client-facing response may ever be built from -- structurally excludes `passwordHash`, the same "narrow, allowlisted view" discipline `StudentQuestionView`/`CanonicalQuestion` already use (D-020). `onboardingCompletedAt` (Product Phase 1 Unit 6) is `null` until the student completes the one-time onboarding sequence. */
 export interface StudentAccountPublicRecord {
   id: string;
   email: string;
   createdAt: string;
+  onboardingCompletedAt: string | null;
 }
 
 export interface StudentAccountRepository {
@@ -551,6 +553,15 @@ export interface StudentAccountRepository {
   /** Includes `passwordHash` -- the ONE legitimate reason to read it, for `login()`'s own `verifyPassword()` call. Never returned to a client directly. `null` if no Student with this email exists (including an authRef-only row with a `null` email — never matched). */
   findByEmailWithCredentials(email: string): Promise<StudentAccountRecord | null>;
   findById(studentId: string): Promise<StudentAccountPublicRecord | null>;
+  /**
+   * Idempotent: sets `onboardingCompletedAt` to `now` ONLY if it is
+   * currently `null`; a repeat call for an already-onboarded student is a
+   * safe no-op that returns the EXISTING completion timestamp, never moves
+   * it forward. Throws `PersistenceError("missing_reference")` if no such
+   * student exists (should not happen for a caller that resolved
+   * `studentId` from a verified session, but this is not assumed).
+   */
+  completeOnboarding(studentId: string, now: string): Promise<StudentAccountPublicRecord>;
 }
 
 export interface SessionRecord {
