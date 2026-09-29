@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -8,14 +8,21 @@ import { describe, expect, it } from "vitest";
  * routing/shell layer must never import a domain package, a selection
  * engine, a training-system provider, `@ipmat/db`, or Prisma directly.
  *
- * The existing, already-documented exception (`src/adapter/service.ts`,
- * predating this lock, retired by Unit 10) is deliberately excluded from
- * this scan -- this test guards against NEW violations, it does not
- * re-litigate the tracked one.
+ * `src/adapter/{service,fixtures,presentation}.ts` (the fixture-backed
+ * `TrainingRecommendationAdapter` and its own supporting fixture/
+ * presentation data) are deliberately excluded from this scan -- they
+ * legitimately import domain packages directly to build deterministic
+ * fixture data for tests (Product Phase 1 Unit 10 retired this trio from
+ * the PRODUCTION runtime path -- see the "Practice API integration" block
+ * below -- but they still exist, and still need those imports, for
+ * `apps/web/test/service.test.ts` and any future fixture-specific use).
+ * `src/adapter/{apiTrainingAdapter,index,types}.ts` are NOT excluded --
+ * those must stay clean. This test guards against NEW violations, it does
+ * not re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice"];
-const EXCLUDED_FILES: string[] = [];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice", "src/adapter"];
+const EXCLUDED_FILES: string[] = ["src/adapter/service.ts", "src/adapter/fixtures.ts", "src/adapter/presentation.ts"];
 
 const BANNED_IMPORT_SPECIFIERS = [
   "@ipmat/attempt",
@@ -62,7 +69,9 @@ function listSourceFiles(dir: string): string[] {
 }
 
 const webRoot = join(__dirname, "..");
-const scannedFiles = SCANNED_DIRS.flatMap((dir) => listSourceFiles(join(webRoot, dir))).filter((path) => !EXCLUDED_FILES.some((excluded) => path.endsWith(excluded)));
+const scannedFiles = SCANNED_DIRS.flatMap((dir) => listSourceFiles(join(webRoot, dir))).filter(
+  (path) => !EXCLUDED_FILES.some((excluded) => path.replace(/\\/g, "/").endsWith(excluded))
+);
 
 describe("Web Architecture Lock -- routing/shell layer never imports a domain package directly", () => {
   it("scanned at least the expected route/router files", () => {
@@ -223,6 +232,54 @@ describe("Practice entry: the real dashboard -> practice transition, no second d
     expect(source).not.toMatch(/\breact\b/i);
     expect(source).not.toMatch(/\bfetch\(/);
     expect(source).not.toContain("createFixtureTrainingAdapter");
+  });
+});
+
+describe("Practice API integration: the real HTTP-backed adapter, fixture adapter retired from the runtime path (Product Phase 1 Unit 10)", () => {
+  const adapterDir = join(webRoot, "src/adapter");
+  const appSource = readFileSync(join(webRoot, "src/App.tsx"), "utf-8");
+
+  it("App.tsx selects createApiTrainingAdapter() for the running app -- the ONE place a runtime adapter is chosen", () => {
+    expect(appSource).toContain("createApiTrainingAdapter");
+    expect(appSource).toContain("PracticeSessionProvider adapter={adapter}");
+  });
+
+  it("App.tsx never imports or invokes the fixture adapter -- createFixtureTrainingAdapter is retired from the production runtime path", () => {
+    expect(appSource).not.toMatch(/import\s*\{[^}]*createFixtureTrainingAdapter/);
+    expect(appSource).not.toMatch(/[=(]\s*createFixtureTrainingAdapter\(\)/); // an actual assignment/call, not a doc-comment mention
+  });
+
+  it("PracticeSessionContext.tsx no longer constructs its own fixture adapter internally -- it only accepts one as a prop", () => {
+    const source = readFileSync(join(webRoot, "src/practice/PracticeSessionContext.tsx"), "utf-8");
+    expect(source).not.toContain("createFixtureTrainingAdapter");
+    expect(source).not.toMatch(/\bfetch\(/);
+  });
+
+  it("apiTrainingAdapter.ts uses ONLY the shared jsonRequest()/http.ts transport -- never a raw fetch() of its own", () => {
+    const source = readFileSync(join(adapterDir, "apiTrainingAdapter.ts"), "utf-8");
+    expect(source).toContain("jsonRequest");
+    expect(source).not.toMatch(/(?<!json)fetch\(/); // no bare fetch() call outside the jsonRequest()/FetchLike plumbing
+  });
+
+  it("apiTrainingAdapter.ts never constructs a request body containing a studentId/enrollmentId field", () => {
+    const source = readFileSync(join(adapterDir, "apiTrainingAdapter.ts"), "utf-8");
+    expect(source).not.toMatch(/\bstudentId\s*:/);
+    expect(source).not.toMatch(/\benrollmentId\s*:/);
+  });
+
+  it("apiTrainingAdapter.ts contains no recommendation/adaptive/grading/repair decision logic of its own -- transport translation only", () => {
+    const source = readFileSync(join(adapterDir, "apiTrainingAdapter.ts"), "utf-8");
+    expect(source).not.toMatch(/orchestrat|selectNextQuestion|computeMastery|buildRepairPlan|generateHypothesis/i);
+  });
+
+  it("the fixture adapter (service.ts) still exists for tests/fixtures, unmodified, but is no longer imported by any production route/component outside src/adapter itself", () => {
+    const offenders: string[] = [];
+    for (const path of scannedFiles) {
+      if (path.includes(`${sep}adapter${sep}`)) continue; // src/adapter's own barrel/type files legitimately reference the fixture factory's name (export + historical doc comment)
+      const source = readFileSync(path, "utf-8");
+      if (source.includes("createFixtureTrainingAdapter")) offenders.push(path);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

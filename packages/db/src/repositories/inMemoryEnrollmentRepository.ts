@@ -28,4 +28,15 @@ export class InMemoryEnrollmentRepository implements EnrollmentRepository {
     if (!id) return null;
     return this.byId.get(id) ?? null;
   }
+
+  /**
+   * By-id lookup, additional to the `EnrollmentRepository` port interface
+   * (which only requires `findByStudentAndExam`) — added for Product Phase
+   * 1 Unit 10, so a consumer that only has an enrollment id (e.g. an
+   * `EnrollmentReader`-shaped adapter) can resolve the SAME store this
+   * repository writes to, rather than a second, disconnected one.
+   */
+  async findById(enrollmentId: string): Promise<StudentEnrollmentRecord | null> {
+    return this.byId.get(enrollmentId) ?? null;
+  }
 }

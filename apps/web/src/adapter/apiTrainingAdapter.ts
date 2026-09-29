@@ -1,0 +1,176 @@
+import type { AuthFailure } from "../auth/failureMapping.js";
+import { jsonRequest, type FetchLike } from "../http.js";
+import type {
+  AttemptResultViewModel,
+  AutopsyResponse,
+  AutopsyViewModel,
+  DashboardViewModel,
+  QuestionViewModel,
+  RecommendationViewModel,
+  TrainingRecommendationAdapter
+} from "./types.js";
+
+/**
+ * The real, HTTP-backed `TrainingRecommendationAdapter` (Product Phase 1
+ * Unit 10) -- talks to `apps/api`'s six existing practice routes through
+ * the SAME shared `jsonRequest()`/`http.ts` plumbing every other
+ * authenticated `apps/web` call already uses (`credentials: "include"`,
+ * cookie-derived identity, never a client-chosen studentId — see
+ * `apps/api/src/server.ts`'s own `resolvePracticeClaim()`, retrofitted in
+ * this same unit so this adapter has a SAFE endpoint to call at all).
+ *
+ * This file is transport translation ONLY (HTTP DTO <-> the EXISTING
+ * `TrainingRecommendationAdapter` contract every route already consumes)
+ * -- it contains no recommendation/adaptive/grading/repair logic of its
+ * own; every decision was already made server-side by `@ipmat/practice-api`
+ * before a response ever reaches here. No UI component changes to consume
+ * this adapter — it is a drop-in replacement for
+ * `createFixtureTrainingAdapter()`, selected once in `App.tsx`.
+ *
+ * KNOWN, DISCLOSED GAPS (see PHASE_1_PLATFORM_SHELL.md's Unit 10 summary
+ * for the full rationale — none of these are silently papered over):
+ * - `questionsPracticedSoFar` has no real backend endpoint yet; this
+ *   adapter INSTANCE counts real submitted/skipped attempts made during
+ *   this session (resets on reload) — an honest count of real actions
+ *   taken, never a fabricated number, mirroring the fixture adapter's own
+ *   equally session-scoped `attempts.length`.
+ * - `AutopsyViewModel.observed` has no real backend source
+ *   (`PendingAutopsyView` never surfaces raw behavior/historical signals,
+ *   by design — D-020/D-036) — always `[]` here, never invented text.
+ * - `respondToAutopsy()` has no real confirm/reject endpoint yet (Unit 10
+ *   is transport integration, not a new intelligence implementation) --
+ *   `getAutopsyForConfirmation` already reports `pending: false` for every
+ *   real attempt today (nothing populates a fresh hypothesis outside the
+ *   fixture adapter's own inline AI call), so the only reachable behavior
+ *   is re-resolving the next recommendation, exactly mirroring the fixture
+ *   adapter's own `if (!pending) return computeRecommendation();` fallback.
+ */
+
+class PracticeApiRequestError extends Error {
+  readonly failure: AuthFailure;
+  constructor(failure: AuthFailure) {
+    super(failure.kind === "unexpected" || failure.kind === "validation" ? failure.message : failure.kind);
+    this.name = "PracticeApiRequestError";
+    this.failure = failure;
+  }
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function readRecommendation(body: unknown): RecommendationViewModel {
+  const value = asObject(body);
+  const questionId = typeof value.questionId === "string" ? value.questionId : null;
+  const headline = typeof value.headline === "string" ? value.headline : "";
+  const explanation = typeof value.explanation === "string" ? value.explanation : "";
+  const modeLabel = typeof value.modeLabel === "string" ? value.modeLabel : "";
+  return { questionId, headline, explanation, modeLabel };
+}
+
+function readQuestion(body: unknown): QuestionViewModel {
+  const value = asObject(body);
+  const options = Array.isArray(value.options) && value.options.every((o) => typeof o === "string") ? (value.options as string[]) : null;
+  return {
+    questionId: typeof value.questionId === "string" ? value.questionId : "",
+    chapterName: typeof value.chapterName === "string" ? value.chapterName : "",
+    conceptName: typeof value.conceptName === "string" ? value.conceptName : "",
+    prompt: typeof value.prompt === "string" ? value.prompt : "",
+    answerFormat: value.answerFormat === "numeric_entry" ? "numeric_entry" : "multiple_choice",
+    options,
+    expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60
+  };
+}
+
+function readAttemptResult(body: unknown, hasAutopsy: boolean): AttemptResultViewModel {
+  const value = asObject(body);
+  return {
+    attemptId: typeof value.attemptId === "string" ? value.attemptId : "",
+    questionId: typeof value.questionId === "string" ? value.questionId : "",
+    isCorrect: value.isCorrect === true,
+    chosenAnswer: typeof value.chosenAnswer === "string" ? value.chosenAnswer : "",
+    correctAnswer: typeof value.correctAnswer === "string" ? value.correctAnswer : "",
+    timeTakenSeconds: typeof value.timeSpentSeconds === "number" ? value.timeSpentSeconds : 0,
+    expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60,
+    solutionSteps: [],
+    hasAutopsy
+  };
+}
+
+function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { summary: string; supportingEvidence: string[] } | null } {
+  const value = asObject(body);
+  const pending = value.pending === true;
+  const hypothesisValue = asObject(value.hypothesis);
+  const hasHypothesis = typeof hypothesisValue.summary === "string";
+  const supportingEvidence = Array.isArray(hypothesisValue.supportingEvidence) ? hypothesisValue.supportingEvidence.filter((e): e is string => typeof e === "string") : [];
+  return {
+    pending,
+    hypothesis: hasHypothesis ? { summary: hypothesisValue.summary as string, supportingEvidence } : null
+  };
+}
+
+export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): TrainingRecommendationAdapter {
+  const attemptIdByQuestion = new Map<string, string>();
+  let questionsPracticedSoFar = 0;
+
+  async function post(path: string, body?: unknown): Promise<unknown> {
+    const result = await jsonRequest(fetchImpl, "POST", path, body ?? {});
+    if (!result.ok) throw new PracticeApiRequestError(result.failure);
+    return result.body;
+  }
+
+  async function get(path: string): Promise<unknown> {
+    const result = await jsonRequest(fetchImpl, "GET", path);
+    if (!result.ok) throw new PracticeApiRequestError(result.failure);
+    return result.body;
+  }
+
+  return {
+    async getDashboard(): Promise<DashboardViewModel> {
+      const recommendation = readRecommendation(await post("/v1/recommendation"));
+      return { studentDisplayName: "there", questionsPracticedSoFar, recommendation };
+    },
+
+    async loadQuestion(questionId: string): Promise<QuestionViewModel> {
+      const started = asObject(await post("/v1/attempts", { questionId }));
+      const attemptId = typeof started.attemptId === "string" ? started.attemptId : "";
+      if (!attemptId) {
+        throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
+      }
+      attemptIdByQuestion.set(questionId, attemptId);
+      return readQuestion(started.question);
+    },
+
+    async submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel> {
+      const attemptId = attemptIdByQuestion.get(input.questionId);
+      if (!attemptId) {
+        throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
+      }
+      const submitted = await post(`/v1/attempts/${attemptId}/submit`, { questionId: input.questionId, chosenAnswer: input.chosenAnswer });
+      attemptIdByQuestion.delete(input.questionId);
+      questionsPracticedSoFar += 1;
+
+      // Whether an autopsy hypothesis is actually pending is resolved via the
+      // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
+      // response, which carries no such signal) -- see this file's own doc comment.
+      const pending = await get(`/v1/attempts/${attemptId}/autopsy`)
+        .then((body) => readPendingAutopsy(body).pending)
+        .catch(() => false);
+
+      return readAttemptResult(submitted, pending);
+    },
+
+    async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {
+      const { hypothesis } = readPendingAutopsy(await get(`/v1/attempts/${attemptId}/autopsy`));
+      return { attemptId, observed: [], hypothesis };
+    },
+
+    async respondToAutopsy(_input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel> {
+      return readRecommendation(await post("/v1/recommendation"));
+    },
+
+    async getNextRecommendation(): Promise<RecommendationViewModel> {
+      return readRecommendation(await post("/v1/recommendation"));
+    }
+  };
+}

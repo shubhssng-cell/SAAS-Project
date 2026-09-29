@@ -45,4 +45,15 @@ describe("EnrollmentRepository (InMemory)", () => {
     const b = await repo.create({ studentId: "student-b", examId: "exam-1", now: T0 });
     expect(a.id).not.toBe(b.id);
   });
+
+  it("findById returns null when no such enrollment exists", async () => {
+    const repo = new InMemoryEnrollmentRepository();
+    expect(await repo.findById("no-such-id")).toBeNull();
+  });
+
+  it("findById finds the created enrollment by its own id -- the SAME store create() wrote to (Product Phase 1 Unit 10)", async () => {
+    const repo = new InMemoryEnrollmentRepository();
+    const created = await repo.create({ studentId: "student-1", examId: "exam-1", now: T0 });
+    expect(await repo.findById(created.id)).toEqual(created);
+  });
 });

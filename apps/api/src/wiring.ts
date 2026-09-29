@@ -3,7 +3,6 @@ import type { EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import type { PrismaClient } from "@prisma/client";
 import {
   InMemoryAttemptRepository,
-  InMemoryEnrollmentReader,
   InMemoryEnrollmentRepository,
   InMemoryExamReader,
   InMemoryPrepPhaseTemplateReader,
@@ -27,6 +26,7 @@ import {
   PrismaStudentAccountRepository,
   PrismaTrainingQuestionReader,
   type AutopsyRepository,
+  type EnrollmentReader,
   type ExamRecord,
   type PrepPhaseTemplateRecord
 } from "@ipmat/db";
@@ -66,7 +66,6 @@ const DEFAULT_PREP_PHASE_TEMPLATE: PrepPhaseTemplateRecord = { examId: DEFAULT_E
  */
 export function createInMemoryDependencies(
   seed: {
-    enrollments?: ConstructorParameters<typeof InMemoryEnrollmentReader>[0];
     questions?: ConstructorParameters<typeof InMemoryQuestionReader>[0];
     questionContent?: ConstructorParameters<typeof InMemoryQuestionContentReader>[0];
     exams?: ExamRecord[];
@@ -76,12 +75,10 @@ export function createInMemoryDependencies(
   AuthApiDependencies &
   EnrollmentApiDependencies & {
     attempts: InMemoryAttemptRepository;
-    enrollmentReaderStore: InMemoryEnrollmentReader;
     questions: InMemoryQuestionReader;
     questionContent: InMemoryQuestionContentReader;
   } {
   const attempts = new InMemoryAttemptRepository();
-  const enrollments = new InMemoryEnrollmentReader(seed.enrollments);
   const questions = new InMemoryQuestionReader(seed.questions);
   const questionContent = new InMemoryQuestionContentReader(seed.questionContent);
   const autopsyReader: Pick<AutopsyRepository, "findByAttemptId"> = { findByAttemptId: async () => null };
@@ -91,8 +88,28 @@ export function createInMemoryDependencies(
   const examReader = new InMemoryExamReader(seed.exams ?? [DEFAULT_EXAM]);
   const prepPhaseTemplateReader = new InMemoryPrepPhaseTemplateReader(seed.prepPhaseTemplates ?? [DEFAULT_PREP_PHASE_TEMPLATE]);
 
+  /**
+   * Product Phase 1 Unit 10 -- reads through the SAME `enrollmentRepository`
+   * instance `/v1/enrollment` writes to, rather than a second, disconnected
+   * `InMemoryEnrollmentReader` store (the pre-Unit-10 shape: correct for
+   * Units 1-9, where nothing yet exercised enrollment ownership and
+   * real practice through one continuous in-memory wiring, but a genuine
+   * bug the first real end-to-end run under this unit surfaced -- an
+   * enrollment created via `POST /v1/enrollment` was invisible to
+   * `assertEnrollmentOwnership()`/`TrainingRecommendationService`, both of
+   * which read via `EnrollmentReader`). `StudentEnrollmentRecord` already
+   * structurally contains every `EnrollmentRecord` field plus `enrolledAt`
+   * -- this is a narrowing read, not a new store or a schema change.
+   */
+  const enrollmentReader: EnrollmentReader = {
+    findById: async (enrollmentId) => {
+      const record = await enrollmentRepository.findById(enrollmentId);
+      return record ? { id: record.id, studentId: record.studentId, examId: record.examId } : null;
+    }
+  };
+
   const trainingRecommendationDeps: TrainingRecommendationDependencies = {
-    enrollmentReader: enrollments,
+    enrollmentReader,
     attemptHistoryReader: attempts,
     repairPlanReader: { findConfirmedActiveByStudentId: async () => [] },
     trainingQuestionReader: { findPublishedByExamId: async () => [] },
@@ -105,7 +122,7 @@ export function createInMemoryDependencies(
   return {
     trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
     practiceLoopService: new PracticeLoopService(attempts, questions),
-    enrollmentReader: enrollments,
+    enrollmentReader,
     questionReader: questions,
     questionContentReader: questionContent,
     autopsyReader,
@@ -115,7 +132,6 @@ export function createInMemoryDependencies(
     examReader,
     prepPhaseTemplateReader,
     attempts,
-    enrollmentReaderStore: enrollments,
     questions,
     questionContent
   };

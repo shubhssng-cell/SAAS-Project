@@ -4,6 +4,26 @@ import { createServer as createNodeServer, type IncomingMessage, type ServerResp
 import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, type StudentRequestClaim } from "@ipmat/practice-api";
 
 /**
+ * Product Phase 1 Unit 10 (real web/API integration) -- the six practice
+ * routes below used to accept `studentId`/`enrollmentId` as plain,
+ * unauthenticated request fields (`StudentRequestClaim` was, until this
+ * unit, literally "whatever the caller says it is" -- documented in
+ * `@ipmat/practice-api`'s own `StudentRequestClaim` doc comment as
+ * "explicitly future work (D-004, still open)"). D-004 has since been
+ * resolved (Unit 4) and every other authenticated route in this file
+ * already derives identity from the session cookie -- this unit closes
+ * that same gap here, the same way, rather than shipping a real HTTP
+ * client that would otherwise have to send a browser-chosen studentId to
+ * a production endpoint. `resolvePracticeClaim()` is the ONE place this
+ * happens: it resolves `studentId` via the EXISTING `getCurrentSession()`
+ * (identical to `resolveAuthenticatedStudentId()` below) and `enrollmentId`
+ * via the EXISTING `EnrollmentApiService.getCurrentEnrollment()` -- no new
+ * auth mechanism, no change to `@ipmat/practice-api`'s own `StudentRequestClaim`
+ * shape or any of its six methods, which still receive exactly the same
+ * claim shape as before, just from a trustworthy source now.
+ */
+
+/**
  * The ONE, minimal HTTP transport for the application/API boundary
  * (docs/project-memory/70_API_AND_APPLICATION_LAYER.md). This file
  * contains NO business logic — every route handler does exactly three
@@ -21,11 +41,14 @@ import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, typ
  * same `PracticeApiService` without changing it at all.
  *
  * Versioned under `/v1` (F: "keep the public contract minimal and
- * versionable"). No auth middleware — resolving a real, authenticated
- * identity remains D-004's own open decision; `studentId`/`enrollmentId`
- * are accepted as explicit request fields, the SAME trust boundary
- * `@ipmat/training-recommendation`/`@ipmat/practice-loop` already have as
- * plain function parameters. This transport adds no new trust assumption.
+ * versionable"). Every practice route below is now cookie-authenticated
+ * (Product Phase 1 Unit 10, see the doc comment above) — `studentId`/
+ * `enrollmentId` are resolved server-side via `resolvePracticeClaim()`,
+ * never read from the request. `questionId`/`attemptId`/`chosenAnswer` are
+ * still read as plain request fields; there is nothing sensitive about
+ * trusting a caller's own claimed `questionId`/`chosenAnswer` the way
+ * there was about trusting their claimed *identity* — `@ipmat/practice-api`
+ * independently verifies ownership/state for every one of these.
  *
  * `now` is NEVER read from a request anywhere in this file — see
  * `@ipmat/practice-api`'s own `PracticeApiService` doc comment for why
@@ -43,7 +66,7 @@ interface RouteParams {
   attemptId: string;
 }
 
-type Handler = (service: PracticeApiService, body: Record<string, unknown>, query: URLSearchParams, params: RouteParams) => Promise<unknown>;
+type Handler = (service: PracticeApiService, claim: StudentRequestClaim, body: Record<string, unknown>, query: URLSearchParams, params: RouteParams) => Promise<unknown>;
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -76,26 +99,22 @@ function stringField(body: Record<string, unknown>, query: URLSearchParams, fiel
   return query.get(field) ?? "";
 }
 
-function claimFrom(body: Record<string, unknown>, query: URLSearchParams): StudentRequestClaim {
-  return { studentId: stringField(body, query, "studentId"), enrollmentId: stringField(body, query, "enrollmentId") };
-}
-
 const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "POST",
     pattern: /^\/v1\/recommendation$/,
-    handler: async (service, body, query) => service.getNextRecommendation(claimFrom(body, query))
+    handler: async (service, claim) => service.getNextRecommendation(claim)
   },
   {
     method: "POST",
     pattern: /^\/v1\/attempts$/,
-    handler: async (service, body, query) => service.startAttempt(claimFrom(body, query), { questionId: stringField(body, query, "questionId") })
+    handler: async (service, claim, body, query) => service.startAttempt(claim, { questionId: stringField(body, query, "questionId") })
   },
   {
     method: "POST",
     pattern: /^\/v1\/attempts\/([^/]+)\/submit$/,
-    handler: async (service, body, query, params) =>
-      service.submitAttempt(claimFrom(body, query), {
+    handler: async (service, claim, body, query, params) =>
+      service.submitAttempt(claim, {
         attemptId: params.attemptId,
         questionId: stringField(body, query, "questionId"),
         chosenAnswer: stringField(body, query, "chosenAnswer")
@@ -104,17 +123,17 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "POST",
     pattern: /^\/v1\/attempts\/([^/]+)\/skip$/,
-    handler: async (service, body, query, params) => service.skipAttempt(claimFrom(body, query), { attemptId: params.attemptId, questionId: stringField(body, query, "questionId") })
+    handler: async (service, claim, body, query, params) => service.skipAttempt(claim, { attemptId: params.attemptId, questionId: stringField(body, query, "questionId") })
   },
   {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/result$/,
-    handler: async (service, body, query, params) => service.getAttemptResult(claimFrom(body, query), { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.getAttemptResult(claim, { attemptId: params.attemptId })
   },
   {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/autopsy$/,
-    handler: async (service, body, query, params) => service.getAutopsyForConfirmation(claimFrom(body, query), { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.getAutopsyForConfirmation(claim, { attemptId: params.attemptId })
   }
 ];
 
@@ -219,6 +238,27 @@ async function resolveAuthenticatedStudentId(authService: AuthApiService, cookie
   return student.id;
 }
 
+/**
+ * The ONE place a session cookie is turned into a verified `StudentRequestClaim`
+ * for the six practice routes (Product Phase 1 Unit 10) — reuses
+ * `resolveAuthenticatedStudentId()` for `studentId` (identical mechanism to
+ * `/v1/enrollment`) and the EXISTING `EnrollmentApiService.getCurrentEnrollment()`
+ * for `enrollmentId` — never a client-supplied value for either field. A
+ * student with no current enrollment gets a clean `invalid_state` (409),
+ * never a crash or a fabricated enrollment id; the frontend's own
+ * `EnrollmentGate` already prevents an unenrolled student from reaching
+ * these routes in the ordinary product flow, so this is a defensive
+ * boundary, not the primary one.
+ */
+async function resolvePracticeClaim(authService: AuthApiService, enrollmentService: EnrollmentApiService, cookies: Record<string, string>): Promise<StudentRequestClaim> {
+  const studentId = await resolveAuthenticatedStudentId(authService, cookies);
+  const { enrollment } = await enrollmentService.getCurrentEnrollment({ studentId });
+  if (!enrollment) {
+    throw new PracticeApiError("invalid_state", "You need to complete enrollment before practicing.", 409);
+  }
+  return { studentId, enrollmentId: enrollment.id };
+}
+
 const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler }> = [
   {
     method: "POST",
@@ -321,11 +361,15 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * already require).
  *
  * `/v1/auth/*` (Product Phase 1 Unit 4) is checked as a SEPARATE route
- * table from the pre-existing `ROUTES` — the two never overlap in pattern,
- * and keeping them separate means the auth addition touches nothing about
- * how the 6 existing, already-tested `/v1/*` routes are dispatched.
+ * table from `ROUTES` — the two never overlap in pattern.
  * `/v1/onboarding/complete` (Unit 6) and `/v1/enrollment` (Unit 7) share
  * that same table, since both are cookie-authenticated the same way.
+ * `ROUTES` (the six practice operations) is its own dispatch branch below —
+ * each one is ALSO cookie-authenticated as of Product Phase 1 Unit 10, via
+ * `resolvePracticeClaim()`, but keeps its own `Handler` shape (still
+ * receives `body`/`query`/`params` for `questionId`/`attemptId`/
+ * `chosenAnswer`, unlike the auth/enrollment table) rather than being
+ * folded into `AUTH_ROUTES`.
  */
 export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies) {
   const service = new PracticeApiService(deps);
@@ -361,8 +405,10 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
         const match = route.pattern.exec(url.pathname);
         const params: RouteParams = { attemptId: match?.[1] ?? "" };
         const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
+        const cookies = parseCookies(req.headers.cookie);
+        const claim = await resolvePracticeClaim(authService, enrollmentService, cookies);
 
-        const result = await route.handler(service, body, url.searchParams, params);
+        const result = await route.handler(service, claim, body, url.searchParams, params);
         sendJson(res, 200, result);
       } catch (error) {
         sendError(res, error);
