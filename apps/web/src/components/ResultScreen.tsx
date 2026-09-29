@@ -4,13 +4,17 @@ import { Button, Card, Screen } from "../design/index.js";
 
 export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result: AttemptResultViewModel; onSeeWhatHappened: () => void; onContinue: () => void }) {
   const [showSolution, setShowSolution] = useState(false);
+  // The real API adapter returns no solution steps today -- offering "View solution" that reveals an empty list would be a control that does nothing.
+  const hasSolution = result.solutionSteps.length > 0;
 
   return (
     <Screen>
       <Card>
         <div className="result-banner">
-          <div className={`result-icon ${result.isCorrect ? "correct" : "incorrect"}`}>{result.isCorrect ? "✓" : "✕"}</div>
-          <h2 className="headline headline-compact">{result.isCorrect ? "Correct." : "Not quite."}</h2>
+          <div className={`result-icon ${result.isCorrect ? "correct" : "incorrect"}`} aria-hidden="true">
+            {result.isCorrect ? "✓" : "✕"}
+          </div>
+          <h1 className="headline headline-compact">{result.isCorrect ? "Correct." : "Not quite."}</h1>
         </div>
 
         <div className="fact-row">
@@ -26,20 +30,24 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
         <div className="fact-row">
           <span className="fact-label">Time taken</span>
           <span className="fact-value">
-            {result.timeTakenSeconds}s <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>(expected {result.expectedTimeSeconds}s)</span>
+            {result.timeTakenSeconds}s <span className="fact-value-note">(expected {result.expectedTimeSeconds}s)</span>
           </span>
         </div>
 
-        <Button variant="secondary" className="solution-toggle" onClick={() => setShowSolution((v) => !v)}>
-          {showSolution ? "Hide solution" : "View solution"}
-        </Button>
+        {hasSolution && (
+          <>
+            <Button variant="secondary" className="solution-toggle" aria-expanded={showSolution} aria-controls="solution-steps" onClick={() => setShowSolution((v) => !v)}>
+              {showSolution ? "Hide solution" : "View solution"}
+            </Button>
 
-        {showSolution && (
-          <ol className="solution-list">
-            {result.solutionSteps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
+            {showSolution && (
+              <ol className="solution-list" id="solution-steps">
+                {result.solutionSteps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+            )}
+          </>
         )}
       </Card>
 

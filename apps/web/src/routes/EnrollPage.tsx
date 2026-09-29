@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, Screen } from "../design/index.js";
+import { Button, Card, ErrorNotice, Screen } from "../design/index.js";
 import { useEnrollment } from "../enrollment/EnrollmentContext.js";
 import { useNavigate } from "../router/router.js";
 
@@ -37,11 +37,7 @@ export function EnrollPage() {
     <Screen eyebrow="IPMAT preparation" headline="You're setting up your IPMAT preparation.">
       <Card>
         <p className="subtext">Enrolling establishes your preparation context — the platform uses your enrollment date to structure training against a realistic timeline as your exam approaches.</p>
-        {error && (
-          <p className="form-alert" role="alert">
-            {error}
-          </p>
-        )}
+        {error && <ErrorNotice>{error}</ErrorNotice>}
         <Button block disabled={submitting} onClick={handleEnroll}>
           {submitting ? "Enrolling…" : "Enroll for IPMAT"}
         </Button>

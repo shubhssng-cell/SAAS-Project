@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { AutopsyResponse, AutopsyViewModel } from "../adapter/index.js";
+import { isSessionExpiredError, type AutopsyResponse, type AutopsyViewModel } from "../adapter/index.js";
 import { AutopsyCard } from "../components/AutopsyCard.js";
-import { Button, Screen } from "../design/index.js";
+import { FailureScreen } from "../components/FailureScreen.js";
+import { Button, LoadingState, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
@@ -12,20 +13,23 @@ import { useNavigate } from "../router/router.js";
  * PHASE_1_PLATFORM_SHELL.md's Unit 10 summary for a disclosed limitation:
  * the real backend does not yet populate a pending autopsy hypothesis
  * through the ordinary submit flow, so this route is rarely reached today
- * -- its error handling still matters for whenever it is.
+ * -- its error handling still matters for whenever it is. Product Phase 1
+ * Unit 11: a failed load can be retried, and a response can't be recorded twice.
  */
 export function PracticeAutopsyRoute({ questionId }: { questionId: string }) {
   const { adapter, getLastResult, getLastAutopsy, setLastAutopsy } = usePracticeSession();
   const navigate = useNavigate();
   const result = getLastResult(questionId);
   const [autopsy, setAutopsy] = useState<AutopsyViewModel | null>(result ? (getLastAutopsy(result.attemptId) ?? null) : null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<{ sessionExpired: boolean } | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [responding, setResponding] = useState(false);
   const [respondFailed, setRespondFailed] = useState(false);
 
   useEffect(() => {
     if (!result) return;
     let cancelled = false;
-    setLoadFailed(false);
+    setLoadFailure(null);
     adapter
       .getAutopsy(result.attemptId)
       .then((fetched) => {
@@ -33,13 +37,13 @@ export function PracticeAutopsyRoute({ questionId }: { questionId: string }) {
         setAutopsy(fetched);
         setLastAutopsy(result.attemptId, fetched);
       })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true);
+      .catch((error: unknown) => {
+        if (!cancelled) setLoadFailure({ sessionExpired: isSessionExpiredError(error) });
       });
     return () => {
       cancelled = true;
     };
-  }, [adapter, result?.attemptId]);
+  }, [adapter, result?.attemptId, retryCount]);
 
   // Same limitation as PracticeResultRoute -- no in-session result to review means this URL
   // was reached without going through the practice flow (or after a hard refresh).
@@ -51,31 +55,44 @@ export function PracticeAutopsyRoute({ questionId }: { questionId: string }) {
     );
   }
 
-  if (loadFailed) {
+  if (loadFailure) {
     return (
-      <Screen eyebrow="Practice" headline="We couldn't load this review." subtext="Something went wrong. Please try again.">
-        <Button onClick={() => navigate("/practice/next")}>Back to practice</Button>
-      </Screen>
+      <FailureScreen
+        eyebrow="Practice"
+        headline="We couldn't load this review."
+        sessionExpired={loadFailure.sessionExpired}
+        onRetry={() => setRetryCount((n) => n + 1)}
+        back={{ label: "Back to practice", to: "/practice/next" }}
+      />
     );
   }
 
-  if (!autopsy) return <p className="loading-text">Loading review…</p>;
+  if (!autopsy) return <LoadingState message="Loading review…" />;
 
   async function handleRespond(response: AutopsyResponse) {
-    if (!result) return;
+    if (!result || responding) return;
     setRespondFailed(false);
+    setResponding(true);
     try {
       await adapter.respondToAutopsy({ attemptId: result.attemptId, response });
       navigate("/practice/next");
-    } catch {
-      setRespondFailed(true);
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        setLoadFailure({ sessionExpired: true });
+      } else {
+        setRespondFailed(true);
+      }
+      setResponding(false);
     }
   }
 
   return (
-    <>
-      <AutopsyCard autopsy={autopsy} onRespond={handleRespond} />
-      {respondFailed && <p className="subtext">We couldn't record your response. Please try again.</p>}
-    </>
+    <AutopsyCard
+      autopsy={autopsy}
+      onRespond={handleRespond}
+      onContinue={() => navigate("/practice/next")}
+      responding={responding}
+      respondError={respondFailed ? "We couldn't record your response. Please try again." : null}
+    />
   );
 }

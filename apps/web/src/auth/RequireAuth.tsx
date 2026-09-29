@@ -1,5 +1,5 @@
 import { useEffect, type ReactElement } from "react";
-import { Button, Screen } from "../design/index.js";
+import { Button, LoadingState, Screen } from "../design/index.js";
 import { useNavigate } from "../router/router.js";
 import { useAuth } from "./AuthContext.js";
 import { decideProtectedRouteAccess } from "./routeAccess.js";
@@ -27,12 +27,12 @@ export function RequireAuth({ children }: { children: ReactElement }): ReactElem
   if (decision === "error") {
     const message = state.status === "error" ? state.message : "Please check your connection and try again.";
     return (
-      <Screen eyebrow="Connection problem" headline="We couldn't reach the server." subtext={message}>
+      <Screen role="alert" eyebrow="Connection problem" headline="We couldn't reach the server." subtext={message}>
         <Button onClick={() => window.location.reload()}>Retry</Button>
       </Screen>
     );
   }
 
   // "loading" (hydrating) or "redirect-to-login" (a brief flash before the effect above navigates away).
-  return <p className="loading-text">Checking your session…</p>;
+  return <LoadingState message="Checking your session…" />;
 }

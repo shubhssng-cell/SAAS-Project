@@ -28,31 +28,59 @@ function readErrorBody(body: unknown): { code?: string; message?: string } {
   return { code: typeof code === "string" ? code : undefined, message: typeof message === "string" ? message : undefined };
 }
 
-export async function jsonRequest(fetchImpl: FetchLike, method: "GET" | "POST", path: string, body?: unknown): Promise<JsonRequestResult> {
-  let res: { ok: boolean; status: number; json: () => Promise<unknown> };
-  try {
-    res = await fetchImpl(`${API_BASE_URL}${path}`, {
-      method,
-      credentials: "include",
-      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined
-    });
-  } catch {
-    // A thrown fetch (offline, DNS failure, connection refused, CORS misconfiguration) is a
-    // genuinely different problem than a 401 -- never silently treated as "not authenticated."
-    return { ok: false, failure: NETWORK_FAILURE };
+/**
+ * Upper bound on how long any one request (headers AND body) may take before
+ * it is treated as a network failure (Product Phase 1 Unit 11). Without a
+ * bound, a request that never settles (a stalled connection, a hung server)
+ * would leave whichever screen issued it on its loading state forever, with
+ * no error and no retry.
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
+export async function jsonRequest(fetchImpl: FetchLike, method: "GET" | "POST", path: string, body?: unknown, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<JsonRequestResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Races the whole request (a fetch impl that ignores `signal` still can't hang the caller).
+  const timedOut = new Promise<JsonRequestResult>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({ ok: false, failure: NETWORK_FAILURE });
+    }, timeoutMs);
+  });
+
+  async function perform(): Promise<JsonRequestResult> {
+    let res: { ok: boolean; status: number; json: () => Promise<unknown> };
+    try {
+      res = await fetchImpl(`${API_BASE_URL}${path}`, {
+        method,
+        credentials: "include",
+        headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+    } catch {
+      // A thrown fetch (offline, DNS failure, connection refused, CORS misconfiguration, our own timeout abort) is a
+      // genuinely different problem than a 401 -- never silently treated as "not authenticated."
+      return { ok: false, failure: NETWORK_FAILURE };
+    }
+
+    let parsedBody: unknown = null;
+    try {
+      parsedBody = await res.json();
+    } catch {
+      parsedBody = null;
+    }
+
+    if (!res.ok) {
+      const { code, message } = readErrorBody(parsedBody);
+      return { ok: false, failure: mapAuthApiErrorCode(code, message) };
+    }
+    return { ok: true, body: parsedBody };
   }
 
-  let parsedBody: unknown = null;
   try {
-    parsedBody = await res.json();
-  } catch {
-    parsedBody = null;
+    return await Promise.race([perform(), timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
-
-  if (!res.ok) {
-    const { code, message } = readErrorBody(parsedBody);
-    return { ok: false, failure: mapAuthApiErrorCode(code, message) };
-  }
-  return { ok: true, body: parsedBody };
 }

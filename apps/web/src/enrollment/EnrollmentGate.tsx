@@ -1,6 +1,6 @@
 import { useEffect, type ReactElement } from "react";
 import type { OnboardingGateMode } from "../auth/routeAccess.js";
-import { Button, Screen } from "../design/index.js";
+import { Button, LoadingState, Screen } from "../design/index.js";
 import { useNavigate } from "../router/router.js";
 import { useEnrollment } from "./EnrollmentContext.js";
 import { decideEnrollmentGateAccess } from "./routeAccess.js";
@@ -37,12 +37,12 @@ export function EnrollmentGate({ mode, children }: { mode: OnboardingGateMode; c
 
   if (state.status === "error") {
     return (
-      <Screen eyebrow="Connection problem" headline="We couldn't check your enrollment status." subtext={state.message}>
+      <Screen role="alert" eyebrow="Connection problem" headline="We couldn't check your enrollment status." subtext={state.message}>
         <Button onClick={() => window.location.reload()}>Retry</Button>
       </Screen>
     );
   }
 
   // idle / loading / the brief moment before the redirect effect above fires.
-  return <p className="loading-text">Checking your enrollment…</p>;
+  return <LoadingState message="Checking your enrollment…" />;
 }

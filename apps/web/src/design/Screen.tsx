@@ -13,11 +13,12 @@ import type { ReactNode } from "react";
  *
  * `eyebrow`/`headline`/`subtext` are optional: a component that builds its
  * own heading (e.g. `AutopsyCard` uses only `headline`, `QuestionPlayer`
- * uses neither) can omit any of them.
+ * uses neither) can omit any of them. `role="alert"` (Product Phase 1 Unit
+ * 11) is for whole-screen error states, so assistive tech announces them.
  */
-export function Screen({ eyebrow, headline, subtext, children }: { eyebrow?: string; headline?: string; subtext?: string; children?: ReactNode }) {
+export function Screen({ eyebrow, headline, subtext, role, children }: { eyebrow?: string; headline?: string; subtext?: string; role?: "alert"; children?: ReactNode }) {
   return (
-    <div className="screen">
+    <div className="screen" role={role}>
       {eyebrow && <p className="eyebrow">{eyebrow}</p>}
       {headline && <h1 className="headline">{headline}</h1>}
       {subtext && <p className="subtext">{subtext}</p>}

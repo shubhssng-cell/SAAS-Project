@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
-import { Button, Card, FormField, Screen } from "../design/index.js";
+import { Button, Card, ErrorNotice, FormField, Screen } from "../design/index.js";
 import { Link, useNavigate } from "../router/router.js";
 
 export function LoginPage() {
@@ -45,11 +45,7 @@ export function LoginPage() {
     <Screen eyebrow="Log in" headline="Welcome back.">
       <Card>
         <form onSubmit={handleSubmit} noValidate>
-          {formError && (
-            <p className="form-alert" role="alert">
-              {formError}
-            </p>
-          )}
+          {formError && <ErrorNotice>{formError}</ErrorNotice>}
           <FormField label="Email" htmlFor="login-email">
             <input
               id="login-email"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../../src/http.js";
-import { createApiTrainingAdapter } from "../../src/adapter/apiTrainingAdapter.js";
+import { createApiTrainingAdapter, isSessionExpiredError } from "../../src/adapter/apiTrainingAdapter.js";
 
 interface Call {
   url: string;
@@ -184,5 +184,29 @@ describe("createApiTrainingAdapter -- identity and transport discipline", () => 
       expect(call.init?.credentials).toBe("include");
       expect(Object.keys(call.init?.headers ?? {}).map((h) => h.toLowerCase())).not.toContain("authorization");
     }
+  });
+});
+
+describe("isSessionExpiredError (Product Phase 1 Unit 11)", () => {
+  async function failureOf(fetchImpl: FetchLike): Promise<unknown> {
+    try {
+      await createApiTrainingAdapter(fetchImpl).getNextRecommendation();
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected the adapter call to reject");
+  }
+
+  it("is true for a real 401 (not_authenticated) from a practice call", async () => {
+    const { fetchImpl } = routedFetch({ "/v1/recommendation": { ok: false, status: 401, body: { error: { code: "not_authenticated", message: "no session" } } } });
+    expect(isSessionExpiredError(await failureOf(fetchImpl))).toBe(true);
+  });
+
+  it("is false for a server error, a network failure, and for things that are not adapter errors at all", async () => {
+    const { fetchImpl } = routedFetch({ "/v1/recommendation": { ok: false, status: 500, body: { error: { code: "infrastructure_failure", message: "boom" } } } });
+    expect(isSessionExpiredError(await failureOf(fetchImpl))).toBe(false);
+    expect(isSessionExpiredError(await failureOf(throwingFetch()))).toBe(false);
+    expect(isSessionExpiredError(new Error("not_authenticated"))).toBe(false);
+    expect(isSessionExpiredError(undefined)).toBe(false);
   });
 });

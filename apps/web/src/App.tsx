@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { createApiTrainingAdapter } from "./adapter/index.js";
 import { AuthHeaderControl } from "./auth/AuthHeaderControl.js";
 import { AuthProvider } from "./auth/AuthContext.js";
 import { EnrollmentProvider } from "./enrollment/EnrollmentContext.js";
 import { PracticeSessionProvider } from "./practice/PracticeSessionContext.js";
 import { AppRoutes } from "./router/AppRoutes.js";
+import { useRouteAccessibility } from "./router/RouteAccessibility.js";
 
 /**
  * The application shell. Owns no flow/screen state of its own -- which
@@ -38,12 +39,17 @@ import { AppRoutes } from "./router/AppRoutes.js";
  */
 export function App() {
   const adapter = useMemo(() => createApiTrainingAdapter(), []);
+  const mainRef = useRef<HTMLElement>(null);
+  useRouteAccessibility(mainRef);
 
   return (
     <AuthProvider>
       <EnrollmentProvider>
         <PracticeSessionProvider adapter={adapter}>
           <div className="app-shell">
+            <a className="skip-link" href="#main-content">
+              Skip to main content
+            </a>
             <header className="app-header">
               <div className="wordmark">
                 IPMAT AI
@@ -52,7 +58,7 @@ export function App() {
               <AuthHeaderControl />
             </header>
 
-            <main className="app-main">
+            <main className="app-main" id="main-content" tabIndex={-1} ref={mainRef}>
               <AppRoutes />
             </main>
           </div>

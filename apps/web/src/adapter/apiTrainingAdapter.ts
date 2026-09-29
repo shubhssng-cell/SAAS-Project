@@ -55,6 +55,16 @@ class PracticeApiRequestError extends Error {
   }
 }
 
+/**
+ * True only for a genuine 401 from a practice call (Product Phase 1 Unit 11) -- lets a
+ * route show "log in again" instead of a Retry that can never succeed. Reads the
+ * transport-level failure kind only; the server remains the sole authority on whether
+ * a session is valid, and this changes no auth state.
+ */
+export function isSessionExpiredError(error: unknown): boolean {
+  return error instanceof PracticeApiRequestError && error.failure.kind === "not_authenticated";
+}
+
 function asObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useAuth } from "../auth/AuthContext.js";
 import { createOperationGuard } from "../auth/operationGuard.js";
 import { apiEnroll, apiGetEnrollment, type EnrollResult } from "./api.js";
@@ -63,7 +64,7 @@ export function EnrollmentProvider({ children }: { children: ReactNode }) {
       async enroll() {
         const token = guard.next();
         const result = await apiEnroll();
-        if (result.ok && guard.isCurrent(token)) dispatch({ type: "ENROLLED", enrollment: result.enrollment, prepPhase: result.prepPhase });
+        if (result.ok && guard.isCurrent(token)) flushSync(() => dispatch({ type: "ENROLLED", enrollment: result.enrollment, prepPhase: result.prepPhase }));
         return result;
       }
     }),

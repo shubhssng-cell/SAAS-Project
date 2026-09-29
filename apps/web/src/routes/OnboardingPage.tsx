@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../auth/AuthContext.js";
-import { Button, Card, Screen } from "../design/index.js";
+import { Button, Card, ErrorNotice, Screen } from "../design/index.js";
 import { useNavigate } from "../router/router.js";
 
 /**
@@ -58,11 +58,7 @@ export function OnboardingPage() {
             <p className="subtext onboarding-section-body">{section.body}</p>
           </div>
         ))}
-        {error && (
-          <p className="form-alert" role="alert">
-            {error}
-          </p>
-        )}
+        {error && <ErrorNotice>{error}</ErrorNotice>}
         <Button block disabled={submitting} onClick={handleStart}>
           {submitting ? "Starting…" : "Start preparing"}
         </Button>

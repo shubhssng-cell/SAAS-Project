@@ -216,14 +216,15 @@ describe("Practice entry: the real dashboard -> practice transition, no second d
 
   it("PracticeNextRoute has an explicit unavailable state with a recovery action -- never implies a recommendation exists when it doesn't", () => {
     const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
-    expect(source).toContain("Practice isn't available right now.");
+    expect(source).toContain("PRACTICE_UNAVAILABLE_COPY.headline"); // the copy itself lives in practice/practiceEntry.ts (asserted in practiceEntry.test.ts)
     expect(source).toContain('navigate("/dashboard")');
   });
 
   it("PracticeNextRoute has an explicit error state with a recovery action, and never exposes raw internals", () => {
     const source = readFileSync(join(routesDir, "PracticeNextRoute.tsx"), "utf-8");
     expect(source).toContain(".catch(");
-    expect(source).toContain("Try again");
+    expect(source).toContain("FailureScreen"); // renders the shared error state, whose "Try again" is asserted under Unit 11 below
+    expect(source).toContain("onRetry");
     expect(source.toLowerCase()).not.toMatch(/stack|json\.stringify|error\.message/);
   });
 
@@ -313,5 +314,111 @@ describe("Route components compose existing presentation components rather than 
       expect(source).toContain("usePracticeSession");
       expect(source).not.toContain("createFixtureTrainingAdapter");
     }
+  });
+});
+
+describe("Shell hardening: loading/error/empty/accessibility structure (Product Phase 1 Unit 11)", () => {
+  const src = (path: string) => readFileSync(join(webRoot, "src", path), "utf-8");
+  const allSources = scannedFiles.map((path) => ({ path, source: readFileSync(path, "utf-8") }));
+
+  it("no route/gate/component renders a bare loading-text paragraph -- every loading state goes through the shared LoadingState (role=status)", () => {
+    const offenders = allSources.filter(({ path, source }) => !path.split(sep).join("/").endsWith("design/LoadingState.tsx") && source.includes('className="loading-text"')).map(({ path }) => path);
+    expect(offenders).toEqual([]);
+    const loading = src("design/LoadingState.tsx");
+    expect(loading).toContain('role="status"');
+    expect(loading).toContain('aria-live="polite"');
+  });
+
+  it("ErrorNotice announces itself (role=alert) and FailureScreen never renders an error object, message, stack, or JSON", () => {
+    expect(src("design/ErrorNotice.tsx")).toContain('role="alert"');
+    const failure = src("components/FailureScreen.tsx");
+    expect(failure).toContain('role="alert"');
+    expect(failure.toLowerCase()).not.toMatch(/stack|json\.stringify|error\.message|\.failure\b/);
+  });
+
+  it("every practice/dashboard route's catch reads only isSessionExpiredError() -- never the error's message -- and renders FailureScreen", () => {
+    for (const file of ["DashboardRoute.tsx", "PracticeNextRoute.tsx", "PracticeQuestionRoute.tsx", "PracticeAutopsyRoute.tsx"]) {
+      const source = src(`routes/${file}`);
+      expect(source, file).toContain("isSessionExpiredError");
+      expect(source, file).toContain("FailureScreen");
+      expect(source.toLowerCase(), file).not.toMatch(/error\.message|json\.stringify|\.stack/);
+    }
+  });
+
+  it("the autopsy route's load failure is retryable, not a dead end", () => {
+    const source = src("routes/PracticeAutopsyRoute.tsx");
+    expect(source).toContain("retryCount");
+    expect(source).toContain("onRetry");
+  });
+
+  it("answer submission and autopsy responses cannot be duplicated: routes guard on their in-flight flag and the controls are disabled meanwhile", () => {
+    expect(src("routes/PracticeQuestionRoute.tsx")).toMatch(/if \(submitting\) return/);
+    expect(src("components/QuestionPlayer.tsx")).toMatch(/disabled=\{submitting\}/);
+    expect(src("components/QuestionPlayer.tsx")).toMatch(/disabled=\{!selected \|\| submitting\}/);
+    expect(src("routes/PracticeAutopsyRoute.tsx")).toMatch(/responding\) return/);
+    expect(src("components/ConfirmationPrompt.tsx")).toMatch(/disabled=\{disabled\}/);
+  });
+
+  it("the question screen has a real h1, exposes the selected option (aria-pressed), and the result/solution controls are labelled", () => {
+    const player = src("components/QuestionPlayer.tsx");
+    expect(player).toContain("<h1");
+    expect(player).toContain("aria-pressed");
+    const result = src("components/ResultScreen.tsx");
+    expect(result).toContain("<h1");
+    expect(result).toContain("aria-expanded");
+    expect(result).toContain('aria-hidden="true"'); // the decorative check/cross glyph
+  });
+
+  it("ResultScreen offers 'View solution' only when there are solution steps (the real adapter returns none today)", () => {
+    expect(src("components/ResultScreen.tsx")).toMatch(/solutionSteps\.length > 0/);
+  });
+
+  it("AutopsyCard never leaves the student without a next action (no-hypothesis and nothing-to-review both offer Continue)", () => {
+    const source = src("components/AutopsyCard.tsx");
+    expect(source).toContain("onContinue");
+    expect(source).toContain("There's nothing to review for this attempt.");
+  });
+
+  it("the shell exposes a skip link, a focusable main landmark, and moves focus/title on route change", () => {
+    const app = src("App.tsx");
+    expect(app).toContain('className="skip-link"');
+    expect(app).toContain('href="#main-content"');
+    expect(app).toContain('id="main-content"');
+    expect(app).toContain("useRouteAccessibility");
+    expect(src("router/RouteAccessibility.ts")).toContain("document.title");
+  });
+
+  it("signup inputs are wired to their validation messages (aria-invalid + aria-describedby) and a failed submit moves focus to the first invalid field", () => {
+    const source = src("routes/SignupPage.tsx");
+    expect(source).toContain("aria-invalid");
+    expect(source).toContain("aria-describedby");
+    expect(source).toContain("firstInvalidFieldId");
+  });
+
+  it("auth/enrollment state applied before a post-success navigate() is flushed synchronously (regression: signup bounced to /login)", () => {
+    for (const file of ["auth/AuthContext.tsx", "enrollment/EnrollmentContext.tsx"]) {
+      expect(src(file), file).toContain("flushSync");
+    }
+    // ...and the two actions that navigate right after must actually use it.
+    expect(src("auth/AuthContext.tsx")).toMatch(/flushSync\(\(\) => dispatch\(\{ type: "SIGNED_UP"/);
+    expect(src("auth/AuthContext.tsx")).toMatch(/flushSync\(\(\) => dispatch\(\{ type: "LOGGED_IN"/);
+  });
+
+  it("the stylesheet honors reduced motion, styles disabled buttons, and never lets the header email/long words force horizontal scroll", () => {
+    const css = src("styles.css");
+    expect(css).toContain("prefers-reduced-motion: reduce");
+    expect(css).toContain(".btn:disabled");
+    expect(css).toMatch(/\.auth-header-email \{[^}]*text-overflow: ellipsis/);
+    expect(css).toMatch(/\.prompt-text \{[^}]*overflow-wrap/);
+    expect(css).toMatch(/\.fact-row \{[^}]*flex-wrap: wrap/);
+  });
+
+  it("production runtime is unchanged: App.tsx still selects createApiTrainingAdapter() and no fixture adapter, no new fetch call sites were added", () => {
+    expect(src("App.tsx")).toContain("createApiTrainingAdapter()");
+    expect(src("App.tsx")).not.toMatch(/import\s*\{[^}]*createFixtureTrainingAdapter/);
+    expect(src("App.tsx")).not.toMatch(/[=(]\s*createFixtureTrainingAdapter\(\)/); // an actual call, not the doc-comment mention
+    // Every request still goes through http.ts's jsonRequest() (via auth/api.ts, enrollment/api.ts, the API adapter) -- no scanned file calls fetch() itself.
+    const fetchCallers = allSources.filter(({ source }) => /\bfetch\(/.test(source)).map(({ path }) => path);
+    expect(fetchCallers).toEqual([]);
   });
 });

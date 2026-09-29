@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { apiCompleteOnboarding, apiLogin, apiLogout, apiMe, apiSignup, type AuthApiResult, type LogoutResult } from "./api.js";
 import { authReducer, failureToHydrateEvent, type AuthState } from "./authState.js";
 import { createOperationGuard } from "./operationGuard.js";
@@ -25,6 +26,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/*
+ * `signup`/`login`/`completeOnboarding` apply their result with `flushSync` (Product Phase 1
+ * Unit 11): callers `navigate()` immediately after these promises resolve, and an
+ * async-continuation `dispatch` is otherwise rendered AFTER that synchronous navigation --
+ * `RequireAuth` would render once with the stale "unauthenticated" state and bounce a student
+ * who had just signed up back to `/login`. Reproduced in a real browser before this fix.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, { status: "loading" });
   const guard = useRef(createOperationGuard()).current;
@@ -45,13 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async signup(input) {
         const token = guard.next();
         const result = await apiSignup(input);
-        if (result.ok && guard.isCurrent(token)) dispatch({ type: "SIGNED_UP", student: result.student });
+        if (result.ok && guard.isCurrent(token)) flushSync(() => dispatch({ type: "SIGNED_UP", student: result.student }));
         return result;
       },
       async login(input) {
         const token = guard.next();
         const result = await apiLogin(input);
-        if (result.ok && guard.isCurrent(token)) dispatch({ type: "LOGGED_IN", student: result.student });
+        if (result.ok && guard.isCurrent(token)) flushSync(() => dispatch({ type: "LOGGED_IN", student: result.student }));
         return result;
       },
       async logout() {
@@ -68,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async completeOnboarding() {
         const token = guard.next();
         const result = await apiCompleteOnboarding();
-        if (result.ok && guard.isCurrent(token)) dispatch({ type: "ONBOARDING_COMPLETED", student: result.student });
+        if (result.ok && guard.isCurrent(token)) flushSync(() => dispatch({ type: "ONBOARDING_COMPLETED", student: result.student }));
         return result;
       }
     }),

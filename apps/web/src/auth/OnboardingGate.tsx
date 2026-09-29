@@ -1,4 +1,5 @@
 import { useEffect, type ReactElement } from "react";
+import { LoadingState } from "../design/index.js";
 import { useNavigate } from "../router/router.js";
 import { useAuth } from "./AuthContext.js";
 import { decideOnboardingGateAccess, type OnboardingGateMode } from "./routeAccess.js";
@@ -24,5 +25,5 @@ export function OnboardingGate({ mode, children }: { mode: OnboardingGateMode; c
   }, [state.status, decision, redirectTo, navigate]);
 
   if (state.status === "authenticated" && decision === "render") return children;
-  return <p className="loading-text">Redirecting…</p>;
+  return <LoadingState message="Redirecting…" />;
 }

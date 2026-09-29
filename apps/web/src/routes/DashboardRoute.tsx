@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import type { DashboardViewModel } from "../adapter/index.js";
+import { isSessionExpiredError, type DashboardViewModel } from "../adapter/index.js";
 import { useAuth } from "../auth/AuthContext.js";
 import { Dashboard } from "../components/Dashboard.js";
+import { FailureScreen } from "../components/FailureScreen.js";
 import { derivePrepStatus } from "../dashboard/prepStatus.js";
-import { Button, Screen } from "../design/index.js";
+import { LoadingState } from "../design/index.js";
 import { useEnrollment } from "../enrollment/EnrollmentContext.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
-type DashboardLoadState = { status: "loading" } | { status: "loaded"; dashboard: DashboardViewModel } | { status: "error" };
+type DashboardLoadState = { status: "loading" } | { status: "loaded"; dashboard: DashboardViewModel } | { status: "error"; sessionExpired: boolean };
 
 /**
  * `DashboardRoute` is only ever reached after `RequireAuth` +
@@ -25,8 +26,8 @@ type DashboardLoadState = { status: "loading" } | { status: "loaded"; dashboard:
  * `createApiTrainingAdapter()` — selected once in `App.tsx`), which can
  * genuinely fail (network/server error) where the pre-Unit-10 fixture call
  * never could — `.catch()` below maps that to an explicit, student-safe
- * error state with a retry action, the same `.btn-row` two-action pattern
- * `PracticeNextRoute` already established in Unit 9. `dashboard.recommendation`
+ * error state with a retry action (the shared `FailureScreen`, Product Phase 1
+ * Unit 11, also used by `PracticeNextRoute`). `dashboard.recommendation`
  * is used only for the on-page preview (headline/explanation/disabled
  * state); the "Start Practice" action itself does not navigate to a
  * dashboard-chosen question id (Product Phase 1 Unit 9) -- it hands off to
@@ -50,8 +51,8 @@ export function DashboardRoute() {
       .then((dashboard) => {
         if (!cancelled) setState({ status: "loaded", dashboard });
       })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ status: "error", sessionExpired: isSessionExpiredError(error) });
       });
     return () => {
       cancelled = true;
@@ -60,15 +61,11 @@ export function DashboardRoute() {
 
   const prepStatus = derivePrepStatus(enrollmentState);
 
-  if (authState.status !== "authenticated" || !prepStatus) return <p className="loading-text">Loading your dashboard…</p>;
-  if (state.status === "loading") return <p className="loading-text">Loading your dashboard…</p>;
+  if (authState.status !== "authenticated" || !prepStatus) return <LoadingState message="Loading your dashboard…" />;
+  if (state.status === "loading") return <LoadingState message="Loading your dashboard…" />;
 
   if (state.status === "error") {
-    return (
-      <Screen eyebrow="Dashboard" headline="We couldn't load your dashboard." subtext="Something went wrong. Please try again.">
-        <Button onClick={() => setRetryCount((n) => n + 1)}>Retry</Button>
-      </Screen>
-    );
+    return <FailureScreen eyebrow="Dashboard" headline="We couldn't load your dashboard." sessionExpired={state.sessionExpired} onRetry={() => setRetryCount((n) => n + 1)} />;
   }
 
   return (

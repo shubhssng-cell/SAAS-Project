@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import type { RecommendationViewModel } from "../adapter/index.js";
+import { isSessionExpiredError, type RecommendationViewModel } from "../adapter/index.js";
+import { FailureScreen } from "../components/FailureScreen.js";
 import { NextTrainingCard } from "../components/NextTrainingCard.js";
-import { Button, Screen } from "../design/index.js";
-import { decidePracticeEntryOutcome } from "../practice/practiceEntry.js";
+import { Button, LoadingState, Screen } from "../design/index.js";
+import { decidePracticeEntryOutcome, PRACTICE_UNAVAILABLE_COPY } from "../practice/practiceEntry.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
-type PracticeNextState = { status: "loading" } | { status: "loaded"; recommendation: RecommendationViewModel } | { status: "error" };
+type PracticeNextState = { status: "loading" } | { status: "loaded"; recommendation: RecommendationViewModel } | { status: "error"; sessionExpired: boolean };
 
 /**
  * The one real practice-entry boundary (Product Phase 1 Unit 9) -- reached
@@ -18,7 +19,8 @@ type PracticeNextState = { status: "loading" } | { status: "loaded"; recommendat
  * already made -- and does nothing else: no recommendation logic of its
  * own, no second decision engine. `decidePracticeEntryOutcome()` only names
  * the "nothing to recommend" branch `RecommendationViewModel` already
- * encodes as `questionId: null`.
+ * encodes as `questionId: null`. Loading/error rendering goes through the
+ * shared `LoadingState`/`FailureScreen` (Product Phase 1 Unit 11).
  */
 export function PracticeNextRoute() {
   const { adapter } = usePracticeSession();
@@ -34,26 +36,25 @@ export function PracticeNextRoute() {
       .then((recommendation) => {
         if (!cancelled) setState({ status: "loaded", recommendation });
       })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ status: "error", sessionExpired: isSessionExpiredError(error) });
       });
     return () => {
       cancelled = true;
     };
   }, [adapter, retryCount]);
 
-  if (state.status === "loading") return <p className="loading-text">Finding your next question…</p>;
+  if (state.status === "loading") return <LoadingState message="Finding your next question…" />;
 
   if (state.status === "error") {
     return (
-      <Screen eyebrow="Practice" headline="We couldn't load your next question." subtext="Something went wrong. Please try again.">
-        <div className="btn-row">
-          <Button onClick={() => setRetryCount((n) => n + 1)}>Try again</Button>
-          <Button variant="secondary" onClick={() => navigate("/dashboard")}>
-            Back to dashboard
-          </Button>
-        </div>
-      </Screen>
+      <FailureScreen
+        eyebrow="Practice"
+        headline="We couldn't load your next question."
+        sessionExpired={state.sessionExpired}
+        onRetry={() => setRetryCount((n) => n + 1)}
+        back={{ label: "Back to dashboard", to: "/dashboard" }}
+      />
     );
   }
 
@@ -61,7 +62,7 @@ export function PracticeNextRoute() {
 
   if (outcome.kind === "unavailable") {
     return (
-      <Screen eyebrow="Practice" headline="Practice isn't available right now." subtext="There's nothing to practice at the moment — check back soon.">
+      <Screen eyebrow="Practice" headline={PRACTICE_UNAVAILABLE_COPY.headline} subtext={PRACTICE_UNAVAILABLE_COPY.explanation}>
         <Button onClick={() => navigate("/dashboard")}>Back to dashboard</Button>
       </Screen>
     );
