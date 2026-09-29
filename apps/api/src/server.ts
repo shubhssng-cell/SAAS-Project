@@ -1,3 +1,4 @@
+import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, type StudentRequestClaim } from "@ipmat/practice-api";
 
@@ -124,25 +125,156 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
 
 /** E — the transport-level half of safe error mapping: takes whatever `PracticeApiError` the application layer already produced (or wraps an unrecognized throw the same defensive way) and writes it as `{ error: { code, message } }` — never a stack trace, never a raw Node/driver error string. */
 function sendError(res: ServerResponse, error: unknown): void {
+  if (error instanceof AuthApiError) {
+    sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
+    return;
+  }
   const apiError = error instanceof PracticeApiError ? error : new PracticeApiError("infrastructure_failure", "An unexpected error occurred. Please try again.", 500);
   sendJson(res, apiError.httpStatus, { error: { code: apiError.code, message: apiError.message } });
 }
+
+/**
+ * Product Phase 1 Unit 4 (Authentication Architecture) -- cookie handling
+ * for the four `/v1/auth/*` routes below. See
+ * docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md's Unit 4 architecture
+ * section for the full session-model rationale (server-authoritative,
+ * opaque bearer token, never a JWT). `SESSION_COOKIE_NAME`'s value is the
+ * RAW session token -- `AuthApiService` itself never sees or stores it raw
+ * beyond the one moment it issues it; only `hashSessionToken()`'s digest is
+ * ever persisted.
+ */
+const SESSION_COOKIE_NAME = "session_token";
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const part of header.split(";")) {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex === -1) continue;
+    const name = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1).trim();
+    if (name) cookies[name] = decodeURIComponent(value);
+  }
+  return cookies;
+}
+
+/** `Secure` is gated on `NODE_ENV === "production"` -- a real deployment sits behind TLS termination; requiring `Secure` unconditionally would break local `http://localhost` development. */
+function cookieAttributes(maxAgeSeconds: number): string {
+  const attrs = ["HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${maxAgeSeconds}`];
+  if (process.env.NODE_ENV === "production") attrs.push("Secure");
+  return attrs.join("; ");
+}
+
+function sessionCookieHeader(token: string, expiresAt: string): string {
+  const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; ${cookieAttributes(maxAgeSeconds)}`;
+}
+
+function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE_NAME}=; ${cookieAttributes(0)}`;
+}
+
+function sendJsonWithCookie(res: ServerResponse, status: number, payload: unknown, setCookieHeader: string): void {
+  const json = JSON.stringify(payload);
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "set-cookie": setCookieHeader });
+  res.end(json);
+}
+
+type AuthHandler = (authService: AuthApiService, body: Record<string, unknown>, cookies: Record<string, string>) => Promise<{ status: number; body: unknown; setCookieHeader?: string }>;
+
+/** Reads a field from the JSON body only (never the query string — every auth route is a POST with a body, or a cookie-only GET) — same always-a-string, never-`undefined` shape `stringField()` gives the existing routes, so `assertNonEmptyString()` sees a consistently rejectable value for malformed input. */
+function bodyStringField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  return typeof value === "string" ? value : "";
+}
+
+const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler }> = [
+  {
+    method: "POST",
+    pattern: /^\/v1\/auth\/signup$/,
+    handler: async (authService, body) => {
+      const result = await authService.signup({ email: bodyStringField(body, "email"), password: bodyStringField(body, "password") });
+      return { status: 200, body: { student: result.student }, setCookieHeader: sessionCookieHeader(result.sessionToken, result.expiresAt) };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/v1\/auth\/login$/,
+    handler: async (authService, body) => {
+      const result = await authService.login({ email: bodyStringField(body, "email"), password: bodyStringField(body, "password") });
+      return { status: 200, body: { student: result.student }, setCookieHeader: sessionCookieHeader(result.sessionToken, result.expiresAt) };
+    }
+  },
+  {
+    method: "GET",
+    pattern: /^\/v1\/auth\/me$/,
+    handler: async (authService, _body, cookies) => {
+      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      // No cookie at all is the ordinary "not logged in" case -- handled here,
+      // before the service, so it never reaches AuthApiService.getCurrentSession()'s
+      // own `assertNonEmptyString()` guard (which exists for a malformed/blank
+      // token, a different case) and never produces `invalid_request` for what is
+      // simply an unauthenticated visitor.
+      if (!sessionToken) {
+        throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
+      }
+      const result = await authService.getCurrentSession({ sessionToken });
+      return { status: 200, body: { student: result.student } };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/v1\/auth\/logout$/,
+    handler: async (authService, _body, cookies) => {
+      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      // No cookie at all: already logged out, a no-op success -- same principle
+      // as logging out an already-invalid token (see AuthApiService.logout()'s
+      // own doc comment), just short-circuited before the service since there is
+      // no token to even hash and look up.
+      if (!sessionToken) {
+        return { status: 200, body: { loggedOut: true }, setCookieHeader: clearSessionCookieHeader() };
+      }
+      await authService.logout({ sessionToken });
+      return { status: 200, body: { loggedOut: true }, setCookieHeader: clearSessionCookieHeader() };
+    }
+  }
+];
 
 /**
  * Constructs a plain `http.Server` for the given, already-wired
  * dependencies — this function performs NO wiring of its own (see
  * `wiring.ts` for that; `createServer` never imports `@ipmat/db`'s
  * concrete repository classes directly, only the port interfaces
- * `PracticeApiDependencies` already requires).
+ * `PracticeApiDependencies`/`AuthApiDependencies` already require).
+ *
+ * `/v1/auth/*` (Product Phase 1 Unit 4) is checked as a SEPARATE route
+ * table from the pre-existing `ROUTES` — the two never overlap in pattern,
+ * and keeping them separate means the auth addition touches nothing about
+ * how the 6 existing, already-tested `/v1/*` routes are dispatched.
  */
-export function createServer(deps: PracticeApiDependencies) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies) {
   const service = new PracticeApiService(deps);
+  const authService = new AuthApiService(deps);
 
   return createNodeServer((req, res) => {
     void (async () => {
       try {
         const url = new URL(req.url ?? "/", "http://localhost");
         const method = req.method ?? "GET";
+
+        const authRoute = AUTH_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+        if (authRoute) {
+          const cookies = parseCookies(req.headers.cookie);
+          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
+          const result = await authRoute.handler(authService, body, cookies);
+          if (result.setCookieHeader) {
+            sendJsonWithCookie(res, result.status, result.body, result.setCookieHeader);
+          } else {
+            sendJson(res, result.status, result.body);
+          }
+          return;
+        }
+
         const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
 
         if (!route) {

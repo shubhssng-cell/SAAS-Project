@@ -26,3 +26,7 @@ export * from "./prismaConceptReader.js";
 export * from "./inMemoryConceptReader.js";
 export * from "./prismaQuestionContentReader.js";
 export * from "./inMemoryQuestionContentReader.js";
+export * from "./prismaStudentAccountRepository.js";
+export * from "./inMemoryStudentAccountRepository.js";
+export * from "./prismaSessionRepository.js";
+export * from "./inMemorySessionRepository.js";

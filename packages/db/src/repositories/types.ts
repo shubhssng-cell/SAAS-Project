@@ -518,3 +518,54 @@ export interface QuestionContentReader {
   /** `null` unless the question exists AND `validationState === "published"` — the same "never render draft/review/rejected content" rule `PracticeLoopService.startAttempt()` already enforces, re-checked here independently rather than assumed from an earlier call. */
   findPublishedById(questionId: string): Promise<StudentQuestionRecord | null>;
 }
+
+// ---------------------------------------------------------------------
+// Authentication (Product Phase 1, Unit 4 -- see
+// docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md's Unit 4 architecture
+// section). `StudentAccountRepository`/`SessionRepository` are the ONLY
+// write paths to `Student.email`/`Student.passwordHash` and the `Session`
+// table respectively -- there is no general Student CRUD repository
+// anywhere in this codebase, so an ordinary persistence operation can never
+// accidentally set/overwrite credential fields outside `@ipmat/auth-api`'s
+// own `signup()` flow.
+// ---------------------------------------------------------------------
+
+/** Never returned from `findByEmailWithCredentials()`'s caller onward except for `login()`'s own `verifyPassword()` call -- see `StudentAccountPublicRecord` for the shape everything else uses. */
+export interface StudentAccountRecord {
+  id: string;
+  email: string;
+  passwordHash: string;
+  createdAt: string;
+}
+
+/** The ONLY shape a client-facing response may ever be built from -- structurally excludes `passwordHash`, the same "narrow, allowlisted view" discipline `StudentQuestionView`/`CanonicalQuestion` already use (D-020). */
+export interface StudentAccountPublicRecord {
+  id: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface StudentAccountRepository {
+  /** Throws `PersistenceError("invalid_record")` if a Student with this (already-normalized) email already exists. */
+  create(input: { email: string; passwordHash: string; now: string }): Promise<StudentAccountPublicRecord>;
+  /** Includes `passwordHash` -- the ONE legitimate reason to read it, for `login()`'s own `verifyPassword()` call. Never returned to a client directly. `null` if no Student with this email exists (including an authRef-only row with a `null` email — never matched). */
+  findByEmailWithCredentials(email: string): Promise<StudentAccountRecord | null>;
+  findById(studentId: string): Promise<StudentAccountPublicRecord | null>;
+}
+
+export interface SessionRecord {
+  id: string;
+  studentId: string;
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+export interface SessionRepository {
+  create(input: { id: string; studentId: string; tokenHash: string; now: string; expiresAt: string }): Promise<SessionRecord>;
+  /** `null` for a token that does not exist, is revoked, or has expired — fail closed, and deliberately indistinguishable to the caller which of the three actually happened (no internal-state leak, see the Unit 4 architecture doc's account-enumeration notes). */
+  findActiveByTokenHash(tokenHash: string, now: string): Promise<SessionRecord | null>;
+  /** A no-op (never throws) if no session with this id exists or it is already revoked — logging out an already-ended session is a valid, ordinary outcome, never an error. */
+  revoke(sessionId: string, now: string): Promise<void>;
+}
