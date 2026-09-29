@@ -1,4 +1,5 @@
 import type { AutopsyResponse, AutopsyViewModel } from "../adapter/index.js";
+import { Card, Screen } from "../design/index.js";
 import { ConfirmationPrompt } from "./ConfirmationPrompt.js";
 
 /**
@@ -10,11 +11,8 @@ import { ConfirmationPrompt } from "./ConfirmationPrompt.js";
  */
 export function AutopsyCard({ autopsy, onRespond }: { autopsy: AutopsyViewModel; onRespond: (response: AutopsyResponse) => void }) {
   return (
-    <div className="screen">
-      <p className="eyebrow">What happened</p>
-      <h1 className="headline">Here's what we noticed.</h1>
-
-      <div className="card">
+    <Screen eyebrow="What happened" headline="Here's what we noticed.">
+      <Card>
         <p className="mode-tag">Observed</p>
         <ul className="evidence-list">
           {autopsy.observed.map((item, i) => (
@@ -42,7 +40,7 @@ export function AutopsyCard({ autopsy, onRespond }: { autopsy: AutopsyViewModel;
             <ConfirmationPrompt onRespond={onRespond} />
           </>
         )}
-      </div>
-    </div>
+      </Card>
+    </Screen>
   );
 }

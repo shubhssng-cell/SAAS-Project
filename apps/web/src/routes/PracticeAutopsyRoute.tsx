@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AutopsyResponse, AutopsyViewModel } from "../adapter/index.js";
 import { AutopsyCard } from "../components/AutopsyCard.js";
+import { Button, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
@@ -27,13 +28,9 @@ export function PracticeAutopsyRoute({ questionId }: { questionId: string }) {
   // was reached without going through the practice flow (or after a hard refresh).
   if (!result) {
     return (
-      <div className="screen">
-        <p className="eyebrow">Nothing to review</p>
-        <h1 className="headline">There's no result to review for this question.</h1>
-        <button type="button" className="btn btn-primary" onClick={() => navigate(`/practice/${questionId}`)}>
-          Back to question
-        </button>
-      </div>
+      <Screen eyebrow="Nothing to review" headline="There's no result to review for this question.">
+        <Button onClick={() => navigate(`/practice/${questionId}`)}>Back to question</Button>
+      </Screen>
     );
   }
 

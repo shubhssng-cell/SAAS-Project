@@ -1,17 +1,16 @@
 import { useState } from "react";
 import type { AttemptResultViewModel } from "../adapter/index.js";
+import { Button, Card, Screen } from "../design/index.js";
 
 export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result: AttemptResultViewModel; onSeeWhatHappened: () => void; onContinue: () => void }) {
   const [showSolution, setShowSolution] = useState(false);
 
   return (
-    <div className="screen">
-      <div className="card">
+    <Screen>
+      <Card>
         <div className="result-banner">
           <div className={`result-icon ${result.isCorrect ? "correct" : "incorrect"}`}>{result.isCorrect ? "✓" : "✕"}</div>
-          <h2 className="headline" style={{ margin: 0, fontSize: "1.35rem" }}>
-            {result.isCorrect ? "Correct." : "Not quite."}
-          </h2>
+          <h2 className="headline headline-compact">{result.isCorrect ? "Correct." : "Not quite."}</h2>
         </div>
 
         <div className="fact-row">
@@ -31,9 +30,9 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
           </span>
         </div>
 
-        <button type="button" className="btn btn-secondary" style={{ marginTop: 20 }} onClick={() => setShowSolution((v) => !v)}>
+        <Button variant="secondary" className="solution-toggle" onClick={() => setShowSolution((v) => !v)}>
           {showSolution ? "Hide solution" : "View solution"}
-        </button>
+        </Button>
 
         {showSolution && (
           <ol className="solution-list">
@@ -42,19 +41,15 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
             ))}
           </ol>
         )}
-      </div>
+      </Card>
 
       <div className="btn-row">
         {result.hasAutopsy ? (
-          <button type="button" className="btn btn-primary" onClick={onSeeWhatHappened}>
-            See what the system noticed
-          </button>
+          <Button onClick={onSeeWhatHappened}>See what the system noticed</Button>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={onContinue}>
-            Continue
-          </button>
+          <Button onClick={onContinue}>Continue</Button>
         )}
       </div>
-    </div>
+    </Screen>
   );
 }

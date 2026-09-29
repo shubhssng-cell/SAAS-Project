@@ -1,3 +1,4 @@
+import { Screen } from "../design/index.js";
 import { Link } from "../router/router.js";
 
 /**
@@ -7,10 +8,11 @@ import { Link } from "../router/router.js";
  */
 export function LoginPage() {
   return (
-    <div className="screen">
-      <p className="eyebrow">Log in</p>
-      <h1 className="headline">Sign-in is coming in a later unit.</h1>
-      <p className="subtext">This screen is a placeholder for the real authentication flow (Product Phase 1, Units 4-5). Nothing you do here creates an account.</p>
+    <Screen
+      eyebrow="Log in"
+      headline="Sign-in is coming in a later unit."
+      subtext="This screen is a placeholder for the real authentication flow (Product Phase 1, Units 4-5). Nothing you do here creates an account."
+    >
       <div className="btn-row">
         <Link to="/onboarding" className="btn btn-primary">
           Continue
@@ -19,6 +21,6 @@ export function LoginPage() {
           Back to landing
         </Link>
       </div>
-    </div>
+    </Screen>
   );
 }

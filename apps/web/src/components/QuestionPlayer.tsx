@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { QuestionViewModel } from "../adapter/index.js";
+import { Button, Screen } from "../design/index.js";
 import { Timer } from "./Timer.js";
 
 export function QuestionPlayer({ question, onSubmit }: { question: QuestionViewModel; onSubmit: (chosenAnswer: string, timeTakenSeconds: number) => void }) {
@@ -24,9 +25,9 @@ export function QuestionPlayer({ question, onSubmit }: { question: QuestionViewM
   }
 
   return (
-    <div className="screen">
+    <Screen>
       <Timer elapsedSeconds={elapsedSeconds} expectedSeconds={question.expectedTimeSeconds} />
-      <p className="question-topic" style={{ marginBottom: 10 }}>
+      <p className="question-topic question-topic-spaced">
         {question.chapterName} &middot; {question.conceptName}
       </p>
       <p className="prompt-text">{question.prompt}</p>
@@ -39,9 +40,9 @@ export function QuestionPlayer({ question, onSubmit }: { question: QuestionViewM
         ))}
       </div>
 
-      <button type="button" className="btn btn-primary btn-block" disabled={!selected} onClick={handleSubmit}>
+      <Button block disabled={!selected} onClick={handleSubmit}>
         Submit answer
-      </button>
-    </div>
+      </Button>
+    </Screen>
   );
 }

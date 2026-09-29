@@ -1,4 +1,5 @@
 import { ResultScreen } from "../components/ResultScreen.js";
+import { Button, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
@@ -13,14 +14,9 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
   // server-backed adapter that can fetch a result by attemptId.
   if (!result) {
     return (
-      <div className="screen">
-        <p className="eyebrow">No result to show</p>
-        <h1 className="headline">This result isn't available anymore.</h1>
-        <p className="subtext">Answer the question again to see a result.</p>
-        <button type="button" className="btn btn-primary" onClick={() => navigate(`/practice/${questionId}`)}>
-          Back to question
-        </button>
-      </div>
+      <Screen eyebrow="No result to show" headline="This result isn't available anymore." subtext="Answer the question again to see a result.">
+        <Button onClick={() => navigate(`/practice/${questionId}`)}>Back to question</Button>
+      </Screen>
     );
   }
 

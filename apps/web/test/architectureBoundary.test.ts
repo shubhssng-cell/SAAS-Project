@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components"];
 const EXCLUDED_FILES: string[] = [];
 
 const BANNED_IMPORT_SPECIFIERS = [
