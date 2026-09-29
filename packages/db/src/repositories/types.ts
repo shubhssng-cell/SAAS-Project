@@ -12,6 +12,7 @@ import type {
 import type { ErrorCategory } from "@ipmat/examiner-lens";
 import type { MasteryStatePersistenceRecord, MasteryStateResult } from "@ipmat/mastery";
 import type { PracticeBlockState } from "@ipmat/practice-block";
+import type { PhaseCurvePoint } from "@ipmat/prep-phase";
 import type { PracticeSessionState } from "@ipmat/practice-session";
 import type {
   DifficultyTier,
@@ -579,4 +580,58 @@ export interface SessionRepository {
   findActiveByTokenHash(tokenHash: string, now: string): Promise<SessionRecord | null>;
   /** A no-op (never throws) if no session with this id exists or it is already revoked — logging out an already-ended session is a valid, ordinary outcome, never an error. */
   revoke(sessionId: string, now: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------
+// Enrollment (Product Phase 1, Unit 7 -- see
+// docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md's Unit 7 section). These
+// are the WRITE-capable siblings of the existing `EnrollmentReader`
+// (ownership-only, above) — kept as a SEPARATE, purpose-built type
+// (`StudentEnrollmentRecord`, not a change to `EnrollmentRecord`) so
+// `@ipmat/practice-api`/`@ipmat/training-recommendation`'s existing,
+// already-tested `EnrollmentRecord` usage is completely unaffected.
+// `ExamReader`/`PrepPhaseTemplateReader` are the narrow reads
+// `EnrollmentRepository`'s caller needs to resolve "the one exam this
+// product currently supports" and its phase curve — never a general Exam/
+// PrepPhaseTemplate CRUD surface.
+// ---------------------------------------------------------------------
+
+export interface StudentEnrollmentRecord {
+  id: string;
+  studentId: string;
+  examId: string;
+  enrolledAt: string;
+}
+
+export interface EnrollmentRepository {
+  /**
+   * Idempotent: if an enrollment already exists for `(studentId, examId)`
+   * (the schema's own unique constraint), returns the EXISTING row
+   * unchanged — never moves `enrolledAt`, never creates a duplicate, never
+   * throws for a repeat call. Mirrors `StudentAccountRepository.completeOnboarding()`'s
+   * idempotency discipline.
+   */
+  create(input: { studentId: string; examId: string; now: string }): Promise<StudentEnrollmentRecord>;
+  findByStudentAndExam(studentId: string, examId: string): Promise<StudentEnrollmentRecord | null>;
+}
+
+/** The one exam fact enrollment needs: its real id (to write a foreign key) and its date rule (to resolve a concrete exam date via `@ipmat/prep-phase`'s `resolveExamDate()`). Never a general Exam CRUD surface. */
+export interface ExamRecord {
+  id: string;
+  code: string;
+  examDateRule: unknown;
+}
+
+export interface ExamReader {
+  /** `null` if no exam with this code is seeded — a real infrastructure gap for a product that assumes IPMAT is always seeded, never a validation error. */
+  findByCode(code: string): Promise<ExamRecord | null>;
+}
+
+export interface PrepPhaseTemplateRecord {
+  examId: string;
+  phaseCurve: PhaseCurvePoint[];
+}
+
+export interface PrepPhaseTemplateReader {
+  findByExamId(examId: string): Promise<PrepPhaseTemplateRecord | null>;
 }

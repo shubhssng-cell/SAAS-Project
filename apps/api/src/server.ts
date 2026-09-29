@@ -1,4 +1,5 @@
 import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
+import { EnrollmentApiError, EnrollmentApiService, type EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, type StudentRequestClaim } from "@ipmat/practice-api";
 
@@ -125,7 +126,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
 
 /** E — the transport-level half of safe error mapping: takes whatever `PracticeApiError` the application layer already produced (or wraps an unrecognized throw the same defensive way) and writes it as `{ error: { code, message } }` — never a stack trace, never a raw Node/driver error string. */
 function sendError(res: ServerResponse, error: unknown): void {
-  if (error instanceof AuthApiError) {
+  if (error instanceof AuthApiError || error instanceof EnrollmentApiError) {
     sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
     return;
   }
@@ -180,7 +181,19 @@ function sendJsonWithCookie(res: ServerResponse, status: number, payload: unknow
   res.end(json);
 }
 
-type AuthHandler = (authService: AuthApiService, body: Record<string, unknown>, cookies: Record<string, string>) => Promise<{ status: number; body: unknown; setCookieHeader?: string }>;
+/**
+ * `enrollmentService` (Product Phase 1 Unit 7) is threaded through every
+ * `AUTH_ROUTES` handler alongside `authService` — most ignore it, the two
+ * `/v1/enrollment` handlers use it. Kept in the SAME route table/handler
+ * shape as auth/onboarding rather than a parallel one, since every route
+ * here shares the identical cookie-authentication mechanism.
+ */
+type AuthHandler = (
+  authService: AuthApiService,
+  enrollmentService: EnrollmentApiService,
+  body: Record<string, unknown>,
+  cookies: Record<string, string>
+) => Promise<{ status: number; body: unknown; setCookieHeader?: string }>;
 
 /** Reads a field from the JSON body only (never the query string — every auth route is a POST with a body, or a cookie-only GET) — same always-a-string, never-`undefined` shape `stringField()` gives the existing routes, so `assertNonEmptyString()` sees a consistently rejectable value for malformed input. */
 function bodyStringField(body: Record<string, unknown>, field: string): string {
@@ -188,11 +201,29 @@ function bodyStringField(body: Record<string, unknown>, field: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * The ONE place a session cookie is turned into a verified `studentId` for
+ * a route OTHER than `/v1/auth/*` itself (Product Phase 1 Unit 7) —
+ * reuses the EXISTING `AuthApiService.getCurrentSession()` rather than
+ * re-implementing session verification a second time. Every downstream
+ * service (here, `EnrollmentApiService`) then receives only this
+ * already-verified `studentId` as a plain, trusted parameter — never a
+ * client-supplied one from the request body.
+ */
+async function resolveAuthenticatedStudentId(authService: AuthApiService, cookies: Record<string, string>): Promise<string> {
+  const sessionToken = cookies[SESSION_COOKIE_NAME];
+  if (!sessionToken) {
+    throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
+  }
+  const { student } = await authService.getCurrentSession({ sessionToken });
+  return student.id;
+}
+
 const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler }> = [
   {
     method: "POST",
     pattern: /^\/v1\/auth\/signup$/,
-    handler: async (authService, body) => {
+    handler: async (authService, _enrollmentService, body) => {
       const result = await authService.signup({ email: bodyStringField(body, "email"), password: bodyStringField(body, "password") });
       return { status: 200, body: { student: result.student }, setCookieHeader: sessionCookieHeader(result.sessionToken, result.expiresAt) };
     }
@@ -200,7 +231,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
   {
     method: "POST",
     pattern: /^\/v1\/auth\/login$/,
-    handler: async (authService, body) => {
+    handler: async (authService, _enrollmentService, body) => {
       const result = await authService.login({ email: bodyStringField(body, "email"), password: bodyStringField(body, "password") });
       return { status: 200, body: { student: result.student }, setCookieHeader: sessionCookieHeader(result.sessionToken, result.expiresAt) };
     }
@@ -208,7 +239,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
   {
     method: "GET",
     pattern: /^\/v1\/auth\/me$/,
-    handler: async (authService, _body, cookies) => {
+    handler: async (authService, _enrollmentService, _body, cookies) => {
       const sessionToken = cookies[SESSION_COOKIE_NAME];
       // No cookie at all is the ordinary "not logged in" case -- handled here,
       // before the service, so it never reaches AuthApiService.getCurrentSession()'s
@@ -225,7 +256,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
   {
     method: "POST",
     pattern: /^\/v1\/auth\/logout$/,
-    handler: async (authService, _body, cookies) => {
+    handler: async (authService, _enrollmentService, _body, cookies) => {
       const sessionToken = cookies[SESSION_COOKIE_NAME];
       // No cookie at all: already logged out, a no-op success -- same principle
       // as logging out an already-invalid token (see AuthApiService.logout()'s
@@ -247,13 +278,36 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
     // the request body is never read for an identity.
     method: "POST",
     pattern: /^\/v1\/onboarding\/complete$/,
-    handler: async (authService, _body, cookies) => {
+    handler: async (authService, _enrollmentService, _body, cookies) => {
       const sessionToken = cookies[SESSION_COOKIE_NAME];
       if (!sessionToken) {
         throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
       }
       const result = await authService.completeOnboarding({ sessionToken });
       return { status: 200, body: { student: result.student } };
+    }
+  },
+  {
+    // Product Phase 1 Unit 7 (IPMAT Enrollment) -- same cookie-authentication
+    // mechanism as every route above. `resolveAuthenticatedStudentId()` reuses
+    // the EXISTING `getCurrentSession()` call, never a client-supplied
+    // studentId from the request body (there is none to read -- POST /v1/enrollment
+    // takes no body at all).
+    method: "GET",
+    pattern: /^\/v1\/enrollment$/,
+    handler: async (authService, enrollmentService, _body, cookies) => {
+      const studentId = await resolveAuthenticatedStudentId(authService, cookies);
+      const result = await enrollmentService.getCurrentEnrollment({ studentId });
+      return { status: 200, body: result };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/v1\/enrollment$/,
+    handler: async (authService, enrollmentService, _body, cookies) => {
+      const studentId = await resolveAuthenticatedStudentId(authService, cookies);
+      const result = await enrollmentService.enroll({ studentId });
+      return { status: 200, body: result };
     }
   }
 ];
@@ -263,16 +317,20 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * dependencies — this function performs NO wiring of its own (see
  * `wiring.ts` for that; `createServer` never imports `@ipmat/db`'s
  * concrete repository classes directly, only the port interfaces
- * `PracticeApiDependencies`/`AuthApiDependencies` already require).
+ * `PracticeApiDependencies`/`AuthApiDependencies`/`EnrollmentApiDependencies`
+ * already require).
  *
  * `/v1/auth/*` (Product Phase 1 Unit 4) is checked as a SEPARATE route
  * table from the pre-existing `ROUTES` — the two never overlap in pattern,
  * and keeping them separate means the auth addition touches nothing about
  * how the 6 existing, already-tested `/v1/*` routes are dispatched.
+ * `/v1/onboarding/complete` (Unit 6) and `/v1/enrollment` (Unit 7) share
+ * that same table, since both are cookie-authenticated the same way.
  */
-export function createServer(deps: PracticeApiDependencies & AuthApiDependencies) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies) {
   const service = new PracticeApiService(deps);
   const authService = new AuthApiService(deps);
+  const enrollmentService = new EnrollmentApiService(deps);
 
   return createNodeServer((req, res) => {
     void (async () => {
@@ -284,7 +342,7 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
         if (authRoute) {
           const cookies = parseCookies(req.headers.cookie);
           const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
-          const result = await authRoute.handler(authService, body, cookies);
+          const result = await authRoute.handler(authService, enrollmentService, body, cookies);
           if (result.setCookieHeader) {
             sendJsonWithCookie(res, result.status, result.body, result.setCookieHeader);
           } else {

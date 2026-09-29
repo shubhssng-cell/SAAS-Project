@@ -1,5 +1,6 @@
 import { AuthHeaderControl } from "./auth/AuthHeaderControl.js";
 import { AuthProvider } from "./auth/AuthContext.js";
+import { EnrollmentProvider } from "./enrollment/EnrollmentContext.js";
 import { PracticeSessionProvider } from "./practice/PracticeSessionContext.js";
 import { AppRoutes } from "./router/AppRoutes.js";
 
@@ -17,25 +18,33 @@ import { AppRoutes } from "./router/AppRoutes.js";
  * apps/api connection -- it establishes presentation auth state from
  * `GET /v1/auth/me` on startup and is otherwise independent of
  * `PracticeSessionProvider`, which remains entirely fixture-backed.
+ *
+ * `EnrollmentProvider` (Product Phase 1 Unit 7) is nested INSIDE
+ * `AuthProvider` -- it reads `useAuth()`'s own state to decide when to
+ * hydrate (only once authenticated) and reset (on logout), so it must
+ * render below `AuthProvider` in the tree. It is otherwise independent of
+ * `PracticeSessionProvider`, same as `AuthProvider` itself.
  */
 export function App() {
   return (
     <AuthProvider>
-      <PracticeSessionProvider>
-        <div className="app-shell">
-          <header className="app-header">
-            <div className="wordmark">
-              IPMAT AI
-              <small>Training</small>
-            </div>
-            <AuthHeaderControl />
-          </header>
+      <EnrollmentProvider>
+        <PracticeSessionProvider>
+          <div className="app-shell">
+            <header className="app-header">
+              <div className="wordmark">
+                IPMAT AI
+                <small>Training</small>
+              </div>
+              <AuthHeaderControl />
+            </header>
 
-          <main className="app-main">
-            <AppRoutes />
-          </main>
-        </div>
-      </PracticeSessionProvider>
+            <main className="app-main">
+              <AppRoutes />
+            </main>
+          </div>
+        </PracticeSessionProvider>
+      </EnrollmentProvider>
     </AuthProvider>
   );
 }

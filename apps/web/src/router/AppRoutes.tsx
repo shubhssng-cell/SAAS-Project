@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { OnboardingGate } from "../auth/OnboardingGate.js";
 import { RequireAuth } from "../auth/RequireAuth.js";
+import { EnrollmentGate } from "../enrollment/EnrollmentGate.js";
 import { DashboardRoute } from "../routes/DashboardRoute.js";
 import { EnrollPage } from "../routes/EnrollPage.js";
 import { LandingPage } from "../routes/LandingPage.js";
@@ -35,6 +36,19 @@ import { usePathname } from "./router.js";
  * already-onboarded student to `/dashboard` (`"require-incomplete"`);
  * everything else redirects a not-yet-onboarded student to `/onboarding`
  * (`"require-complete"`).
+ *
+ * `enroll` and the authenticated-shell routes further nest `EnrollmentGate`
+ * (Product Phase 1 Unit 7) INSIDE `OnboardingGate mode="require-complete"`
+ * -- a student cannot reach the enrollment step (or beyond) before
+ * finishing onboarding. `/enroll` itself uses `"require-incomplete"`
+ * (redirects an already-enrolled student to `/dashboard`); `/dashboard`
+ * and every practice route use `"require-complete"` (redirects a
+ * not-yet-enrolled student to `/enroll`). The full chain for the
+ * authenticated shell is therefore: `RequireAuth` -> `OnboardingGate
+ * (require-complete)` -> `EnrollmentGate (require-complete)` -> the real
+ * route -- each gate resolves exactly one concern and hands off to the
+ * next only once its own condition is satisfied, so no two gates ever
+ * fight over the same redirect.
  */
 const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement> = {
   landing: () => <LandingPage />,
@@ -47,39 +61,57 @@ const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement
       </OnboardingGate>
     </RequireAuth>
   ),
-  enroll: () => <EnrollPage />,
+  enroll: () => (
+    <RequireAuth>
+      <OnboardingGate mode="require-complete">
+        <EnrollmentGate mode="require-incomplete">
+          <EnrollPage />
+        </EnrollmentGate>
+      </OnboardingGate>
+    </RequireAuth>
+  ),
   dashboard: () => (
     <RequireAuth>
       <OnboardingGate mode="require-complete">
-        <DashboardRoute />
+        <EnrollmentGate mode="require-complete">
+          <DashboardRoute />
+        </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
   ),
   "practice-next": () => (
     <RequireAuth>
       <OnboardingGate mode="require-complete">
-        <PracticeNextRoute />
+        <EnrollmentGate mode="require-complete">
+          <PracticeNextRoute />
+        </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
   ),
   "practice-result": (params) => (
     <RequireAuth>
       <OnboardingGate mode="require-complete">
-        <PracticeResultRoute questionId={params.questionId ?? ""} />
+        <EnrollmentGate mode="require-complete">
+          <PracticeResultRoute questionId={params.questionId ?? ""} />
+        </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
   ),
   "practice-autopsy": (params) => (
     <RequireAuth>
       <OnboardingGate mode="require-complete">
-        <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+        <EnrollmentGate mode="require-complete">
+          <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+        </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
   ),
   "practice-question": (params) => (
     <RequireAuth>
       <OnboardingGate mode="require-complete">
-        <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+        <EnrollmentGate mode="require-complete">
+          <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+        </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
   )

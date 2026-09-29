@@ -1,8 +1,12 @@
 import type { AuthApiDependencies } from "@ipmat/auth-api";
+import type { EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import type { PrismaClient } from "@prisma/client";
 import {
   InMemoryAttemptRepository,
   InMemoryEnrollmentReader,
+  InMemoryEnrollmentRepository,
+  InMemoryExamReader,
+  InMemoryPrepPhaseTemplateReader,
   InMemoryQuestionContentReader,
   InMemoryQuestionReader,
   InMemorySessionRepository,
@@ -11,19 +15,38 @@ import {
   PrismaAutopsyRepository,
   PrismaConceptReader,
   PrismaEnrollmentReader,
+  PrismaEnrollmentRepository,
+  PrismaExamReader,
   PrismaPracticeBlockRepository,
   PrismaPracticeSessionRepository,
+  PrismaPrepPhaseTemplateReader,
   PrismaQuestionContentReader,
   PrismaQuestionReader,
   PrismaRepairPlanRepository,
   PrismaSessionRepository,
   PrismaStudentAccountRepository,
   PrismaTrainingQuestionReader,
-  type AutopsyRepository
+  type AutopsyRepository,
+  type ExamRecord,
+  type PrepPhaseTemplateRecord
 } from "@ipmat/db";
+import { ipmatPrepPhaseTemplate } from "@ipmat/prep-phase";
 import { PracticeLoopService } from "@ipmat/practice-loop";
 import type { PracticeApiDependencies } from "@ipmat/practice-api";
 import { TrainingRecommendationService, type TrainingRecommendationDependencies } from "@ipmat/training-recommendation";
+
+/**
+ * Product Phase 1 Unit 7 (IPMAT Enrollment) -- the in-memory wiring's
+ * default seed for `ExamReader`/`PrepPhaseTemplateReader`. Mirrors the
+ * REAL seeded data exactly (`packages/db/prisma/seed.ts`'s `IPMAT_INDORE`
+ * exam, `@ipmat/prep-phase`'s own `ipmatPrepPhaseTemplate` fixture) --
+ * never invented values. The in-memory id is arbitrary (no live database
+ * exists to match a real row's uuid); `EnrollmentApiService` only ever
+ * resolves the exam by its CODE, never by this id directly.
+ */
+const DEFAULT_EXAM_ID = "exam-ipmat-indore";
+const DEFAULT_EXAM: ExamRecord = { id: DEFAULT_EXAM_ID, code: "IPMAT_INDORE", examDateRule: { type: "fixed_date", date: ipmatPrepPhaseTemplate.examDate } };
+const DEFAULT_PREP_PHASE_TEMPLATE: PrepPhaseTemplateRecord = { examId: DEFAULT_EXAM_ID, phaseCurve: ipmatPrepPhaseTemplate.phaseCurve };
 
 /**
  * The ONE place `@ipmat/practice-api`'s port interfaces are wired to
@@ -42,11 +65,18 @@ import { TrainingRecommendationService, type TrainingRecommendationDependencies 
  * it needs directly against the returned repository instances.
  */
 export function createInMemoryDependencies(
-  seed: { enrollments?: ConstructorParameters<typeof InMemoryEnrollmentReader>[0]; questions?: ConstructorParameters<typeof InMemoryQuestionReader>[0]; questionContent?: ConstructorParameters<typeof InMemoryQuestionContentReader>[0] } = {}
+  seed: {
+    enrollments?: ConstructorParameters<typeof InMemoryEnrollmentReader>[0];
+    questions?: ConstructorParameters<typeof InMemoryQuestionReader>[0];
+    questionContent?: ConstructorParameters<typeof InMemoryQuestionContentReader>[0];
+    exams?: ExamRecord[];
+    prepPhaseTemplates?: PrepPhaseTemplateRecord[];
+  } = {}
 ): PracticeApiDependencies &
-  AuthApiDependencies & {
+  AuthApiDependencies &
+  EnrollmentApiDependencies & {
     attempts: InMemoryAttemptRepository;
-    enrollments: InMemoryEnrollmentReader;
+    enrollmentReaderStore: InMemoryEnrollmentReader;
     questions: InMemoryQuestionReader;
     questionContent: InMemoryQuestionContentReader;
   } {
@@ -57,6 +87,9 @@ export function createInMemoryDependencies(
   const autopsyReader: Pick<AutopsyRepository, "findByAttemptId"> = { findByAttemptId: async () => null };
   const studentAccounts = new InMemoryStudentAccountRepository();
   const sessions = new InMemorySessionRepository();
+  const enrollmentRepository = new InMemoryEnrollmentRepository();
+  const examReader = new InMemoryExamReader(seed.exams ?? [DEFAULT_EXAM]);
+  const prepPhaseTemplateReader = new InMemoryPrepPhaseTemplateReader(seed.prepPhaseTemplates ?? [DEFAULT_PREP_PHASE_TEMPLATE]);
 
   const trainingRecommendationDeps: TrainingRecommendationDependencies = {
     enrollmentReader: enrollments,
@@ -78,8 +111,11 @@ export function createInMemoryDependencies(
     autopsyReader,
     studentAccounts,
     sessions,
+    enrollments: enrollmentRepository,
+    examReader,
+    prepPhaseTemplateReader,
     attempts,
-    enrollments,
+    enrollmentReaderStore: enrollments,
     questions,
     questionContent
   };
@@ -99,7 +135,7 @@ export function createInMemoryDependencies(
  * `@ipmat/training-recommendation` already requires (D-063) — constructed
  * here identically, never a second, competing construction.
  */
-export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDependencies & AuthApiDependencies {
+export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies {
   const attempts = new PrismaAttemptRepository(prisma);
   const enrollmentReader = new PrismaEnrollmentReader(prisma);
   const questionReader = new PrismaQuestionReader(prisma);
@@ -123,6 +159,9 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
     questionContentReader: new PrismaQuestionContentReader(prisma),
     autopsyReader: new PrismaAutopsyRepository(prisma),
     studentAccounts: new PrismaStudentAccountRepository(prisma),
-    sessions: new PrismaSessionRepository(prisma)
+    sessions: new PrismaSessionRepository(prisma),
+    enrollments: new PrismaEnrollmentRepository(prisma),
+    examReader: new PrismaExamReader(prisma),
+    prepPhaseTemplateReader: new PrismaPrepPhaseTemplateReader(prisma)
   };
 }

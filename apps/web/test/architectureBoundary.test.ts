@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment"];
 const EXCLUDED_FILES: string[] = [];
 
 const BANNED_IMPORT_SPECIFIERS = [
@@ -39,6 +39,11 @@ const BANNED_IMPORT_SPECIFIERS = [
   // domain/application packages themselves.
   "@ipmat/auth",
   "@ipmat/auth-api",
+  // Product Phase 1 Unit 7 -- same discipline for enrollment/prep-phase: apps/web
+  // talks to /v1/enrollment only, never these packages, and never computePrepPhase()
+  // directly (that stays exclusively server-side).
+  "@ipmat/enrollment-api",
+  "@ipmat/prep-phase",
   "@prisma/client"
 ];
 
@@ -102,6 +107,38 @@ describe("Auth: the browser never reads/stores a raw session token itself (Produ
       const source = readFileSync(join(authDir, file), "utf-8");
       expect(source, `${file} must not call fetch() directly`).not.toMatch(/\bfetch\(/);
     }
+  });
+});
+
+describe("Enrollment: the browser never chooses which student is enrolled (Product Phase 1 Unit 7)", () => {
+  const enrollmentDir = join(webRoot, "src/enrollment");
+
+  it("enrollment/api.ts posts no body to /v1/enrollment -- structurally cannot send a studentId", () => {
+    const source = readFileSync(join(enrollmentDir, "api.ts"), "utf-8");
+    expect(source).toContain("jsonRequest");
+    // apiEnroll()/apiGetEnrollment() call jsonRequest(fetchImpl, method, path) with no 4th
+    // (body) argument at all -- confirmed structurally: neither call site passes a 4th
+    // argument, and there is no JSON.stringify/request-body construction anywhere in this
+    // file, so there is no code path through which a studentId (or anything else) could be
+    // sent as a request body.
+    expect(source).toMatch(/jsonRequest\(fetchImpl,\s*"GET",\s*"\/v1\/enrollment"\)/);
+    expect(source).toMatch(/jsonRequest\(fetchImpl,\s*"POST",\s*"\/v1\/enrollment"\)/);
+    expect(source).not.toContain("JSON.stringify");
+  });
+
+  it("api.ts is the ONLY file in src/enrollment that calls fetch() -- every other file goes through it", () => {
+    const files = readdirSync(enrollmentDir).filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
+    for (const file of files) {
+      if (file === "api.ts") continue;
+      const source = readFileSync(join(enrollmentDir, file), "utf-8");
+      expect(source, `${file} must not call fetch() directly`).not.toMatch(/\bfetch\(/);
+    }
+  });
+
+  it("EnrollmentGate never redirects for an unresolved status (structural check: 'unresolved' only ever maps to a non-navigating render path)", () => {
+    const source = readFileSync(join(enrollmentDir, "EnrollmentGate.tsx"), "utf-8");
+    expect(source).toContain('decision === "redirect"');
+    expect(source).not.toContain('decision === "unresolved"'); // never explicitly branches into a redirect for this case
   });
 });
 
