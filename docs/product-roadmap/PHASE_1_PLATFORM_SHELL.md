@@ -114,7 +114,7 @@ All of the above already exist as domain/application logic (`@ipmat/practice-api
 
 ### Current Unit
 
-**Current Unit: Unit 1.**
+**Current Unit: Unit 1 — audit complete (2026-09-29), see "Unit 1 audit findings" and "Web Architecture Lock" below. Unit 2 is defined and ready to start, but not yet begun.**
 
 ## Phase 1 unit plan
 
@@ -127,10 +127,36 @@ Each unit below is documented only at the level of objective / expected student-
 - **Acceptance criteria:** This document's "Current state" section (above) is accurate against the real repository at the time Unit 1 is closed; any discrepancy found is recorded, not silently fixed by rewriting history.
 
 ### Unit 2 — Application shell + routing
-- **Objective:** Introduce real routes/URLs (landing, auth, onboarding, enrollment, dashboard, practice) replacing the single in-memory `Screen` union in `App.tsx`.
-- **Expected student-visible outcome:** Distinct, navigable URLs exist for each top-level area, even if most still render placeholder content.
-- **Dependencies:** Unit 1.
-- **Acceptance criteria:** Deep-linking to any top-level route works; back/forward browser navigation behaves correctly; the existing practice/result/autopsy flow still renders (may still be fixture-backed at this point).
+
+**Objective:** Introduce real, addressable routes/URLs for the top-level product areas (landing, auth, onboarding, enrollment, dashboard, practice), replacing the single in-memory `Screen` union in `App.tsx` — purely a navigation/shell restructuring, not a rebuild of what already works inside the practice loop.
+
+**Screens/routes involved:**
+- `/` — landing (new; does not exist today)
+- `/login`, `/signup` — auth screens (new shells only; no real auth logic — that is Units 4–5)
+- `/onboarding` — onboarding shell (new; no real onboarding content — that is Unit 6)
+- `/enroll` — enrollment shell (new; no real enrollment logic — that is Unit 7)
+- `/dashboard` — reuses the existing `Dashboard` component, now reached by URL instead of initial screen state
+- `/practice/:questionId`, `/practice/:questionId/result`, `/practice/:questionId/autopsy`, `/practice/next` — reuse the existing `QuestionPlayer` / `ResultScreen` / `AutopsyCard` / `NextTrainingCard` components, now reached by URL instead of `useState<Screen>` transitions
+
+**Student-visible outcome:** Each top-level area has its own URL and is reachable by direct navigation and browser back/forward, even though most screens besides dashboard/practice still render placeholder or minimal content at the end of this unit. The already-working dashboard → question → result → autopsy → next flow keeps working exactly as it does today, just reached through routes instead of local screen state.
+
+**Dependencies:** Unit 1 (this audit).
+
+**Acceptance criteria:**
+- Deep-linking directly to any top-level route works (no route requires passing through `/` first).
+- Browser back/forward moves between screens correctly.
+- The existing practice/result/autopsy loop still renders and still round-trips through the (still fixture-backed) adapter unchanged.
+- No route performs any authentication check, calls a domain package directly, or bypasses `TrainingRecommendationAdapter` — this unit only changes how a screen is reached, never what decides its content.
+
+**Explicit exclusions for Unit 2** (each is scoped to its own later unit — do not pull any of it forward):
+- Authentication / session logic (Unit 4–5)
+- Signup/login form submission logic (Unit 5)
+- Onboarding content/logic (Unit 6)
+- IPMAT enrollment logic (Unit 7)
+- Dashboard business logic (already exists via the adapter — Unit 2 does not change it)
+- Real API integration (Unit 10)
+- Any adaptive/orchestration logic (already exists server-side/adapter-side — Unit 2 does not touch it)
+- Payments (out of scope for all of Phase 1)
 
 ### Unit 3 — Design system foundation
 - **Objective:** Establish a minimal, consistent visual/component foundation (tokens, base components) the rest of the shell builds on.
@@ -192,14 +218,111 @@ Each unit below is documented only at the level of objective / expected student-
 - **Dependencies:** Unit 11.
 - **Acceptance criteria:** Tests/typecheck/lint/build all pass; the full journey (landing → signup/login → onboarding → enrollment → dashboard → start practice → practice experience) has been manually exercised in a real browser and confirmed working; this file's "Current state" and "Execution Log" sections are updated to reflect what actually shipped; a Git checkpoint (commit) captures the completed phase.
 
+## Unit 1 audit findings (2026-09-29)
+
+### Audited apps/web architecture, as it actually is
+
+- **Entry point:** `src/main.tsx` mounts `<App />` into `#root`, no providers, no router library installed (no `react-router` or equivalent in `package.json`).
+- **Screen/state model:** `App.tsx` owns a single `useState<Screen>` discriminated union (`loading | dashboard | question | result | autopsy | next`) and transitions between them via plain function calls (`startQuestion`, `refreshDashboard`, `handleAnswerSubmit`, `handleSeeWhatHappened`, `handleAutopsyResponse`, `handleContinueAfterResult`). There are no URLs for any of these states — refresh always returns to `loading → dashboard`.
+- **Adapter layer** (`src/adapter/`): `types.ts` defines `TrainingRecommendationAdapter`, a clean, student-safe interface (`getDashboard`, `loadQuestion`, `submitAnswer`, `getAutopsy`, `respondToAutopsy`, `getNextRecommendation`) that already matches the shape `@ipmat/practice-api` independently converged on (see "Important discovery" below). `service.ts`'s `createFixtureTrainingAdapter()` is the only implementation today.
+- **Presentation/view-model layer** (`src/adapter/presentation.ts`): `toRecommendationViewModel()` and `describeObservations()` translate raw domain output into plain student-facing strings — never expose provider ids, action types, or raw evidence structures to components.
+- **Fixtures** (`src/adapter/fixtures.ts`, 202 lines): two hand-authored questions (`q-reverse-1`, `q-percentage-repair-1`, plus a non-trap `q-direct-1` used in tests) with full Question DNA, attempt context, solution steps, and a canned AI hypothesis output. Clearly synthetic, clearly labeled as a stand-in.
+- **Components** (`src/components/`): `Dashboard`, `QuestionPlayer`, `ResultScreen`, `AutopsyCard`, `ConfirmationPrompt`, `NextTrainingCard`, `RecommendationCard`, `Timer`. Each is a small, focused, presentational component driven entirely by adapter view models — none imports a domain package directly, none makes its own decisions. This part of the UI is genuinely reusable.
+- **Styling:** one hand-authored `styles.css` (497 lines), no CSS framework/design-system library. Token-like CSS custom properties are used informally (e.g. `var(--ink-faint)`) but there is no formal design-token file.
+- **Assets/fonts:** none — no `public/` directory, no custom fonts, no image assets.
+- **Config/env:** `apps/web` has no `.env`/config file of its own; the repo root's `.env.example` only defines `ANTHROPIC_API_KEY` (irrelevant to the frontend). `vite.config.ts` hardcodes dev port `5184`, no API base URL configuration exists anywhere.
+- **Scripts:** `dev`, `build` (`tsc --noEmit && vite build`), `typecheck`, `preview` — standard, nothing unusual.
+- **Tests:** one file, `test/service.test.ts` (75 lines), which deliberately proves the fixture adapter is "a thin wiring layer over the REAL domain packages, not a second decision engine" — i.e. it verifies that `createFixtureTrainingAdapter()`'s output is whatever `orchestrateNextTrainingAction()`/`buildRepairPlan()`/etc. actually produced, never a value the adapter invented itself.
+- **Build configuration:** standard Vite + `tsc`; `apps/web/dist/` is checked in from a prior build, confirming the app builds today.
+
+### Important discovery: `apps/web`'s adapter currently bypasses the application/API boundary entirely
+
+`apps/web/package.json` depends directly on `@ipmat/ai`, `@ipmat/attempt`, `@ipmat/autopsy`, `@ipmat/mastery`, and `@ipmat/training-orchestration` — and `src/adapter/service.ts` imports and calls real domain-package functions in the browser: `startAttempt`/`recordAttemptEvent`/`submitAttempt` (`@ipmat/attempt`), `buildAutopsyOutput`/`generateHypothesis`/`confirmHypothesis`/`rejectHypothesis`/`buildRepairPlan` (`@ipmat/autopsy`), `computeMasteryState` (`@ipmat/mastery`), `orchestrateNextTrainingAction` (`@ipmat/training-orchestration`), and even instantiates a `FixtureProvider` from `@ipmat/ai` to stand in for a live AI call.
+
+This is a **deliberate, well-documented, temporary scope decision** for the current fixture-driven vertical slice (the adapter's own doc comment explains this stands in for a not-yet-built Training Recommendation Composition Layer, and `TrainingRecommendationAdapter`'s interface was designed so only the factory function needs to change later). It is not an accident and does not need to be treated as a bug — but it is a real, current violation of the target architecture ("Student UI → application/API boundary → ... → database") stated at the top of this document and in CLAUDE.md's module-boundary rule, and it must not be extended or copied forward into new work. It also explains why `apps/web`'s `package.json` currently has direct domain-package dependencies that a real product shell must not have.
+
+**A second, favorable discovery narrows the gap this creates:** `@ipmat/practice-api` (`packages/practice-api/src/types.ts`, `presentation.ts`) already independently converged on the *same* student-facing shapes `apps/web`'s adapter uses — `RecommendationView`/`toRecommendationView()` is structurally and even textually near-identical to the adapter's `RecommendationViewModel`/`toRecommendationViewModel()` (same `PROVIDER_COPY` table, same fields), and `StudentQuestionView`/`AttemptResultView`/`PendingAutopsyView` map cleanly onto `QuestionViewModel`/`AttemptResultViewModel`/`AutopsyViewModel`. This means Unit 10's eventual swap to a real adapter calling `apps/api` is more mechanical than it might appear — the target shapes already exist and were designed with this exact swap in mind, they are just not wired to `apps/web` yet.
+
+### Relevant contracts inspected (practice-api / apps/api)
+
+- `packages/practice-api/src/types.ts` / `presentation.ts`: confirmed the server-side view shapes above.
+- `apps/api/src/server.ts`: confirmed the 6 existing HTTP routes (`POST /v1/recommendation`, `POST /v1/attempts`, `POST /v1/attempts/:id/submit`, `POST /v1/attempts/:id/skip`, `GET /v1/attempts/:id/result`, `GET /v1/attempts/:id/autopsy`), that it is a pure, logic-free transport over `PracticeApiService`, and that it has no auth middleware (`StudentRequestClaim` fields are accepted unauthenticated, consistent with D-004 remaining open).
+- No unrelated backend packages were inspected beyond what `apps/web` and these two directly touch, per this unit's scope.
+
+### Classification
+
+| Area | Classification | Why |
+|---|---|---|
+| App entry (`main.tsx`) | KEEP | Minimal, correct, framework-idiomatic; nothing to change. |
+| Current layout (`App.tsx`'s screen shell/header) | KEEP WITH MODIFICATION | The visual shell (header/wordmark/`app-main`) is fine; the screen-selection mechanism inside it must become route-driven. |
+| Navigation | REPLACE | There is none today beyond local function calls — a real router is needed for Unit 2. |
+| Routing/state model (`useState<Screen>` union) | REPLACE | Must become URL-addressable routes; the underlying transition logic (which screen follows which) is sound and can inform route design, but the mechanism itself must change. |
+| Dashboard (`Dashboard.tsx`) | KEEP | Presentational, adapter-driven, no changes needed for Phase 1 routing/shell work. |
+| Question UI (`QuestionPlayer.tsx`, `Timer.tsx`) | KEEP | Same — clean, adapter-driven, reusable as-is. |
+| Result UI (`ResultScreen.tsx`) | KEEP | Same. |
+| Autopsy UI (`AutopsyCard.tsx`, `ConfirmationPrompt.tsx`) | KEEP | Same — and already correctly enforces the observation/hypothesis/confirmation separation CLAUDE.md requires. |
+| Adapter layer — interface (`adapter/types.ts`) | KEEP | `TrainingRecommendationAdapter` is exactly the right seam; no change needed even after the Unit 10 swap. |
+| Adapter layer — implementation (`adapter/service.ts`, fixture-backed, direct domain imports) | DEFER | Correct and useful until Unit 10; must not be extended with new domain-package calls in the meantime, and is explicitly replaced (not modified) by Unit 10, not by this phase's earlier units. |
+| Presentation mapping (`adapter/presentation.ts`) | KEEP | Reusable translation logic; already has a near-identical server-side counterpart in `@ipmat/practice-api` for Unit 10 to converge on. |
+| Styling (`styles.css`) | KEEP WITH MODIFICATION | Usable foundation; needs to become an explicit design-system/token layer under Unit 3, not a rewrite from scratch. |
+| Reusable components (all of `src/components/`) | KEEP | Genuinely presentational, adapter-driven, no direct domain/backend imports — safe to reuse unchanged through the rest of Phase 1. |
+| Assets/fonts | DEFER | None exist; Unit 3 introduces them if the design system needs any. |
+| Fixtures (`adapter/fixtures.ts`) | DEFER | Correct and necessary until Unit 10 provides real content; not touched by Units 2–9. |
+| API integration | MISSING (not yet classifiable as keep/replace — see Unit 10) | `apps/web` does not call `apps/api` at all today; this is new work, not a modification of existing integration. |
+| Configuration (env/API base URL) | MISSING | No frontend env/config mechanism exists yet; needed no later than Unit 10, and auth config no later than Unit 4. |
+| Tests (`test/service.test.ts`) | KEEP | Correctly scoped to proving the fixture adapter is a thin wrapper over real domain logic; will need a parallel/replacement test once Unit 10 swaps the adapter implementation, but the existing test does not need to change before then. |
+
+### Gap analysis
+
+**A. Already good / reusable as-is:** the component layer (`Dashboard`, `QuestionPlayer`, `ResultScreen`, `AutopsyCard`, `ConfirmationPrompt`, `NextTrainingCard`, `RecommendationCard`, `Timer`), the `TrainingRecommendationAdapter` interface, the presentation/translation layer, the existing CSS foundation, the existing test's intent and coverage of the practice/autopsy loop.
+
+**B. Needs modification:** the screen-selection mechanism in `App.tsx` (→ real routing, Unit 2), the CSS foundation (→ formalized design tokens, Unit 3), `apps/web/package.json`'s dependency list (its direct `@ipmat/attempt`/`@ipmat/autopsy`/`@ipmat/mastery`/`@ipmat/training-orchestration`/`@ipmat/ai` dependencies must be removed once Unit 10 replaces the fixture adapter — not before, since removing them earlier would break the still-needed fixture adapter).
+
+**C. Missing entirely:** landing page, auth screens and logic, onboarding, enrollment flow, a real router, a design-token/component-foundation layer, any frontend env/config mechanism, a real (non-fixture) adapter implementation calling `apps/api`, loading/empty/error states beyond the single existing `"Loading your dashboard…"` string, responsive/accessibility hardening, and any connection at all between `apps/web` and `apps/api` (they exist side by side today, entirely unconnected).
+
+**D. Intentionally deferred (per this document and CLAUDE.md, not oversights):** the fixture adapter's direct domain-package calls (deferred to Unit 10), a live database connection (deferred beyond Phase 1's structural units, blocked on Postgres reachability), real AI provider calls (out of scope — Phase 1 has no AI features), payments/mocks/social features/multi-exam support (out of scope for the whole product per Product Phase 0's exclusions).
+
+## Web Architecture Lock
+
+This section is binding for every subsequent unit in this phase (Units 2–12) and may only be revised by a deliberate, documented decision — not silently reinterpreted unit-to-unit.
+
+```
+Student UI (apps/web)
+  -> application/API boundary (apps/api -> @ipmat/practice-api)
+  -> existing application/domain services (@ipmat/training-recommendation, @ipmat/practice-loop, ...)
+  -> repositories (@ipmat/db)
+  -> database
+```
+
+**The frontend (`apps/web`) must NOT:**
+- import `@prisma/client` or any Prisma-generated types
+- import `@ipmat/adaptive-selection`, `@ipmat/repair-selection`, `@ipmat/training-orchestration`, or any individual training-system provider (`@ipmat/calculation-gym`, `@ipmat/speed-lab`, `@ipmat/trap-lab`, `@ipmat/novelty-training`, `@ipmat/pressure-training`) directly
+- perform authoritative grading (comparing a chosen answer to a correct answer) — that is always server-side, per D-034
+- calculate authoritative timing — `timeSpentSeconds` is always server-derived (`finalizedAt - startedAt`), per D-034; a client-side timer display (as `Timer.tsx` already does) is fine, an authoritative one is not
+- implement adaptive-selection or repair-selection decisions itself
+- implement training-system ranking/priority logic itself
+- bypass the application/API boundary once Unit 10 lands (no direct `@ipmat/db` repository calls, no direct `@ipmat/attempt`/`@ipmat/autopsy`/`@ipmat/mastery` calls)
+- expose internal diagnostics or answer keys to the browser before grading (mirrors D-048's `QuestionReader` server-side-only resolution and `@ipmat/practice-api`'s `StudentQuestionView`/`JudgeView`-style narrowing)
+
+**Explicit, temporary exception (tracked, not silently allowed to persist):** `apps/web/src/adapter/service.ts`'s `createFixtureTrainingAdapter()` currently violates several of the rules above (direct imports of `@ipmat/attempt`/`@ipmat/autopsy`/`@ipmat/mastery`/`@ipmat/training-orchestration`/`@ipmat/ai`, and performs grading/timing/orchestration client-side). This is accepted **only** because:
+1. It predates this Product Phase 1 lock (built during the earlier fixture-driven vertical-slice work).
+2. It is fully documented as a temporary stand-in, structurally isolated behind the `TrainingRecommendationAdapter` interface, and covered by a test that proves it never invents its own decisions.
+3. It is explicitly retired by Unit 10, not extended by any unit before it.
+
+No new code written during Units 2–9 may add further direct domain-package imports to `apps/web` — the existing exception is not a precedent for more of the same.
+
+**The existing fixture adapter is temporary and replaceable** — `TrainingRecommendationAdapter`'s interface (`adapter/types.ts`) is the permanent seam; `createFixtureTrainingAdapter()` (`adapter/service.ts`) is the only piece Unit 10 replaces, per the adapter's own existing doc comment.
+
+**Existing UI is preserved where it does not conflict with Phase 1's product direction** — see the classification table above: every component in `src/components/` is KEEP, not REPLACE. This phase does not introduce a new frontend framework, new state-management library, or new architecture merely because one might be preferred in the abstract — React + Vite + the existing component/adapter structure stays, and only the specific gaps identified above (routing, auth, onboarding, enrollment, design tokens, real API wiring) are added.
+
 ## Phase 1 definition of done
 
 The student can enter the product, authenticate, complete onboarding, establish IPMAT enrollment, reach a coherent dashboard, and enter the practice experience. The product must feel like one application. The frontend must not duplicate backend intelligence. Tests/typecheck/lint/build must pass before the phase is closed.
 
 ## Execution log
 
-_Empty. Updated after every completed unit._
+Updated after every completed unit.
 
 | Unit | Status | Date | Commit | Tests | Files changed | Important discoveries | Notes |
 |---|---|---|---|---|---|---|---|
-| | | | | | | | |
+| 1 | COMPLETE | 2026-09-29 | (not committed yet) | No code changed; audit validated against actual repository content (package.json, adapter/service.ts, adapter/types.ts, adapter/presentation.ts, all components, apps/api/src/server.ts, packages/practice-api/src/types.ts + presentation.ts) | docs/product-roadmap/PHASE_1_PLATFORM_SHELL.md only | `apps/web`'s current adapter imports domain packages (`@ipmat/attempt`, `@ipmat/autopsy`, `@ipmat/mastery`, `@ipmat/training-orchestration`, `@ipmat/ai`) directly and performs grading/timing/orchestration client-side — a deliberate, documented, temporary exception to the target architecture, retired by Unit 10, not to be extended. `@ipmat/practice-api` already independently converged on near-identical student-facing view shapes, narrowing Unit 10's eventual work. | Web Architecture Lock established; Unit 2 scope defined; no router/design-system/auth/onboarding/enrollment exists yet. |
