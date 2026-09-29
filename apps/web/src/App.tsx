@@ -1,3 +1,5 @@
+import { AuthHeaderControl } from "./auth/AuthHeaderControl.js";
+import { AuthProvider } from "./auth/AuthContext.js";
 import { PracticeSessionProvider } from "./practice/PracticeSessionContext.js";
 import { AppRoutes } from "./router/AppRoutes.js";
 
@@ -10,22 +12,30 @@ import { AppRoutes } from "./router/AppRoutes.js";
  * question itself; it never changes when the adapter's fixture
  * implementation is swapped for a real one (Product Phase 1 Unit 10) --
  * see PHASE_1_PLATFORM_SHELL.md's Web Architecture Lock.
+ *
+ * `AuthProvider` (Product Phase 1 Unit 5) is the first real apps/web ->
+ * apps/api connection -- it establishes presentation auth state from
+ * `GET /v1/auth/me` on startup and is otherwise independent of
+ * `PracticeSessionProvider`, which remains entirely fixture-backed.
  */
 export function App() {
   return (
-    <PracticeSessionProvider>
-      <div className="app-shell">
-        <header className="app-header">
-          <div className="wordmark">
-            IPMAT AI
-            <small>Training</small>
-          </div>
-        </header>
+    <AuthProvider>
+      <PracticeSessionProvider>
+        <div className="app-shell">
+          <header className="app-header">
+            <div className="wordmark">
+              IPMAT AI
+              <small>Training</small>
+            </div>
+            <AuthHeaderControl />
+          </header>
 
-        <main className="app-main">
-          <AppRoutes />
-        </main>
-      </div>
-    </PracticeSessionProvider>
+          <main className="app-main">
+            <AppRoutes />
+          </main>
+        </div>
+      </PracticeSessionProvider>
+    </AuthProvider>
   );
 }

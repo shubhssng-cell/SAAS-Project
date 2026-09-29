@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { RequireAuth } from "../auth/RequireAuth.js";
 import { DashboardRoute } from "../routes/DashboardRoute.js";
 import { EnrollPage } from "../routes/EnrollPage.js";
 import { LandingPage } from "../routes/LandingPage.js";
@@ -19,17 +20,44 @@ import { usePathname } from "./router.js";
  * `ROUTE_TABLE` itself so the pattern/precedence data can be unit-tested
  * without importing JSX/React rendering (see test/router.test.ts).
  */
+/**
+ * `dashboard` and every `practice-*` route are the "authenticated shell"
+ * (Product Phase 1 Unit 5) -- wrapped in `RequireAuth`, which is
+ * PRESENTATIONAL protection only (a frontend redirect, not a security
+ * boundary; the server remains authoritative). `landing`/`login`/`signup`
+ * stay public and unwrapped, per this unit's own route classification.
+ */
 const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement> = {
   landing: () => <LandingPage />,
   login: () => <LoginPage />,
   signup: () => <SignupPage />,
   onboarding: () => <OnboardingPage />,
   enroll: () => <EnrollPage />,
-  dashboard: () => <DashboardRoute />,
-  "practice-next": () => <PracticeNextRoute />,
-  "practice-result": (params) => <PracticeResultRoute questionId={params.questionId ?? ""} />,
-  "practice-autopsy": (params) => <PracticeAutopsyRoute questionId={params.questionId ?? ""} />,
-  "practice-question": (params) => <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+  dashboard: () => (
+    <RequireAuth>
+      <DashboardRoute />
+    </RequireAuth>
+  ),
+  "practice-next": () => (
+    <RequireAuth>
+      <PracticeNextRoute />
+    </RequireAuth>
+  ),
+  "practice-result": (params) => (
+    <RequireAuth>
+      <PracticeResultRoute questionId={params.questionId ?? ""} />
+    </RequireAuth>
+  ),
+  "practice-autopsy": (params) => (
+    <RequireAuth>
+      <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+    </RequireAuth>
+  ),
+  "practice-question": (params) => (
+    <RequireAuth>
+      <PracticeQuestionRoute questionId={params.questionId ?? ""} />
+    </RequireAuth>
+  )
 };
 
 export function AppRoutes(): ReactElement {

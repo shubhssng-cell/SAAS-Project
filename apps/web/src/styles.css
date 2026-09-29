@@ -580,6 +580,77 @@ body {
   font-size: var(--text-base);
 }
 
+/* Product Phase 1 Unit 5 -- form/input styling. The first unit with real
+   form inputs; every value below reuses existing tokens (spacing, radius,
+   colors, control-min-height, focus ring), no new palette introduced. */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+}
+
+.form-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--ink);
+}
+
+.form-input {
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  min-height: var(--control-min-height);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.form-input:hover {
+  border-color: var(--accent);
+}
+
+.form-error {
+  font-size: var(--text-sm);
+  color: var(--danger);
+  margin: 0;
+}
+
+.form-alert {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-4);
+}
+
+.form-footer-note {
+  margin-top: var(--space-4);
+  margin-bottom: 0;
+}
+
+/* Compact control variant for the header's auth control -- the only place a
+   full-size .btn (44px min-height, 22px horizontal padding) would look
+   oversized next to the wordmark. */
+.btn-sm {
+  min-height: auto;
+  padding: 8px 14px;
+  font-size: var(--text-sm);
+}
+
+.auth-header-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.auth-header-email {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+
 @media (max-width: 480px) {
   .app-header {
     padding: var(--space-4);
@@ -591,5 +662,9 @@ body {
 
   .btn-row .btn {
     width: 100%;
+  }
+
+  .auth-header-email {
+    display: none;
   }
 }

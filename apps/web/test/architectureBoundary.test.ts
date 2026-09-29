@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
  * re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth"];
 const EXCLUDED_FILES: string[] = [];
 
 const BANNED_IMPORT_SPECIFIERS = [
@@ -34,6 +34,11 @@ const BANNED_IMPORT_SPECIFIERS = [
   "@ipmat/training-recommendation",
   "@ipmat/db",
   "@ipmat/ai",
+  // Product Phase 1 Unit 5 -- apps/web talks to auth only over the /v1/auth/*
+  // HTTP boundary (src/auth/api.ts); it must never import the auth
+  // domain/application packages themselves.
+  "@ipmat/auth",
+  "@ipmat/auth-api",
   "@prisma/client"
 ];
 
@@ -67,6 +72,36 @@ describe("Web Architecture Lock -- routing/shell layer never imports a domain pa
       return importPattern.test(source);
     });
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("Auth: the browser never reads/stores a raw session token itself (Product Phase 1 Unit 5)", () => {
+  it("no scanned file uses localStorage, sessionStorage, or reads document.cookie", () => {
+    const offenders: string[] = [];
+    for (const path of scannedFiles) {
+      const source = readFileSync(path, "utf-8");
+      if (/localStorage|sessionStorage|document\.cookie/.test(source)) {
+        offenders.push(path);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("src/auth/api.ts sends credentials: \"include\" and never sets an Authorization/Cookie header itself", () => {
+    const source = readFileSync(join(webRoot, "src/auth/api.ts"), "utf-8");
+    expect(source).toContain('credentials: "include"');
+    expect(source).not.toMatch(/["']authorization["']/i);
+    expect(source).not.toMatch(/["']cookie["']/i);
+  });
+
+  it("api.ts is the ONLY file that calls fetch() for /v1/auth/* -- every other auth file goes through it", () => {
+    const authDir = join(webRoot, "src/auth");
+    const files = readdirSync(authDir).filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
+    for (const file of files) {
+      if (file === "api.ts") continue;
+      const source = readFileSync(join(authDir, file), "utf-8");
+      expect(source, `${file} must not call fetch() directly`).not.toMatch(/\bfetch\(/);
+    }
   });
 });
 
