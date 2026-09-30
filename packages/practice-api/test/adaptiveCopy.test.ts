@@ -116,3 +116,79 @@ describe("toRecommendationView -- accumulated-evidence copy", () => {
     }
   });
 });
+
+/**
+ * Phase 3.3 -- TREND evidence copy. Counts from the student's own persisted attempts and what the question is; never a label, never a
+ * cause, never an internal reason code. Trend evidence describes changes in observed performance; it does not diagnose the student.
+ */
+function withTrend(primaryReason: string, trend: Record<string, unknown> | null, accumulatedEvidence: Record<string, unknown> | null = null): TrainingOrchestrationResult {
+  return {
+    status: "selected",
+    actionType: "adaptive_practice",
+    question: { questionId: "q-next", difficultyTier: "advanced" },
+    explanation: "internal",
+    providerResult: { primaryReason, isFallback: false, accumulatedEvidence, trendEvidence: trend, explanation: "internal" },
+    wasFallbackFromRepair: false,
+    wasFallbackFromTrainingSystems: false,
+    diagnostics: {}
+  } as unknown as TrainingOrchestrationResult;
+}
+const trendBase = { conceptName: "Percentages", recentWindowSize: 3, recentCorrect: 3, earlierGraded: 3, earlierCorrect: 0, currentStreak: { outcome: "correct", length: 3 }, kind: "improving" };
+
+describe("toRecommendationView -- trend-evidence copy", () => {
+  it("recent_improvement states the last window against the earlier ones, and moves forward gradually", () => {
+    const view = toRecommendationView(withTrend("recent_improvement", trendBase));
+    expect(view).toEqual({
+      questionId: "q-next",
+      modeLabel: "Recent progress",
+      headline: "Keep building on your progress",
+      explanation: "Your last 3 graded answers on Percentages were all correct, compared with 0 of 3 earlier ones, so this moves you forward gradually."
+    });
+  });
+
+  it("recent_deterioration states the counts and keeps the difficulty steady", () => {
+    const view = toRecommendationView(withTrend("recent_deterioration", { ...trendBase, kind: "deteriorating", recentCorrect: 1, earlierGraded: 4, earlierCorrect: 4, currentStreak: { outcome: "incorrect", length: 1 } }));
+    expect(view.modeLabel).toBe("Recent change");
+    expect(view.explanation).toBe("1 of your last 3 graded answers on Percentages were correct, compared with 4 of 4 earlier ones, so here's another question that isn't harder.");
+  });
+
+  it("repeated_error gains the trend context ONLY when the history genuinely deteriorated; otherwise the Unit 10 copy is untouched", () => {
+    const deteriorated = { ...trendBase, kind: "deteriorating", recentCorrect: 1, earlierGraded: 2, earlierCorrect: 2, currentStreak: { outcome: "incorrect", length: 2 } };
+    expect(toRecommendationView(withTrend("repeated_error", deteriorated)).explanation).toBe(
+      "Your last 2 graded answers on Percentages were all incorrect, while 2 of 2 earlier ones were correct, so here's more practice on Percentages at a steady difficulty."
+    );
+    const persistent = { ...deteriorated, kind: "persistent_difficulty", earlierCorrect: 0 };
+    const view = toRecommendationView(withTrend("repeated_error", persistent, base));
+    expect(view.modeLabel).toBe("Repeated incorrect answers");
+  });
+
+  it("accuracy_weakness under persistent difficulty states both windows' counts; under any other kind it keeps the Unit 10 copy", () => {
+    const persistent = { ...trendBase, kind: "persistent_difficulty", recentCorrect: 1, earlierGraded: 3, earlierCorrect: 1, currentStreak: { outcome: "incorrect", length: 1 } };
+    expect(toRecommendationView(withTrend("accuracy_weakness", persistent)).explanation).toBe(
+      "Only 1 of 3 earlier graded answers and 1 of your last 3 on Percentages were correct, so here's more practice on Percentages."
+    );
+    const plain = toRecommendationView(withTrend("accuracy_weakness", { ...persistent, kind: null }, { ...base, incorrectCount: 2, trailingIncorrectStreak: 0 }));
+    expect(plain.modeLabel).toBe("Accuracy so far");
+  });
+
+  it("no trend (or no claim) means no trend copy: neutral fallback or the existing copy", () => {
+    expect(toRecommendationView(withTrend("recent_improvement", null)).modeLabel).toBe("Coverage");
+    expect(toRecommendationView(withTrend("recent_improvement", { ...trendBase, kind: null })).modeLabel).toBe("Coverage");
+  });
+
+  it("student-safe: no internal vocabulary, no psychological language, fixed response shape", () => {
+    const cases: [string, Record<string, unknown>][] = [
+      ["recent_improvement", trendBase],
+      ["recent_deterioration", { ...trendBase, kind: "deteriorating", recentCorrect: 1 }],
+      ["repeated_error", { ...trendBase, kind: "deteriorating", recentCorrect: 1, currentStreak: { outcome: "incorrect", length: 2 } }],
+      ["accuracy_weakness", { ...trendBase, kind: "persistent_difficulty", recentCorrect: 1 }]
+    ];
+    for (const [reason, trend] of cases) {
+      const view = toRecommendationView(withTrend(reason, trend));
+      const text = JSON.stringify(view);
+      expect(Object.keys(view).sort()).toEqual(["explanation", "headline", "modeLabel", "questionId"]);
+      expect(text).not.toMatch(/recent_|repeated_error|accuracy_weakness|persistent_difficulty|deteriorating|improving|primaryReason|providerResult|trendEvidence|internal|adaptive/);
+      expect(text).not.toMatch(/confiden|motivat|anxi|lazy|careless|weak|struggl|understand|intelligen|ability|afraid|feel|ready|slow|bad at|naturally|losing/i);
+    }
+  });
+});

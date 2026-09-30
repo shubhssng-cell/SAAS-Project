@@ -1,6 +1,7 @@
 import { computeExposureCounts, type ExposureCounts } from "./exposure.js";
 import { highestDemonstratedTier, trailingIncorrectStreak } from "./accumulatedEvidence.js";
 import { deriveRecentEvidence, recentEvidenceReasonFor } from "./recentEvidence.js";
+import { deriveTrendEvidence, trendReasonFor, type TrendEvidence } from "./trendEvidence.js";
 import {
   ADAPTIVE_SELECTION_CONSTANTS,
   DIFFICULTY_TIER_ORDER,
@@ -25,6 +26,8 @@ export interface TrainingNeedContext {
   activeRepairPlans: RepairPlan[];
   /** Phase 3.1: the latest finalized attempt's observable outcome, or `null` (cold start). */
   recentEvidence: RecentEvidence | null;
+  /** Phase 3.3: per-concept trend (recent window vs earlier), for every concept this student has a graded attempt on. */
+  trendByConcept: Map<string, TrendEvidence>;
 }
 
 export function buildTrainingNeedContext(input: {
@@ -33,7 +36,13 @@ export function buildTrainingNeedContext(input: {
   attemptRecords: MasteryAttemptRecord[];
   activeRepairPlans: RepairPlan[];
 }): TrainingNeedContext {
+  const trendByConcept = new Map<string, TrendEvidence>();
+  for (const conceptName of new Set(input.attemptRecords.filter((r) => r.contribution.studentId === input.studentId).map((r) => r.question.conceptName))) {
+    const trend = deriveTrendEvidence(input.studentId, conceptName, input.attemptRecords);
+    if (trend) trendByConcept.set(conceptName, trend);
+  }
   return {
+    trendByConcept,
     masteryByConcept: new Map(input.masteryByConcept.map((m) => [m.conceptName, m])),
     exposure: computeExposureCounts(input.studentId, input.attemptRecords),
     activeRepairPlans: input.activeRepairPlans,
@@ -100,13 +109,23 @@ export function determineSatisfiedReasons(candidate: AdaptiveCandidateQuestion, 
     reasons.push("repeated_error");
   }
 
-  if (mastery?.measures.accuracy !== null && mastery?.measures.accuracy !== undefined && mastery.measures.accuracy < ADAPTIVE_SELECTION_CONSTANTS.ACCURACY_WEAKNESS_THRESHOLD) {
+  // Phase 3.3: trend evidence. Whole-history accuracy is ACCUMULATED evidence; while the student's last 3 graded answers on the concept are all
+  // correct after an earlier poor run (`improving`), the old mean no longer describes CURRENT performance, so it stops raising
+  // `accuracy_weakness` -- `recent_improvement` takes its place. The counts are untouched (`accumulatedEvidence` still reports them).
+  const trend = ctx.trendByConcept.get(q.conceptName);
+  // Like the recent-evidence reasons, a trend reason is never satisfied by the question the student JUST attempted (no immediate repeat).
+  const trendReason = q.questionId === ctx.recentEvidence?.question.questionId ? null : trendReasonFor(candidate, trend);
+  if (trendReason === "recent_deterioration") reasons.push("recent_deterioration");
+
+  if (trend?.kind !== "improving" && mastery?.measures.accuracy !== null && mastery?.measures.accuracy !== undefined && mastery.measures.accuracy < ADAPTIVE_SELECTION_CONSTANTS.ACCURACY_WEAKNESS_THRESHOLD) {
     reasons.push("accuracy_weakness");
   }
 
   if (mastery?.measures.speedRatio !== null && mastery?.measures.speedRatio !== undefined && mastery.measures.speedRatio >= ADAPTIVE_SELECTION_CONSTANTS.SPEED_WEAKNESS_RATIO) {
     reasons.push("speed_weakness");
   }
+
+  if (trendReason === "recent_improvement") reasons.push("recent_improvement");
 
   const recentReason = recentEvidenceReasonFor(candidate, ctx.recentEvidence);
   if (recentReason !== null) reasons.push(recentReason);

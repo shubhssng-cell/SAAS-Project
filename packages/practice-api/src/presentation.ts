@@ -130,6 +130,51 @@ function accumulatedEvidenceCopy(
   }
 }
 
+/**
+ * Phase 3.3 -- student-facing wording for TREND evidence (how observed performance on the concept changed between the most recent
+ * graded answers and the earlier ones). Every sentence states counts from the student's own persisted attempts and what the question is;
+ * it never labels the student, never explains why performance changed, never shows an internal reason code. Trend evidence describes
+ * changes in observed performance; it does not diagnose the student. `null` => the existing copy for that reason is used.
+ */
+type TrendFacts = { conceptName: string; recentWindowSize: number; recentCorrect: number; earlierGraded: number; earlierCorrect: number; currentStreak: { outcome: string; length: number }; kind: string | null };
+
+function trendEvidenceCopy(reason: string, trend: TrendFacts | null | undefined): { modeLabel: string; headline: string; explanation: string } | null {
+  if (!trend || trend.kind === null) return null;
+  const topic = trend.conceptName;
+  const recent = `${trend.recentCorrect} of your last ${trend.recentWindowSize} graded answers on ${topic}`;
+  const earlier = `${trend.earlierCorrect} of ${trend.earlierGraded} earlier ones`;
+  switch (reason) {
+    case "recent_improvement":
+      return {
+        modeLabel: "Recent progress",
+        headline: "Keep building on your progress",
+        explanation: `Your last ${trend.recentWindowSize} graded answers on ${topic} were all correct, compared with ${earlier}, so this moves you forward gradually.`
+      };
+    case "recent_deterioration":
+      return {
+        modeLabel: "Recent change",
+        headline: "Keep the difficulty steady",
+        explanation: `${recent} were correct, compared with ${earlier}, so here's another question that isn't harder.`
+      };
+    case "repeated_error":
+      if (trend.kind !== "deteriorating" || trend.currentStreak.outcome !== "incorrect" || trend.currentStreak.length < 2) return null;
+      return {
+        modeLabel: "Recent change",
+        headline: "Keep the difficulty steady",
+        explanation: `Your last ${trend.currentStreak.length} graded answers on ${topic} were all incorrect, while ${earlier} were correct, so here's more practice on ${topic} at a steady difficulty.`
+      };
+    case "accuracy_weakness":
+      if (trend.kind !== "persistent_difficulty") return null;
+      return {
+        modeLabel: "Accuracy over time",
+        headline: "More practice on this topic",
+        explanation: `Only ${trend.earlierCorrect} of ${trend.earlierGraded} earlier graded answers and ${trend.recentCorrect} of your last ${trend.recentWindowSize} on ${topic} were correct, so here's more practice on ${topic}.`
+      };
+    default:
+      return null;
+  }
+}
+
 export function toRecommendationView(result: TrainingOrchestrationResult): RecommendationView {
   if (result.status === "no_action") {
     return { questionId: null, modeLabel: "Up to date", headline: "You're all caught up", explanation: "Nothing urgent right now. Keep practicing to build up more evidence." };
@@ -157,6 +202,9 @@ export function toRecommendationView(result: TrainingOrchestrationResult): Recom
   // adaptive_practice
   // Phase 3.1: when the pick was decided by the student's most recent attempt, say so -- in fixed copy that states only what
   // was observed ("your last answer was incorrect"), never a claim about the student. Anything else keeps the coverage copy.
+  // Phase 3.3: trend evidence (recent window vs earlier) is stated first when it is what decided the pick, or sharpens an accumulated reason.
+  const trend = trendEvidenceCopy(result.providerResult.primaryReason, result.providerResult.trendEvidence);
+  if (trend) return { questionId: result.question.questionId, ...trend };
   const recentCopy = RECENT_EVIDENCE_COPY[result.providerResult.primaryReason];
   if (recentCopy) return { questionId: result.question.questionId, ...recentCopy };
   // Phase 3.2: accumulated evidence -- counts/ratios of observed performance across persisted attempts, stated as facts.

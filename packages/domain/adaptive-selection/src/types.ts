@@ -4,8 +4,9 @@ import type { PrepPhaseResult } from "@ipmat/prep-phase";
 import type { DifficultyTier, NoveltyLevel, ValidationState } from "@ipmat/question-engine";
 import type { AccumulatedEvidence } from "./accumulatedEvidence.js";
 import type { RecentEvidence } from "./recentEvidence.js";
+import type { TrendEvidence } from "./trendEvidence.js";
 
-export type { AccumulatedEvidence, RecentEvidence };
+export type { AccumulatedEvidence, RecentEvidence, TrendEvidence };
 
 export type {
   AutopsyQuestionContext,
@@ -110,9 +111,15 @@ export interface CandidateValidationResult {
 export const TRAINING_NEED_REASON_CODES = [
   "repair_priority",
   "repeated_error",
+  // Phase 3.3: strong older history followed by a weaker recent window -- see trendEvidence.ts. Ranks just below repeated_error (which, when
+  // both hold, wins and is worded with the trend context) and above the broader whole-history weakness reasons.
+  "recent_deterioration",
   "prerequisite_weakness",
   "accuracy_weakness",
   "speed_weakness",
+  // Phase 3.3: an earlier poor run followed by 3 consecutive correct answers. While it holds it REPLACES `accuracy_weakness` for that concept
+  // (the whole-history mean would otherwise keep reporting the old problem); the old counts stay visible in `accumulatedEvidence`.
+  "recent_improvement",
   // Phase 3.1 (first adaptive layer): reactions to the student's single most recent finalized attempt -- see recentEvidence.ts.
   // An incorrect answer, a skip, or a slow correct answer are immediate signals: these three rank BELOW the multi-attempt
   // weakness reasons above (which need a minimum number of observations) and ABOVE the exposure/coverage reasons below.
@@ -178,6 +185,8 @@ export interface AdaptiveSelectionResult {
   recentEvidence: RecentEvidence | null;
   /** Phase 3.2: descriptive counts/ratios of the ACCUMULATED persisted evidence for the SELECTED question's concept (read from the existing mastery aggregates) -- `null` when the student has no attempts on it. Facts only; never a label or a score. */
   accumulatedEvidence: AccumulatedEvidence | null;
+  /** Phase 3.3: how the student's OBSERVED performance on the SELECTED question's concept has changed (recent window vs earlier) -- `null` when they have no graded attempt on it. Describes changes in observed performance; does not diagnose the student. */
+  trendEvidence: TrendEvidence | null;
 }
 
 export type AdaptiveNoSelectionReason = "no_candidates_supplied" | "no_published_candidates" | "no_structurally_valid_candidates";

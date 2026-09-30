@@ -1,6 +1,7 @@
 import { validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
 import { deriveAccumulatedEvidence } from "./accumulatedEvidence.js";
 import { compareByRecentPreference, explainRecentEvidence, RECENT_EVIDENCE_REASON_BY_SIGNAL } from "./recentEvidence.js";
+import { compareByTrendPreference } from "./trendEvidence.js";
 import { applyOveruseAvoidance, rankCandidates } from "./tieBreak.js";
 import { buildTrainingNeedContext, computeProgressionTargetTier, determineSatisfiedReasons } from "./trainingNeeds.js";
 import {
@@ -14,10 +15,11 @@ import {
   type AdaptiveSelectionResult,
   type DifficultyTier,
   type RecentEvidence,
-  type TrainingNeedReasonCode
+  type TrainingNeedReasonCode,
+  type TrendEvidence
 } from "./types.js";
 
-function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion, recentEvidence: RecentEvidence | null, accumulated: AccumulatedEvidence | null): string {
+function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion, recentEvidence: RecentEvidence | null, accumulated: AccumulatedEvidence | null, trend: TrendEvidence | null): string {
   const q = candidate.question;
   switch (reason) {
     case "recent_incorrect":
@@ -28,6 +30,14 @@ function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandid
       return recentEvidence ? explainRecentEvidence(reason, candidate, recentEvidence) : `This question follows the student's most recent attempt.`;
     case "repair_priority":
       return `A confirmed diagnosis is actively targeting "${q.patternFamilyName}" in "${q.conceptName}" — this question directly addresses it.`;
+    case "recent_deterioration":
+      return trend
+        ? `On "${q.conceptName}", ${trend.recentCorrect} of your last ${trend.recentWindowSize} graded answers were correct, compared with ${trend.earlierCorrect} of ${trend.earlierGraded} earlier ones, so this keeps the difficulty steady.`
+        : `Recent graded answers on "${q.conceptName}" were less successful than earlier ones, so this keeps the difficulty steady.`;
+    case "recent_improvement":
+      return trend
+        ? `On "${q.conceptName}", your last ${trend.recentWindowSize} graded answers were all correct, compared with ${trend.earlierCorrect} of ${trend.earlierGraded} earlier ones, so this moves you forward gradually.`
+        : `Recent graded answers on "${q.conceptName}" were more successful than earlier ones, so this moves you forward gradually.`;
     case "repeated_error":
       return accumulated
         ? `The most recent ${accumulated.trailingIncorrectStreak} graded answers on "${q.conceptName}" were all incorrect — this question offers further practice on it.`
@@ -198,6 +208,10 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     // Phase 3.1: the recent-evidence rule's own preference comes first; the generic tie-breaks above keep ordering everything it leaves tied (stable sort).
     ranked = [...ranked].sort(compareByRecentPreference(ctx.recentEvidence));
   }
+  if (winningReason === "recent_improvement" || winningReason === "recent_deterioration") {
+    // Phase 3.3: the trend rule's own preference (smallest step up / same tier first), ahead of the generic tie-breaks.
+    ranked = [...ranked].sort(compareByTrendPreference(ctx.trendByConcept));
+  }
 
   const [winner, ...rest] = ranked;
   if (!winner) {
@@ -216,6 +230,7 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
 
   const winnerReasons = satisfiedByQuestionId.get(winner.question.questionId) ?? [];
   const accumulatedEvidence = deriveAccumulatedEvidence(ctx.masteryByConcept.get(winner.question.conceptName));
+  const trendEvidence = ctx.trendByConcept.get(winner.question.conceptName) ?? null;
   const rankedAlternatives: AdaptiveCandidateExplanation[] = rest.map((candidate) => ({
     questionId: candidate.question.questionId,
     primaryReason: TRAINING_NEED_PRIORITY_ORDER.find((r) => (satisfiedByQuestionId.get(candidate.question.questionId) ?? []).includes(r)) ?? "difficulty_progression",
@@ -228,14 +243,15 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     allReasonsSatisfied: winnerReasons,
     targetConceptName: winner.question.conceptName,
     isFallback,
-    explanation: explainReason(winningReason, winner, ctx.recentEvidence, accumulatedEvidence),
+    explanation: explainReason(winningReason, winner, ctx.recentEvidence, accumulatedEvidence, trendEvidence),
     coverageGapAddressed: coverageGapFor(winningReason, winner),
     rankedAlternatives,
     candidatesConsidered: candidates.length,
     excludedMalformedCount,
     excludedUnpublishedCount,
     recentEvidence: ctx.recentEvidence,
-    accumulatedEvidence
+    accumulatedEvidence,
+    trendEvidence
   };
 
   return { status: "selected", result };

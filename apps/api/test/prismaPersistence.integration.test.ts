@@ -569,6 +569,125 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     }
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3.3 -- TREND evidence (last 3 graded answers vs. the earlier ones) on the real Prisma readers + real Postgres. The decision
+  // is a pure function of the persisted attempts: a brand-new instance reconstructs it from the database alone.
+  // Trend evidence describes changes in observed performance; it does not diagnose the student.
+  // ---------------------------------------------------------------------------------------------
+
+  async function replay(instance: Instance, cookie: string, steps: Array<[string, "correct" | "wrong" | "skip"]>) {
+    for (const [q, o] of steps) await practiceOnce(instance, cookie, q, o);
+  }
+  async function sameAfterRestart(cookie: string, expected: Record<string, unknown>) {
+    const restarted = await startInstance(); // nothing but the database carries over
+    try {
+      expect(await card(restarted, cookie)).toEqual(expected);
+    } finally {
+      await restarted.close();
+    }
+    expect(await card(b, cookie)).toEqual(expected);
+  }
+  const INTERNAL = /recent_|repeated_error|accuracy_weakness|persistent_difficulty|deteriorating|improving|primaryReason|trendEvidence|correctAnswer|solutionSteps|groundTruth/;
+  const PSYCH = /confiden|motivat|anxi|lazy|careless|struggl|understand|intelligen|afraid|feel|bad at|naturally|losing|weak/i;
+
+  it("PHASE 3.3 CASE A/E: wrong, wrong, then three correct -> recent progress (one step up), the old mean no longer drives it, identical after a restart", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-imp");
+    await replay(a, s.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({
+      modeLabel: "Recent progress",
+      headline: "Keep building on your progress",
+      explanation: "Your last 3 graded answers on Percentages were all correct, compared with 0 of 2 earlier ones, so this moves you forward gradually."
+    });
+    expect([ids.successive, ids.reverse]).toContain(rec.questionId); // a step up from the standard tier
+    expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    expect(JSON.stringify(rec)).not.toMatch(PSYCH);
+    // the old facts are still in Postgres -- nothing was erased
+    expect(await a.prisma.attempt.count({ where: { studentId: s.studentId, status: "submitted", isCorrect: false } })).toBe(2);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3.3 CASE B: correct x3 then wrong x2 -> the current run of errors is stated WITH the earlier successful answers, at a steady difficulty", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-det");
+    await replay(a, s.cookie, [[ids.point, "correct"], [ids.successive, "correct"], [ids.reverse, "correct"], [ids.point, "wrong"], [ids.successive, "wrong"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({
+      modeLabel: "Recent change",
+      headline: "Keep the difficulty steady",
+      explanation: "Your last 2 graded answers on Percentages were all incorrect, while 2 of 2 earlier ones were correct, so here's more practice on Percentages at a steady difficulty."
+    });
+    expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    expect(JSON.stringify(rec)).not.toMatch(PSYCH);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3.3 CASE B (no trailing error run): strong earlier history, then wrong/correct/wrong -> recent change, a question that is not harder, identical after a restart", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-det2");
+    await replay(a, s.cookie, [[ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"], [ids.successive, "wrong"], [ids.reverse, "correct"], [ids.successive, "wrong"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({
+      modeLabel: "Recent change",
+      explanation: "1 of your last 3 graded answers on Percentages were correct, compared with 4 of 4 earlier ones, so here's another question that isn't harder."
+    });
+    expect(rec.questionId).not.toBe(ids.successive); // never immediately re-served
+    expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3.3 CASE C: wrong, wrong, correct, wrong, correct, wrong -> persistent difficulty is stated with both windows' counts; one success did not clear it", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-pers");
+    await replay(a, s.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "correct"], [ids.successive, "wrong"], [ids.point, "correct"], [ids.reverse, "wrong"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({
+      modeLabel: "Accuracy over time",
+      explanation: "Only 1 of 3 earlier graded answers and 1 of your last 3 on Percentages were correct, so here's more practice on Percentages."
+    });
+    expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3.3 CASE C2: wrong, wrong, correct, wrong, wrong -> the existing repeated-incorrect response still applies (one success in the middle does not clear the current run)", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-pers2");
+    await replay(a, s.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "correct"], [ids.successive, "wrong"], [ids.reverse, "wrong"]]);
+    expect(await card(a, s.cookie)).toMatchObject({ modeLabel: "Repeated incorrect answers" });
+  });
+
+  it("PHASE 3.3 CASE D: four correct answers is a sustained run, not a change -- no progress/change card is claimed", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-sus");
+    await replay(a, s.cookie, [[ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    const rec = await card(a, s.cookie);
+    expect(String(rec.modeLabel)).not.toMatch(/Recent progress|Recent change|incorrect|Accuracy/);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3.3: skipped attempts are not graded -- they neither form the window nor break the run", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "trend-skip");
+    await replay(a, s.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "skip"], [ids.point, "correct"], [ids.successive, "skip"], [ids.point, "correct"], [ids.point, "correct"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({ modeLabel: "Recent progress", explanation: "Your last 3 graded answers on Percentages were all correct, compared with 0 of 2 earlier ones, so this moves you forward gradually." });
+    expect(await a.prisma.attempt.count({ where: { studentId: s.studentId, status: "skipped" } })).toBe(2);
+  });
+
+  it("PHASE 3.3: another student's history never influences this student's trend, and the published-only rule still holds", async () => {
+    const ids = await familyIds();
+    const improver = await newStudent(a, "trend-iso1");
+    const other = await newStudent(a, "trend-iso2");
+    await replay(a, other.cookie, [[ids.successive, "wrong"]]);
+    const before = await card(a, other.cookie);
+    await replay(a, improver.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    expect(await card(a, other.cookie)).toEqual(before);
+    expect(before.modeLabel).toBe("After an incorrect answer");
+    const published = new Set((await a.prisma.question.findMany({ where: { validationState: "published" }, select: { id: true } })).map((r) => r.id));
+    expect(published.has((await card(a, improver.cookie)).questionId as string)).toBe(true);
+  });
+
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
     const s = await newStudent(a, "repo");
     const enrollment = await a.prisma.enrollment.findFirstOrThrow({ where: { studentId: s.studentId } });

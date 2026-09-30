@@ -26,7 +26,9 @@ function sortByFinalizedAt(records: MasteryAttemptRecord[]): MasteryAttemptRecor
   return [...records].sort((a, b) => {
     const aMs = a.contribution.finalizedAt ? Date.parse(a.contribution.finalizedAt) : 0;
     const bMs = b.contribution.finalizedAt ? Date.parse(b.contribution.finalizedAt) : 0;
-    return aMs - bMs;
+    if (aMs !== bMs) return aMs - bMs;
+    // Equal/missing timestamps: break the tie by attemptId so one persisted history has exactly one order (Phase 3.3; mirrors @ipmat/adaptive-selection's trend order).
+    return a.contribution.attemptId < b.contribution.attemptId ? -1 : a.contribution.attemptId > b.contribution.attemptId ? 1 : 0;
   });
 }
 
