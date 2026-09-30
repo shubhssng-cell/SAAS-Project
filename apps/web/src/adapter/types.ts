@@ -63,6 +63,16 @@ export interface AttemptResultViewModel {
   hasAutopsy: boolean;
 }
 
+/**
+ * Phase 4 Unit 1 -- what the system OBSERVED about a finalized attempt (server-authored sentences plus the numbers behind them).
+ * Observation only: no diagnosis, no cause, no label for the student. `notRecorded` names what this flow does not record.
+ */
+export interface AttemptEvidenceViewModel {
+  attemptId: string;
+  observations: string[];
+  notRecorded: string[];
+}
+
 export interface AutopsyViewModel {
   attemptId: string;
   /** Plain-language OBSERVED facts only — never a claim about why. */
@@ -81,6 +91,8 @@ export interface TrainingRecommendationAdapter {
   /** Skips the question's in-progress attempt (server-side terminal `skipped` state) and returns the skipped outcome. Rejects on failure; a skipped attempt can never be submitted afterwards. */
   skipQuestion(input: { questionId: string }): Promise<AttemptResultViewModel>;
   getAttemptResult(attemptId: string): Promise<AttemptResultViewModel>;
+  /** Phase 4 Unit 1: the observation-only evidence for a FINALIZED attempt. Rejects (never guesses) when it is unavailable, e.g. before submission. */
+  getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel>;
   getAutopsy(attemptId: string): Promise<AutopsyViewModel>;
   /** Applies the student's response to the pending hypothesis and returns the resulting recommendation — a confirmed hypothesis may (transparently, via the real domain layer) become a targeted repair recommendation. */
   respondToAutopsy(input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel>;

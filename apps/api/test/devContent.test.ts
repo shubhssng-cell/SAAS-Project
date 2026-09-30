@@ -408,3 +408,69 @@ describe("accumulated evidence through the real HTTP path (Phase 3.2)", () => {
     expect((await recommendation(b)).modeLabel).toBe("Coverage");
   });
 });
+
+describe("observation-only attempt evidence through the real HTTP path (Phase 4 Unit 1)", () => {
+  const canonicalOf = (id: string) => seed.questions.find((q) => q.id === id)!;
+  async function startRecommended(cookie: string) {
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    const questionId = rec.json.questionId as string;
+    const started = await request("POST", "/v1/attempts", { questionId }, cookie);
+    return { questionId, attemptId: started.json.attemptId as string, canonical: canonicalOf(questionId) };
+  }
+
+  it("is refused before submission (409), and available after submission with neutral observations and no answer key", async () => {
+    const cookie = await signupOnboardEnroll("evidence-flow@example.com");
+    const { questionId, attemptId, canonical } = await startRecommended(cookie);
+
+    const early = await request("GET", `/v1/attempts/${attemptId}/evidence`, undefined, cookie);
+    expect(early.status).toBe(409);
+    expect(Object.keys(early.json)).toEqual(["error"]); // a refusal carries no evidence and no answer
+
+    const wrong = canonical.options!.find((o) => o !== canonical.correctAnswer)!;
+    await request("POST", `/v1/attempts/${attemptId}/submit`, { questionId, chosenAnswer: wrong }, cookie);
+    const evidence = await request("GET", `/v1/attempts/${attemptId}/evidence`, undefined, cookie);
+    expect(evidence.status).toBe(200);
+    expect(Object.keys(evidence.json).sort()).toEqual(["attemptId", "context", "facts", "history", "notRecorded", "observations", "questionId", "status"]);
+    const observations = evidence.json.observations as string[];
+    expect(observations).toContain(`Your selected answer was ${wrong}.`);
+    expect(observations).toContain("Your answer was incorrect.");
+    expect(observations.some((o) => /^You took \d+ seconds?\.$/.test(o))).toBe(true);
+    expect(observations.some((o) => o.startsWith("This question was in Percentages"))).toBe(true);
+    const text = JSON.stringify(evidence.json);
+    // the answer key is never stated: no sentence or field names it (short numeric keys make a substring check meaningless)
+    expect(observations.some((o) => o === `Your selected answer was ${canonical.correctAnswer}.`)).toBe(false);
+    expect((evidence.json.facts as { selectedAnswer: string }).selectedAnswer).toBe(wrong);
+    expect(text).not.toMatch(/solutionSteps|correctAnswer|hypothesis|diagnos|repair|confiden|motivat|careless|understand/i);
+  });
+
+  it("a skipped attempt has evidence too (a skip, not a grade); an unknown attempt is 404; another student is refused (403)", async () => {
+    const cookie = await signupOnboardEnroll("evidence-skip@example.com");
+    const { questionId, attemptId } = await startRecommended(cookie);
+    await request("POST", `/v1/attempts/${attemptId}/skip`, { questionId }, cookie);
+    const evidence = await request("GET", `/v1/attempts/${attemptId}/evidence`, undefined, cookie);
+    expect(evidence.status).toBe(200);
+    expect((evidence.json.observations as string[])[0]).toBe("You skipped this question.");
+    expect(evidence.json.facts).toMatchObject({ verdict: "not_graded", selectedAnswer: null });
+
+    expect((await request("GET", "/v1/attempts/no-such-attempt/evidence", undefined, cookie)).status).toBe(404);
+    const other = await signupOnboardEnroll("evidence-other@example.com");
+    expect((await request("GET", `/v1/attempts/${attemptId}/evidence`, undefined, other)).status).toBe(403);
+    expect((await request("GET", `/v1/attempts/${attemptId}/evidence`)).status).toBe(401);
+  });
+
+  it("history is counted from earlier attempts only, and an earlier attempt's evidence is unchanged by later practice", async () => {
+    const cookie = await signupOnboardEnroll("evidence-history@example.com");
+    const first = await startRecommended(cookie);
+    const wrongOf = (c: { options: string[] | null; correctAnswer: string }) => c.options!.find((o) => o !== c.correctAnswer)!;
+    await request("POST", `/v1/attempts/${first.attemptId}/submit`, { questionId: first.questionId, chosenAnswer: wrongOf(first.canonical) }, cookie);
+    const firstBefore = (await request("GET", `/v1/attempts/${first.attemptId}/evidence`, undefined, cookie)).json;
+    expect(firstBefore.history).toBeNull();
+
+    const second = await startRecommended(cookie);
+    await request("POST", `/v1/attempts/${second.attemptId}/submit`, { questionId: second.questionId, chosenAnswer: second.canonical.correctAnswer }, cookie);
+    const secondEvidence = (await request("GET", `/v1/attempts/${second.attemptId}/evidence`, undefined, cookie)).json;
+    expect(secondEvidence.history).toEqual({ priorAttempts: 1, onConcept: { attempts: 1, correct: 0, incorrect: 1, skipped: 0 } });
+    expect((secondEvidence.observations as string[])).toContain("Before this attempt you had 1 earlier attempt on Percentages: 0 correct, 1 incorrect.");
+    expect((await request("GET", `/v1/attempts/${first.attemptId}/evidence`, undefined, cookie)).json).toEqual(firstBefore);
+  });
+});

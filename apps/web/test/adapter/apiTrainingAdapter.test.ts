@@ -163,6 +163,26 @@ describe("createApiTrainingAdapter -- getAutopsy / respondToAutopsy", () => {
   });
 });
 
+describe("createApiTrainingAdapter -- getAttemptEvidence (Phase 4 Unit 1)", () => {
+  const BODY = { attemptId: "attempt-1", questionId: "q-1", status: "submitted", observations: ["Your selected answer was B.", "You took 86 seconds."], notRecorded: ["Changes to your answer before submitting are not recorded in this practice flow."], facts: {}, context: null, history: null };
+
+  it("GETs /v1/attempts/:id/evidence with credentials and maps only the student-facing sentences", async () => {
+    const { calls, fetchImpl } = routedFetch({ "/v1/attempts/attempt-1/evidence": { ok: true, status: 200, body: BODY } });
+    const result = await createApiTrainingAdapter(fetchImpl).getAttemptEvidence("attempt-1");
+    expect(result).toEqual({ attemptId: "attempt-1", observations: BODY.observations, notRecorded: BODY.notRecorded });
+    expect(calls[0]?.url).toMatch(/\/v1\/attempts\/attempt-1\/evidence$/);
+    expect(calls[0]?.init?.method).toBe("GET");
+    expect(calls[0]?.init?.credentials).toBe("include");
+  });
+
+  it("rejects (never guesses) on a malformed body and on a refusal such as 'not finalized yet'", async () => {
+    const malformed = routedFetch({ "/evidence": { ok: true, status: 200, body: { attemptId: "attempt-1", observations: "nope", notRecorded: [] } } });
+    await expect(createApiTrainingAdapter(malformed.fetchImpl).getAttemptEvidence("attempt-1")).rejects.toBeDefined();
+    const early = routedFetch({ "/evidence": { ok: false, status: 409, body: { error: { code: "invalid_state", message: "This attempt has not been finalized yet." } } } });
+    await expect(createApiTrainingAdapter(early.fetchImpl).getAttemptEvidence("attempt-1")).rejects.toBeDefined();
+  });
+});
+
 describe("createApiTrainingAdapter -- identity and transport discipline", () => {
   it("never sends a studentId/enrollmentId in any request body -- identity is cookie-derived server-side only", async () => {
     const { calls, fetchImpl } = routedFetch({

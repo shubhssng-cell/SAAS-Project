@@ -948,6 +948,113 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     }
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 4 Unit 1 -- OBSERVATION-ONLY attempt evidence on real Postgres. The evidence is reconstructed from the persisted attempt,
+  // its events and the persisted question metadata on every request: a fresh instance and a second instance read the same rows and
+  // return the identical object, and asking for it writes nothing (no autopsy, no repair plan, no mastery row).
+  // ---------------------------------------------------------------------------------------------
+
+  const evidenceOf = (instance: Instance, cookie: string, attemptId: string) => call(instance, "GET", `/v1/attempts/${attemptId}/evidence`, cookie);
+  const EVIDENCE_KEYS = ["attemptId", "context", "facts", "history", "notRecorded", "observations", "questionId", "status"];
+  const DIAGNOSTIC = /hypothesis|diagnos|repair|candidateError|errorCategory|trap|modelConfidence|solutionSteps|correctAnswer|confiden|motivat|careless|understand|confus|unsure/i;
+
+  async function startAndSubmit(instance: Instance, cookie: string, questionId: string, outcome: "correct" | "wrong" | "skip"): Promise<string> {
+    const started = await call(instance, "POST", "/v1/attempts", cookie, { questionId });
+    const attemptId = started.json.attemptId as string;
+    if (outcome === "skip") {
+      await call(instance, "POST", `/v1/attempts/${attemptId}/skip`, cookie, { questionId });
+      return attemptId;
+    }
+    const q = await instance.prisma.question.findUniqueOrThrow({ where: { id: questionId } });
+    const chosenAnswer = outcome === "correct" ? q.correctAnswer : (q.options as string[]).find((o) => o !== q.correctAnswer)!;
+    const r = await call(instance, "POST", `/v1/attempts/${attemptId}/submit`, cookie, { questionId, chosenAnswer });
+    expect(r.status).toBe(200);
+    return attemptId;
+  }
+
+  it("PHASE 4 UNIT 1: evidence comes from the PERSISTED finalized attempt (answer, verdict, elapsed time, events), and a restarted and a second instance return the identical object", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "ev-persist");
+    const attemptId = await startAndSubmit(a, s.cookie, real.successive, "wrong");
+    const row = await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: true } });
+
+    const first = await evidenceOf(a, s.cookie, attemptId);
+    expect(first.status).toBe(200);
+    expect(Object.keys(first.json).sort()).toEqual(EVIDENCE_KEYS);
+    expect(first.json.facts).toMatchObject({ verdict: "incorrect", selectedAnswer: row.chosenAnswer, elapsedSeconds: row.timeSpentSeconds, expectedSeconds: real.expected[real.successive] });
+    const observations = first.json.observations as string[];
+    expect(observations).toContain(`Your selected answer was ${row.chosenAnswer}.`);
+    expect(observations).toContain("Your answer was incorrect.");
+    expect(observations.some((o) => o.startsWith('This question was in Percentages, pattern "Successive Percentage Change"'))).toBe(true);
+    // the real flow records ONE selection at submission: changes are reported as not recorded, never as zero
+    expect(row.events.filter((e) => e.eventType === "answer_selected")).toHaveLength(1);
+    expect(first.json.notRecorded).toEqual(["Changes to your answer before submitting are not recorded in this practice flow."]);
+    expect(first.json.facts).toMatchObject({ answerChangeCount: null });
+    expect(JSON.stringify(first.json)).not.toMatch(DIAGNOSTIC);
+
+    const restarted = await startInstance(); // nothing but the database carries over
+    try {
+      expect((await evidenceOf(restarted, s.cookie, attemptId)).json).toEqual(first.json);
+    } finally {
+      await restarted.close();
+    }
+    expect((await evidenceOf(b, s.cookie, attemptId)).json).toEqual(first.json);
+    expect((await evidenceOf(a, s.cookie, attemptId)).json).toEqual(first.json);
+  });
+
+  it("PHASE 4 UNIT 1: nothing before submission (409), nothing for another student (403), a skip has evidence as a skip, an unknown attempt is 404", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "ev-bounds");
+    const open = await call(a, "POST", "/v1/attempts", s.cookie, { questionId: real.point });
+    const early = await evidenceOf(a, s.cookie, open.json.attemptId as string);
+    expect(early.status).toBe(409);
+    expect(Object.keys(early.json)).toEqual(["error"]);
+    await call(a, "POST", `/v1/attempts/${open.json.attemptId as string}/skip`, s.cookie, { questionId: real.point });
+
+    const skipped = await evidenceOf(a, s.cookie, open.json.attemptId as string);
+    expect(skipped.status).toBe(200);
+    expect((skipped.json.observations as string[])[0]).toBe("You skipped this question.");
+    expect(skipped.json.facts).toMatchObject({ verdict: "not_graded", selectedAnswer: null });
+
+    const other = await newStudent(a, "ev-bounds-other");
+    expect((await evidenceOf(a, other.cookie, open.json.attemptId as string)).status).toBe(403);
+    expect((await evidenceOf(a, s.cookie, randomUUID())).status).toBe(404);
+  });
+
+  it("PHASE 4 UNIT 1: history is counted from the persisted earlier attempts only; later practice never changes an earlier attempt's evidence", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "ev-history");
+    const ids: string[] = [];
+    for (const [q, o] of [[real.point, "wrong"], [real.successive, "correct"], [real.reverse, "wrong"], [real.point, "skip"]] as const) ids.push(await startAndSubmit(a, s.cookie, q, o));
+
+    const fourth = await evidenceOf(a, s.cookie, ids[3]!);
+    expect(fourth.json.history).toEqual({ priorAttempts: 3, onConcept: { attempts: 3, correct: 1, incorrect: 2, skipped: 0 } });
+    expect(await a.prisma.attempt.count({ where: { studentId: s.studentId, status: "submitted", isCorrect: false } })).toBe(2); // the persisted counts the evidence states
+    expect((fourth.json.observations as string[])).toContain("Before this attempt you had 3 earlier attempts on Percentages: 1 correct, 2 incorrect.");
+
+    const firstBefore = await evidenceOf(a, s.cookie, ids[0]!);
+    expect(firstBefore.json.history).toBeNull();
+    await startAndSubmit(a, s.cookie, real.successive, "wrong");
+    expect((await evidenceOf(a, s.cookie, ids[0]!)).json).toEqual(firstBefore.json);
+  });
+
+  it("PHASE 4 UNIT 1: Unit 1 creates NO diagnosis, hypothesis, RepairPlan or mastery row -- it only reads", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "ev-nowrite");
+    const count = async () => ({
+      autopsies: await a.prisma.autopsy.count({ where: { attempt: { studentId: s.studentId } } }),
+      repairPlans: await a.prisma.repairPlan.count({ where: { studentId: s.studentId } }),
+      mastery: await a.prisma.masteryState.count({ where: { studentId: s.studentId } })
+    });
+    expect(await count()).toEqual({ autopsies: 0, repairPlans: 0, mastery: 0 });
+    const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    await evidenceOf(a, s.cookie, attemptId);
+    await evidenceOf(b, s.cookie, attemptId);
+    expect(await count()).toEqual({ autopsies: 0, repairPlans: 0, mastery: 0 });
+    const autopsy = await call(a, "GET", `/v1/attempts/${attemptId}/autopsy`, s.cookie);
+    expect(autopsy.json).toMatchObject({ pending: false, hypothesis: null }); // no hypothesis exists: evidence is not one
+  });
+
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
     const s = await newStudent(a, "repo");
     const enrollment = await a.prisma.enrollment.findFirstOrThrow({ where: { studentId: s.studentId } });

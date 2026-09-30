@@ -2,8 +2,9 @@ import { AttemptLifecycleError, type AttemptOwnershipClaim, type AttemptState } 
 import { PersistenceError, SerializationFailureError } from "@ipmat/db";
 import { assertEnrollmentOwnership } from "@ipmat/training-recommendation";
 import { toPracticeApiError } from "./errors.js";
-import { toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
+import { toAttemptEvidenceView, toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
 import type {
+  AttemptEvidenceView,
   AttemptResultView,
   PendingAutopsyView,
   PracticeApiDependencies,
@@ -231,6 +232,38 @@ export class PracticeApiService {
       }
 
       return toAttemptResultView(attempt, correctAnswer, expectedTimeSeconds, reveal);
+    } catch (error) {
+      if (error instanceof PracticeApiError) throw error;
+      throw toPracticeApiError(error);
+    }
+  }
+
+  /**
+   * Phase 4 Unit 1 -- the OBSERVATION-ONLY evidence for an already-finalized attempt ("what happened"), as a student-safe view.
+   * Ownership is verified against the loaded attempt, an attempt that is still `in_progress` is refused (`invalid_state`/409) so
+   * nothing can be read before submission, and the evidence is assembled by `@ipmat/training-recommendation` from persisted state
+   * alone -- never from the client, never stored, never diagnostic. No AI call, no write.
+   */
+  async getAttemptEvidence(claim: StudentRequestClaim, input: { attemptId: string }): Promise<AttemptEvidenceView> {
+    assertValidClaim(claim);
+    assertNonEmptyString(input.attemptId, "attemptId");
+
+    try {
+      const attempt = await this.deps.practiceLoopService.getAttempt(input.attemptId);
+      if (!attempt) {
+        throw new AttemptLifecycleError("attempt_not_found", `No attempt found with id "${input.attemptId}".`);
+      }
+      if (attempt.studentId !== claim.studentId) {
+        throw new AttemptLifecycleError("ownership_mismatch", "This attempt does not belong to the requesting student.");
+      }
+      if (attempt.status === "in_progress") {
+        throw new PracticeApiError("invalid_state", "This attempt has not been finalized yet.", 409);
+      }
+      const evidence = await this.deps.trainingRecommendationService.getAttemptObservationEvidence({ studentId: claim.studentId, enrollmentId: claim.enrollmentId, attemptId: input.attemptId });
+      if (evidence === null) {
+        throw new AttemptLifecycleError("attempt_not_found", `No evidence is available for attempt "${input.attemptId}".`);
+      }
+      return toAttemptEvidenceView(evidence);
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);

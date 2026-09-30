@@ -1,8 +1,43 @@
 import { useState } from "react";
-import type { AttemptResultViewModel } from "../adapter/index.js";
+import type { AttemptEvidenceViewModel, AttemptResultViewModel } from "../adapter/index.js";
 import { Button, Card, Screen } from "../design/index.js";
 
-export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result: AttemptResultViewModel; onSeeWhatHappened: () => void; onContinue: () => void }) {
+/**
+ * Phase 4 Unit 1 -- what was RECORDED about this attempt, in the server's own neutral sentences. Shown only on the result screen
+ * (after submission); it states observations, never a reason, a label or a judgment, and is omitted entirely when unavailable.
+ */
+function EvidenceCard({ evidence }: { evidence: AttemptEvidenceViewModel | null | undefined }) {
+  if (!evidence || evidence.observations.length === 0) return null;
+  return (
+    <Card>
+      <h2 className="headline headline-compact" id="evidence-heading">
+        What was recorded
+      </h2>
+      <ul className="evidence-list" aria-labelledby="evidence-heading">
+        {evidence.observations.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      {evidence.notRecorded.map((line) => (
+        <p key={line} className="subtext evidence-note">
+          {line}
+        </p>
+      ))}
+    </Card>
+  );
+}
+
+export function ResultScreen({
+  result,
+  evidence,
+  onSeeWhatHappened,
+  onContinue
+}: {
+  result: AttemptResultViewModel;
+  evidence?: AttemptEvidenceViewModel | null;
+  onSeeWhatHappened: () => void;
+  onContinue: () => void;
+}) {
   const [showSolution, setShowSolution] = useState(false);
   // Solution steps are the server's authored worked solution. When none is stored the list is empty, and a "View solution" control that reveals nothing would be a control that does nothing -- so none is offered.
   const hasSolution = result.solutionSteps.length > 0;
@@ -27,6 +62,7 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
             </span>
           </div>
         </Card>
+        <EvidenceCard evidence={evidence} />
         <div className="btn-row">
           <Button onClick={onContinue}>Continue to next question</Button>
         </div>
@@ -86,6 +122,8 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
           </>
         )}
       </Card>
+
+      <EvidenceCard evidence={evidence} />
 
       <div className="btn-row">
         {result.hasAutopsy ? (

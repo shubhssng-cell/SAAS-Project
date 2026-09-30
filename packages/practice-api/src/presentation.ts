@@ -1,7 +1,8 @@
 import type { AttemptState } from "@ipmat/attempt";
 import type { StoredAutopsy, StudentQuestionRecord } from "@ipmat/db";
 import type { TrainingOrchestrationResult } from "@ipmat/training-orchestration";
-import type { AttemptResultStatus, AttemptResultView, PendingAutopsyView, RecommendationView, StudentQuestionView } from "./types.js";
+import type { ObservationEvidence } from "@ipmat/training-recommendation";
+import type { AttemptEvidenceView, AttemptResultStatus, AttemptResultView, PendingAutopsyView, RecommendationView, StudentQuestionView } from "./types.js";
 
 /**
  * The ONLY place internal decision-engine vocabulary (provider ids, action
@@ -211,6 +212,72 @@ export function toRecommendationView(result: TrainingOrchestrationResult): Recom
   const accumulated = accumulatedEvidenceCopy(result.providerResult.primaryReason, result.providerResult.accumulatedEvidence, { isFallback: result.providerResult.isFallback, questionTier: result.question.difficultyTier });
   if (accumulated) return { questionId: result.question.questionId, ...accumulated };
   return { questionId: result.question.questionId, modeLabel: "Coverage", headline: "Keep building your coverage", explanation: "This targets a part of the topic you haven't practiced much yet." };
+}
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/**
+ * Phase 4 Unit 1 -- the ONLY place observation evidence becomes student-facing sentences. Every sentence restates a recorded or
+ * derived number ("You took 86 seconds."); none explains why, labels the student, or judges the attempt beyond the graded verdict.
+ * Anything unknown is left out of `observations` and, where it matters, named in `notRecorded` -- never turned into a default.
+ */
+export function toAttemptEvidenceView(evidence: ObservationEvidence): AttemptEvidenceView {
+  const { outcome, timing, interaction, questionContext, history } = evidence;
+  const observations: string[] = [];
+
+  if (outcome.status === "submitted") {
+    if (outcome.selectedAnswer !== null) observations.push(`Your selected answer was ${outcome.selectedAnswer}.`);
+    if (outcome.verdict === "correct") observations.push("Your answer was correct.");
+    if (outcome.verdict === "incorrect") observations.push("Your answer was incorrect.");
+  } else if (outcome.status === "skipped") {
+    observations.push("You skipped this question.");
+  } else {
+    observations.push("This attempt ended without a submitted answer.");
+  }
+
+  if (timing.elapsedSeconds !== null) observations.push(`You took ${timing.elapsedSeconds} ${plural(timing.elapsedSeconds, "second", "seconds")}.`);
+  if (timing.expectedSeconds !== null) observations.push(`The expected time was ${timing.expectedSeconds} ${plural(timing.expectedSeconds, "second", "seconds")}.`);
+  if (timing.timeRatio !== null) observations.push(`That is about ${timing.timeRatio.toFixed(1)} times the expected time.`);
+
+  if (interaction.answerChangeCount !== null && interaction.answerChangeCount >= 1) {
+    observations.push(`You changed your answer ${interaction.answerChangeCount === 1 ? "once" : `${interaction.answerChangeCount} times`} before submitting.`);
+  }
+  if (interaction.hintEventsRecorded > 0) observations.push(`You opened ${interaction.hintEventsRecorded} ${plural(interaction.hintEventsRecorded, "hint", "hints")}.`);
+  if (interaction.solutionOpenedRecorded) observations.push("You opened the solution during this attempt.");
+
+  if (questionContext !== null) {
+    observations.push(`This question was in ${questionContext.conceptName}, pattern "${questionContext.patternFamilyName}", at the ${questionContext.difficultyTier} level.`);
+  }
+  const onConcept = history?.onSameConcept;
+  if (questionContext !== null && onConcept !== undefined && onConcept.attempts > 0) {
+    const parts = [`${onConcept.correct} correct`, `${onConcept.incorrect} incorrect`];
+    if (onConcept.skipped > 0) parts.push(`${onConcept.skipped} skipped`);
+    observations.push(`Before this attempt you had ${onConcept.attempts} earlier ${plural(onConcept.attempts, "attempt", "attempts")} on ${questionContext.conceptName}: ${parts.join(", ")}.`);
+  }
+
+  const notRecorded: string[] = [];
+  if (interaction.answerChangeCount === null) notRecorded.push("Changes to your answer before submitting are not recorded in this practice flow.");
+
+  return {
+    attemptId: evidence.identity.attemptId,
+    questionId: evidence.identity.questionId,
+    status: outcome.status,
+    observations,
+    facts: {
+      verdict: outcome.verdict,
+      selectedAnswer: outcome.selectedAnswer,
+      elapsedSeconds: timing.elapsedSeconds,
+      expectedSeconds: timing.expectedSeconds,
+      timeRatio: timing.timeRatio,
+      answerChangeCount: interaction.answerChangeCount
+    },
+    context: questionContext === null ? null : { conceptName: questionContext.conceptName, patternFamilyName: questionContext.patternFamilyName, difficultyTier: questionContext.difficultyTier },
+    history:
+      history === null
+        ? null
+        : { priorAttempts: history.priorAttempts, onConcept: { attempts: history.onSameConcept.attempts, correct: history.onSameConcept.correct, incorrect: history.onSameConcept.incorrect, skipped: history.onSameConcept.skipped } },
+    notRecorded
+  };
 }
 
 export function toStudentQuestionView(record: StudentQuestionRecord): StudentQuestionView {

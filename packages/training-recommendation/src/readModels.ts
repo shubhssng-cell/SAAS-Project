@@ -61,7 +61,7 @@ export function toActiveRepairPlanContexts(storedPlans: StoredRepairPlan[]): Act
 }
 
 /** The ONE place a `CanonicalQuestion` becomes an `AttemptQuestionContext` here — same `answerFormat` derivation as `@ipmat/practice-loop` (options present => multiple_choice). Used only as `toMasteryContribution()`'s input. */
-function toAttemptQuestionContext(question: CanonicalQuestion): AttemptQuestionContext {
+export function toAttemptQuestionContext(question: CanonicalQuestion): AttemptQuestionContext {
   return {
     questionId: question.id,
     conceptId: question.conceptId,

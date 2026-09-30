@@ -210,3 +210,42 @@ describe("result route / question route -- boundaries", () => {
     expect(app).not.toMatch(/=> createFixtureTrainingAdapter\(\)/);
   });
 });
+
+describe("ResultScreen -- observation-only evidence card (Phase 4 Unit 1)", () => {
+  const evidence = {
+    attemptId: "attempt-1",
+    observations: ["Your selected answer was 5.5.", "You took 12 seconds.", "The expected time was 45 seconds."],
+    notRecorded: ["Changes to your answer before submitting are not recorded in this practice flow."]
+  };
+  const renderWith = (result: AttemptResultViewModel, ev: typeof evidence | null | undefined) =>
+    renderToStaticMarkup(createElement(ResultScreen, { result, evidence: ev, onSeeWhatHappened: () => {}, onContinue: () => {} }));
+
+  it("shows what was recorded, plainly, after submission -- and what is not recorded", () => {
+    const html = renderWith(view(), evidence);
+    expect(html).toContain("What was recorded");
+    for (const line of evidence.observations) expect(html).toContain(line);
+    expect(html).toContain("not recorded in this practice flow");
+    expect(html).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it("is omitted entirely when there is no evidence (the result and Continue are unaffected), for graded and skipped results alike", () => {
+    for (const result of [view(), view({ status: "skipped", isCorrect: false, chosenAnswer: "", correctAnswer: "", solutionSteps: [], question: null })]) {
+      for (const none of [null, undefined, { attemptId: "attempt-1", observations: [], notRecorded: [] }]) {
+        const html = renderWith(result, none);
+        expect(html).not.toContain("What was recorded");
+        expect(html).toContain("Continue to next question");
+      }
+    }
+  });
+
+  it("uses no diagnostic or psychological wording", () => {
+    const html = renderWith(view(), evidence);
+    expect(html).not.toMatch(/confiden|motivat|careless|unsure|understand|confus|because|diagnos|hypothes/i);
+  });
+
+  it("the route treats evidence as supplementary: it is fetched after the result is showing and a failure never blocks it", () => {
+    const route = src("routes/PracticeResultRoute.tsx");
+    expect(route).toMatch(/getAttemptEvidence\(loadedAttemptId\)/);
+    expect(route).toMatch(/\.catch\(\(\) => \{\s*\/\/ evidence is optional/);
+  });
+});

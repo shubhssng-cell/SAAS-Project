@@ -22,7 +22,7 @@ import { computeMasteryState, type MasteryAttemptRecord } from "@ipmat/mastery";
 import { orchestrateNextTrainingAction, type ActiveRepairPlanContext, type TrainingCandidateQuestion } from "@ipmat/training-orchestration";
 import { CONCEPT_ID, CONCEPT_NAME, ENROLLMENT_ID, ERROR_TAXONOMY, getQuestion, QUESTION_ORDER, STUDENT_ID } from "./fixtures.js";
 import { describeObservations, toRecommendationViewModel } from "./presentation.js";
-import type { AttemptResultViewModel, AutopsyResponse, AutopsyViewModel, DashboardViewModel, QuestionViewModel, RecommendationViewModel, TrainingRecommendationAdapter } from "./types.js";
+import type { AttemptEvidenceViewModel, AttemptResultViewModel, AutopsyResponse, AutopsyViewModel, DashboardViewModel, QuestionViewModel, RecommendationViewModel, TrainingRecommendationAdapter } from "./types.js";
 
 /**
  * Fixture-backed implementation of `TrainingRecommendationAdapter`. Every
@@ -183,6 +183,11 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
       const result = resultsByAttempt.get(attemptId);
       if (!result) throw new Error(`No result for attempt "${attemptId}".`);
       return result;
+    },
+
+    async getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel> {
+      // The fixture adapter has no persisted history to observe; it never invents evidence.
+      throw new Error(`Attempt evidence is not available from the fixture adapter (attempt "${attemptId}").`);
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

@@ -2,6 +2,7 @@ import type { AuthFailure } from "../auth/failureMapping.js";
 import { jsonRequest, type FetchLike } from "../http.js";
 import { createSingleFlight } from "../practice/singleFlight.js";
 import type {
+  AttemptEvidenceViewModel,
   AttemptResultViewModel,
   AutopsyResponse,
   AutopsyViewModel,
@@ -155,6 +156,17 @@ function readAttemptResult(body: unknown, hasAutopsy: boolean, allowed: readonly
   };
 }
 
+function readAttemptEvidence(body: unknown): AttemptEvidenceViewModel {
+  const value = asObject(body);
+  const strings = (x: unknown): string[] | null => (Array.isArray(x) && x.every((entry) => typeof entry === "string") ? (x as string[]) : null);
+  const observations = strings(value.observations);
+  const notRecorded = strings(value.notRecorded);
+  if (typeof value.attemptId !== "string" || observations === null || notRecorded === null) {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: "The attempt evidence response was malformed." });
+  }
+  return { attemptId: value.attemptId, observations, notRecorded };
+}
+
 function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { summary: string; supportingEvidence: string[] } | null } {
   const value = asObject(body);
   const pending = value.pending === true;
@@ -257,6 +269,10 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
       const parsed = readAttemptResult(body, false, ["submitted", "skipped"]);
       // A skipped attempt has nothing to diagnose; only a graded one can have a pending autopsy.
       return parsed.status === "skipped" ? parsed : { ...parsed, hasAutopsy: await isAutopsyPending(attemptId) };
+    },
+
+    async getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel> {
+      return readAttemptEvidence(await get(`/v1/attempts/${encodeURIComponent(attemptId)}/evidence`));
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

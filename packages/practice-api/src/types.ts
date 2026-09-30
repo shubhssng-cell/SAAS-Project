@@ -95,6 +95,31 @@ export interface AttemptResultView {
 }
 
 /**
+ * Phase 4 Unit 1 -- what the system OBSERVED about one finalized attempt, for the student. Observation only: no diagnosis, no cause,
+ * no label, no answer key (the verdict is the only answer-related fact and the result already shows it), nothing inferred about the
+ * student. `observations` are fixed, hand-authored sentences built from the numbers in `facts`/`history`; `notRecorded` says plainly
+ * what this practice flow does not record, instead of guessing it. Only available AFTER the attempt is finalized.
+ */
+export interface AttemptEvidenceView {
+  attemptId: string;
+  questionId: string;
+  status: AttemptResultStatus;
+  observations: string[];
+  facts: {
+    verdict: "correct" | "incorrect" | "not_graded";
+    selectedAnswer: string | null;
+    elapsedSeconds: number | null;
+    expectedSeconds: number | null;
+    timeRatio: number | null;
+    /** `null` = unknown (see `notRecorded`), never 0 by default. */
+    answerChangeCount: number | null;
+  };
+  context: { conceptName: string; patternFamilyName: string; difficultyTier: string } | null;
+  history: { priorAttempts: number; onConcept: { attempts: number; correct: number; incorrect: number; skipped: number } } | null;
+  notRecorded: string[];
+}
+
+/**
  * Never carries `modelConfidence` (D-038: the AI model's own confidence,
  * never to be exposed or reinterpreted as anything student-facing), never
  * carries raw `behaviorSignals`/`historicalSignals`/`candidateErrorEvidence`

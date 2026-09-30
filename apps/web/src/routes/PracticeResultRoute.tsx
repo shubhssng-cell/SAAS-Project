@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isSessionExpiredError, type AttemptResultViewModel } from "../adapter/index.js";
+import { isSessionExpiredError, type AttemptEvidenceViewModel, type AttemptResultViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { ResultScreen } from "../components/ResultScreen.js";
 import { Button, LoadingState, Screen } from "../design/index.js";
@@ -62,6 +62,27 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
     };
   }, [adapter, attemptId, inSession, questionId, retryCount, setLastResult]);
 
+  // Phase 4 Unit 1: the observation-only evidence for THIS finalized attempt, fetched from the server after the result is showing.
+  // It is supplementary: a failure (or no evidence) simply shows nothing -- it never blocks, delays or changes the result or Continue.
+  const [evidence, setEvidence] = useState<AttemptEvidenceViewModel | null>(null);
+  const loadedAttemptId = state.status === "loaded" ? state.result.attemptId : null;
+  useEffect(() => {
+    setEvidence(null);
+    if (!loadedAttemptId) return;
+    let cancelled = false;
+    adapter
+      .getAttemptEvidence(loadedAttemptId)
+      .then((value) => {
+        if (!cancelled && value.attemptId === loadedAttemptId) setEvidence(value);
+      })
+      .catch(() => {
+        // evidence is optional
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, loadedAttemptId]);
+
   if (!inSession && !attemptId) {
     return (
       <Screen eyebrow="No result to show" headline="This result isn't available anymore." subtext="Answer the question again to see a result.">
@@ -84,5 +105,5 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
     );
   }
 
-  return <ResultScreen result={state.result} onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
+  return <ResultScreen result={state.result} evidence={evidence} onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
 }

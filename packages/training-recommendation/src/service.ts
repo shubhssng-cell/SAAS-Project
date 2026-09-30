@@ -1,4 +1,6 @@
 import { orchestrateNextTrainingAction, type TrainingOrchestrationResult } from "@ipmat/training-orchestration";
+import type { ObservationEvidence } from "@ipmat/autopsy";
+import { composeAttemptObservationEvidence } from "./attemptEvidence.js";
 import { composeTrainingOrchestrationInput } from "./compose.js";
 import type { TrainingRecommendationDependencies, TrainingRecommendationRequest } from "./types.js";
 
@@ -22,5 +24,13 @@ export class TrainingRecommendationService {
   async recommendNextTrainingAction(request: TrainingRecommendationRequest): Promise<TrainingOrchestrationResult> {
     const input = await composeTrainingOrchestrationInput(this.deps, request);
     return orchestrateNextTrainingAction(input);
+  }
+
+  /**
+   * Phase 4 Unit 1 -- the observation-only evidence for ONE finalized attempt (see `composeAttemptObservationEvidence`). Read-only,
+   * ownership-verified, `null` when the attempt is not one of this student's finalized attempts.
+   */
+  async getAttemptObservationEvidence(request: TrainingRecommendationRequest & { attemptId: string }): Promise<ObservationEvidence | null> {
+    return composeAttemptObservationEvidence(this.deps, request);
   }
 }

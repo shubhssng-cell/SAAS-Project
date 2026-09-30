@@ -132,6 +132,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/v1\/attempts\/([^/]+)\/evidence$/,
+    handler: async (service, claim, body, query, params) => service.getAttemptEvidence(claim, { attemptId: params.attemptId })
+  },
+  {
+    method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/autopsy$/,
     handler: async (service, claim, body, query, params) => service.getAutopsyForConfirmation(claim, { attemptId: params.attemptId })
   }
