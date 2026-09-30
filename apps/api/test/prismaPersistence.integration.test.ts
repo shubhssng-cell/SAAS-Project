@@ -298,19 +298,19 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
       const question = started.json.question as { options: string[]; prompt: string };
       expect(question.prompt.length).toBeGreaterThan(20);
       const attemptId = started.json.attemptId as string;
-      if (round === 1) {
-        const skipped = await call(a, "POST", `/v1/attempts/${attemptId}/skip`, s.cookie, { questionId });
-        expect(skipped.json).toMatchObject({ status: "skipped", correctAnswer: null });
-      } else {
-        const submitted = await call(a, "POST", `/v1/attempts/${attemptId}/submit`, s.cookie, { questionId, chosenAnswer: question.options[0] });
-        expect(submitted.json).toMatchObject({ status: "submitted" });
-        expect((submitted.json.solutionSteps as string[]).length).toBeGreaterThan(0);
-      }
+      // Phase 3.1 note: this Unit 8 test practices with CORRECT, on-pace answers. A wrong answer or a skip is now (by design)
+      // reacted to by the first adaptive layer -- e.g. "a related question that isn't harder" -- so the coverage-first tour of the
+      // whole set is only guaranteed while answers are correct. The adaptive reactions have their own PHASE 3.1 tests below.
+      const canonical = await a.prisma.question.findUniqueOrThrow({ where: { id: questionId } });
+      const submitted = await call(a, "POST", `/v1/attempts/${attemptId}/submit`, s.cookie, { questionId, chosenAnswer: canonical.correctAnswer });
+      expect(submitted.json).toMatchObject({ status: "submitted", isCorrect: true });
+      expect((submitted.json.solutionSteps as string[]).length).toBeGreaterThan(0);
+      expect(question.options).toContain(canonical.correctAnswer);
     }
     // The real recommender, on real Prisma readers, walked through every published question before repeating.
     expect(new Set(seen).size).toBe(total);
     const attempts = await a.prisma.attempt.findMany({ where: { studentId: s.studentId }, orderBy: { startedAt: "asc" } });
-    expect(attempts.map((x) => x.status)).toEqual(total >= 2 ? ["submitted", "skipped", ...Array(total - 2).fill("submitted")] : ["submitted"]);
+    expect(attempts.map((x) => x.status)).toEqual(Array(total).fill("submitted"));
   });
 
   it("UNIT 8: recommendation continuity survives a restart -- a fresh instance recommends from persisted history, not from scratch", async () => {
@@ -318,21 +318,151 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     const first = (await call(a, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
     const start1 = await call(a, "POST", "/v1/attempts", s.cookie, { questionId: first });
     const att1 = start1.json.attemptId as string;
-    const firstOption = (start1.json.question as { options: string[] }).options[0]!; // a REAL option (an invalid one is refused and leaves the attempt open)
-    expect((await call(a, "POST", `/v1/attempts/${att1}/submit`, s.cookie, { questionId: first, chosenAnswer: firstOption })).status).toBe(200);
+    // Correct answers (see the Phase 3.1 note in the test above): with a wrong answer or a skip the adaptive layer, by design, may
+    // legitimately steer to an already-seen question; coverage continuity is what a correct, on-pace student gets.
+    const correctOf = async (id: string) => (await a.prisma.question.findUniqueOrThrow({ where: { id } })).correctAnswer;
+    expect((await call(a, "POST", `/v1/attempts/${att1}/submit`, s.cookie, { questionId: first, chosenAnswer: await correctOf(first) })).status).toBe(200);
     const second = (await call(a, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
     expect(second).not.toBe(first);
     const att2 = (await call(a, "POST", "/v1/attempts", s.cookie, { questionId: second })).json.attemptId as string;
-    await call(a, "POST", `/v1/attempts/${att2}/skip`, s.cookie, { questionId: second });
+    expect((await call(a, "POST", `/v1/attempts/${att2}/submit`, s.cookie, { questionId: second, chosenAnswer: await correctOf(second) })).status).toBe(200);
 
     const restarted = await startInstance(); // brand-new client + services: nothing but the database carries over
     try {
       const third = (await call(restarted, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
       expect([first, second]).not.toContain(third); // it knows both are already done
       expect((await call(restarted, "GET", `/v1/attempts/${att1}/result`, s.cookie)).json).toMatchObject({ status: "submitted" });
-      expect((await call(restarted, "GET", `/v1/attempts/${att2}/result`, s.cookie)).json).toMatchObject({ status: "skipped" });
+      expect((await call(restarted, "GET", `/v1/attempts/${att2}/result`, s.cookie)).json).toMatchObject({ status: "submitted", isCorrect: true });
     } finally {
       await restarted.close();
+    }
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3.1 -- the FIRST adaptive layer, on the real Prisma readers + real Postgres. The next
+  // recommendation reacts to the student's most recent PERSISTED finalized attempt.
+  // ---------------------------------------------------------------------------------------------
+
+  async function familyIds(): Promise<{ point: string; successive: string; reverse: string; expected: Record<string, number> }> {
+    const rows = await a.prisma.question.findMany({ where: { validationState: "published" }, include: { patternTaxonomyCell: { include: { patternFamily: true } } } });
+    const idOf = (family: string) => rows.find((r) => r.patternTaxonomyCell.patternFamily.name === family)!.id;
+    return {
+      point: idOf("Percentage Point vs Percentage Change"),
+      successive: idOf("Successive Percentage Change"),
+      reverse: idOf("Reverse Percentage"),
+      expected: Object.fromEntries(rows.map((r) => [r.id, r.expectedTimeSeconds]))
+    };
+  }
+
+  async function practiceOnce(instance: Instance, cookie: string, questionId: string, outcome: "correct" | "wrong" | "skip", startedSecondsAgo?: number): Promise<string> {
+    const started = await call(instance, "POST", "/v1/attempts", cookie, { questionId });
+    const attemptId = started.json.attemptId as string;
+    if (startedSecondsAgo !== undefined) {
+      // Test-only: move the PERSISTED start time back, so the server-derived elapsed time (finalizedAt - startedAt) is genuinely long.
+      await instance.prisma.attempt.update({ where: { id: attemptId }, data: { startedAt: new Date(Date.now() - startedSecondsAgo * 1000) } });
+    }
+    if (outcome === "skip") {
+      await call(instance, "POST", `/v1/attempts/${attemptId}/skip`, cookie, { questionId });
+      return attemptId;
+    }
+    const q = await instance.prisma.question.findUniqueOrThrow({ where: { id: questionId } });
+    const options = q.options as string[];
+    const chosenAnswer = outcome === "correct" ? q.correctAnswer : options.find((o) => o !== q.correctAnswer)!;
+    const submitted = await call(instance, "POST", `/v1/attempts/${attemptId}/submit`, cookie, { questionId, chosenAnswer });
+    expect(submitted.status).toBe(200);
+    return attemptId;
+  }
+
+  it("PHASE 3.1: no prior performance -> a valid published question with the ordinary coverage copy (adaptive layer fails safe)", async () => {
+    const s = await newStudent(a, "ad-cold");
+    const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+    const ids = await familyIds();
+    expect([ids.point, ids.successive, ids.reverse]).toContain(rec.json.questionId);
+    expect(rec.json.modeLabel).toBe("Coverage");
+  });
+
+  it("PHASE 3.1: INCORRECT on an advanced question -> the related, easier persisted question; and a restarted instance makes the SAME adaptive choice from persisted history", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "ad-incorrect");
+    await practiceOnce(a, s.cookie, ids.successive, "wrong");
+    const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+    expect(rec.json).toMatchObject({ questionId: ids.point, modeLabel: "After an incorrect answer" });
+    expect(rec.json.explanation).toMatch(/last answer was incorrect/);
+    expect(JSON.stringify(rec.json)).not.toMatch(/correctAnswer|solutionSteps|groundTruth|recent_|primaryReason/);
+
+    const restarted = await startInstance(); // nothing but the database carries over
+    try {
+      const again = await call(restarted, "POST", "/v1/recommendation", s.cookie);
+      expect(again.json).toEqual(rec.json);
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("PHASE 3.1: SKIP -> a non-harder question with skip-specific copy, read from the persisted skipped attempt", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "ad-skip");
+    const attemptId = await practiceOnce(a, s.cookie, ids.successive, "skip");
+    expect((await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId } })).status).toBe("skipped");
+    const rec = await call(b, "POST", "/v1/recommendation", s.cookie); // a DIFFERENT instance: only the database is shared
+    expect(rec.json).toMatchObject({ questionId: ids.point, modeLabel: "After a skipped question" });
+  });
+
+  it("PHASE 3.1: SLOW correct answer -- elapsed time from the persisted timestamps is consumed -> stays at the same tier (the other advanced question)", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "ad-slow");
+    const attemptId = await practiceOnce(a, s.cookie, ids.successive, "correct", 200); // expected 75s, ~200s elapsed
+    const row = await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId } });
+    expect(row.status).toBe("submitted");
+    expect(row.isCorrect).toBe(true);
+    expect(row.timeSpentSeconds!).toBeGreaterThanOrEqual(190);
+    const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+    expect(rec.json).toMatchObject({ questionId: ids.reverse, modeLabel: "Steady pace" });
+  });
+
+  it("PHASE 3.1: the same correct answer ON PACE is not treated as slow, and a correct answer is not treated as a problem", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "ad-correct");
+    await practiceOnce(a, s.cookie, ids.point, "correct");
+    const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+    expect(rec.json.questionId).not.toBe(ids.point);
+    expect(String(rec.json.modeLabel)).not.toMatch(/After an incorrect|skipped|Steady pace/);
+  });
+
+  it("PHASE 3.1: reacts to the MOST RECENT attempt only -- a wrong answer followed by a correct on-pace one no longer triggers the incorrect rule", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "ad-latest");
+    await practiceOnce(a, s.cookie, ids.successive, "wrong");
+    await new Promise((r) => setTimeout(r, 1100)); // distinct finalizedAt
+    await practiceOnce(a, s.cookie, ids.point, "correct");
+    const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+    expect(rec.json.modeLabel).not.toBe("After an incorrect answer");
+  });
+
+  it("PHASE 3.1: another student's history never influences this student", async () => {
+    const ids = await familyIds();
+    const other = await newStudent(a, "ad-iso-a");
+    const me = await newStudent(b, "ad-iso-b");
+    await practiceOnce(a, other.cookie, ids.successive, "wrong");
+    expect((await call(b, "POST", "/v1/recommendation", me.cookie)).json.modeLabel).toBe("Coverage");
+  });
+
+  it("PHASE 3.1: published-only still holds -- an unpublished question that would be the best incorrect-answer match is never recommended", async () => {
+    const ids = await familyIds();
+    const original = await a.prisma.question.findUniqueOrThrow({ where: { id: ids.point } });
+    const draftId = randomUUID();
+    const { id: _id, provenanceId: _prov, ...rest } = original;
+    void _id;
+    void _prov;
+    await a.prisma.question.create({ data: { ...rest, id: draftId, validationState: "human_reviewed", provenanceId: null } as never });
+    try {
+      const s = await newStudent(a, "ad-draft");
+      await practiceOnce(a, s.cookie, ids.successive, "wrong");
+      const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+      expect(rec.json.questionId).toBe(ids.point);
+      expect(rec.json.questionId).not.toBe(draftId);
+    } finally {
+      await a.prisma.question.delete({ where: { id: draftId } });
     }
   });
 

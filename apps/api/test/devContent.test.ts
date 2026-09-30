@@ -270,3 +270,72 @@ describe("skip through the real HTTP path (Product Phase 2 Unit 6)", () => {
     expect((await request("POST", "/v1/attempts", { questionId }, a)).json.attemptId).toBe(attemptId); // still open for its owner
   });
 });
+
+describe("first adaptive layer through the real HTTP path (Phase 3.1)", () => {
+  const training = () => (seed.trainingQuestions.get(DEV_EXAM_ID) ?? []).map((r) => r.question);
+  const byFamily = (family: string) => training().find((q) => q.patternFamilyName === family)!;
+  const canonicalOf = (id: string) => seed.questions.find((q) => q.id === id)!;
+  const wrongOptionFor = (id: string) => canonicalOf(id).options!.find((o) => o !== canonicalOf(id).correctAnswer)!;
+
+  async function practice(cookie: string, questionId: string, outcome: "correct" | "wrong" | "skip") {
+    const started = await request("POST", "/v1/attempts", { questionId }, cookie);
+    const attemptId = started.json.attemptId as string;
+    if (outcome === "skip") return request("POST", `/v1/attempts/${attemptId}/skip`, { questionId }, cookie);
+    const chosenAnswer = outcome === "correct" ? canonicalOf(questionId).correctAnswer : wrongOptionFor(questionId);
+    return request("POST", `/v1/attempts/${attemptId}/submit`, { questionId, chosenAnswer }, cookie);
+  }
+
+  it("the dev pool is what the rules are exercised on: one standard and two advanced Percentages questions", () => {
+    expect(training().map((q) => q.difficultyTier).sort()).toEqual(["advanced", "advanced", "standard"]);
+  });
+
+  it("no prior performance: a valid, published question with the ordinary coverage copy", async () => {
+    const cookie = await signupOnboardEnroll("adaptive-cold@example.com");
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    expect(rec.status).toBe(200);
+    expect(training().map((q) => q.questionId)).toContain(rec.json.questionId);
+    expect(rec.json.modeLabel).toBe("Coverage");
+  });
+
+  it("INCORRECT on an advanced question -> the next recommendation is the related, easier question, with observation-only copy", async () => {
+    const cookie = await signupOnboardEnroll("adaptive-incorrect@example.com");
+    const missed = byFamily("Successive Percentage Change");
+    await practice(cookie, missed.questionId, "wrong");
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    expect(rec.json.modeLabel).toBe("After an incorrect answer");
+    expect(rec.json.questionId).toBe(byFamily("Percentage Point vs Percentage Change").questionId); // the standard-tier question
+    expect(rec.json.questionId).not.toBe(missed.questionId);
+    expect(rec.json.explanation).toMatch(/last answer was incorrect/);
+    expect(JSON.stringify(rec.json)).not.toMatch(/correctAnswer|solutionSteps|groundTruth|recent_|primaryReason/);
+  });
+
+  it("SKIP -> a different, non-harder question with skip-specific copy (not the incorrect-answer path)", async () => {
+    const cookie = await signupOnboardEnroll("adaptive-skip@example.com");
+    const skipped = byFamily("Successive Percentage Change");
+    const result = await practice(cookie, skipped.questionId, "skip");
+    expect(result.json.status).toBe("skipped");
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    expect(rec.json.modeLabel).toBe("After a skipped question");
+    expect(rec.json.questionId).toBe(byFamily("Percentage Point vs Percentage Change").questionId);
+    expect(rec.json.explanation).toMatch(/skipped your last question/);
+  });
+
+  it("CORRECT and on pace is not treated as a problem: ordinary coverage copy, and the answered question is not repeated", async () => {
+    const cookie = await signupOnboardEnroll("adaptive-correct@example.com");
+    const done = byFamily("Percentage Point vs Percentage Change");
+    const result = await practice(cookie, done.questionId, "correct");
+    expect(result.json).toMatchObject({ status: "submitted", isCorrect: true });
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    expect(rec.json.questionId).not.toBe(done.questionId);
+    expect(String(rec.json.modeLabel)).not.toMatch(/After an incorrect|skipped/);
+    expect(JSON.stringify(rec.json)).not.toMatch(/weak|struggl|confiden/i);
+  });
+
+  it("another student's performance never affects this student's recommendation", async () => {
+    const a = await signupOnboardEnroll("adaptive-iso-a@example.com");
+    const b = await signupOnboardEnroll("adaptive-iso-b@example.com");
+    await practice(a, byFamily("Successive Percentage Change").questionId, "wrong");
+    const recB = await request("POST", "/v1/recommendation", undefined, b);
+    expect(recB.json.modeLabel).toBe("Coverage");
+  });
+});

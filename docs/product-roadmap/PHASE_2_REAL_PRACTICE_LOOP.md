@@ -16,7 +16,7 @@ From the master roadmap: *a real student can practice real published questions e
 | 6 | Practice lifecycle completeness (Skip) | **COMPLETE** (below) |
 | 7 | Real database / persistence foundation | **COMPLETE** (below) |
 | 8 | Persisted practice content + real student flow (real Postgres) | **COMPLETE** (below) |
-| 9+ | Not defined here yet — **NOT STARTED** | NOT STARTED |
+| — | Phase 2 units end at 8. The running unit count continues in [PHASE_3_ADAPTIVE_PRACTICE.md](PHASE_3_ADAPTIVE_PRACTICE.md) (Unit 9 = Phase 3.1, the first adaptive layer). | see that file |
 
 ## Unit 1 — Real published practice content foundation
 

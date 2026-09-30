@@ -1,5 +1,6 @@
 import { MASTERY_CONSTANTS } from "@ipmat/mastery";
 import { computeExposureCounts, type ExposureCounts } from "./exposure.js";
+import { deriveRecentEvidence, recentEvidenceReasonFor } from "./recentEvidence.js";
 import {
   ADAPTIVE_SELECTION_CONSTANTS,
   DIFFICULTY_TIER_ORDER,
@@ -7,6 +8,7 @@ import {
   type DifficultyTier,
   type MasteryAttemptRecord,
   type MasteryStateResult,
+  type RecentEvidence,
   type RepairPlan,
   type TrainingNeedReasonCode
 } from "./types.js";
@@ -21,6 +23,8 @@ export interface TrainingNeedContext {
   masteryByConcept: Map<string, MasteryStateResult>;
   exposure: ExposureCounts;
   activeRepairPlans: RepairPlan[];
+  /** Phase 3.1: the latest finalized attempt's observable outcome, or `null` (cold start). */
+  recentEvidence: RecentEvidence | null;
 }
 
 export function buildTrainingNeedContext(input: {
@@ -32,7 +36,8 @@ export function buildTrainingNeedContext(input: {
   return {
     masteryByConcept: new Map(input.masteryByConcept.map((m) => [m.conceptName, m])),
     exposure: computeExposureCounts(input.studentId, input.attemptRecords),
-    activeRepairPlans: input.activeRepairPlans
+    activeRepairPlans: input.activeRepairPlans,
+    recentEvidence: deriveRecentEvidence(input.studentId, input.attemptRecords)
   };
 }
 
@@ -110,6 +115,9 @@ export function determineSatisfiedReasons(candidate: AdaptiveCandidateQuestion, 
   if (mastery?.measures.speedRatio !== null && mastery?.measures.speedRatio !== undefined && mastery.measures.speedRatio >= ADAPTIVE_SELECTION_CONSTANTS.SPEED_WEAKNESS_RATIO) {
     reasons.push("speed_weakness");
   }
+
+  const recentReason = recentEvidenceReasonFor(candidate, ctx.recentEvidence);
+  if (recentReason !== null) reasons.push(recentReason);
 
   const attemptedCells = mastery?.detail.coverage.taxonomyCellsEncountered ?? [];
   if (!attemptedCells.includes(q.patternTaxonomyCellId)) {

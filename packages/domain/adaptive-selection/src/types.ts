@@ -2,6 +2,9 @@ import type { AutopsyQuestionContext, RepairPlan } from "@ipmat/autopsy";
 import type { MasteryAttemptRecord, MasteryStateResult, PatternTaxonomyCellData } from "@ipmat/mastery";
 import type { PrepPhaseResult } from "@ipmat/prep-phase";
 import type { DifficultyTier, NoveltyLevel, ValidationState } from "@ipmat/question-engine";
+import type { RecentEvidence } from "./recentEvidence.js";
+
+export type { RecentEvidence };
 
 export type {
   AutopsyQuestionContext,
@@ -109,11 +112,22 @@ export const TRAINING_NEED_REASON_CODES = [
   "prerequisite_weakness",
   "accuracy_weakness",
   "speed_weakness",
+  // Phase 3.1 (first adaptive layer): reactions to the student's single most recent finalized attempt -- see recentEvidence.ts.
+  // An incorrect answer, a skip, or a slow correct answer are immediate signals: these three rank BELOW the multi-attempt
+  // weakness reasons above (which need a minimum number of observations) and ABOVE the exposure/coverage reasons below.
+  // At most ONE recent_* reason can be satisfied for a given student state.
+  "recent_incorrect",
+  "recent_skip",
+  "recent_slow",
   "coverage_gap",
   "underexposure",
   "pressure_gap",
   "novelty_gap",
-  "difficulty_progression"
+  "difficulty_progression",
+  // A correct, on-pace answer is NOT a need: it never overrides an exposure/coverage/novelty/pressure gap or the mastery-driven
+  // progression reason. It is the lowest NAMED reason -- it only decides when nothing else stands out, steering toward a step
+  // up (never a repeat) instead of falling through to the blind fallback.
+  "recent_correct_on_pace"
 ] as const;
 export type TrainingNeedReasonCode = (typeof TRAINING_NEED_REASON_CODES)[number];
 
@@ -159,6 +173,8 @@ export interface AdaptiveSelectionResult {
   candidatesConsidered: number;
   excludedMalformedCount: number;
   excludedUnpublishedCount: number;
+  /** Phase 3.1: the observable evidence from the student's most recent finalized attempt that the recent-evidence reasons reacted to -- `null` when there is none (cold start), whether or not it decided this pick. */
+  recentEvidence: RecentEvidence | null;
 }
 
 export type AdaptiveNoSelectionReason = "no_candidates_supplied" | "no_published_candidates" | "no_structurally_valid_candidates";

@@ -51,6 +51,34 @@ const PROVIDER_COPY: Record<string, { modeLabel: string; headline: string; expla
   }
 };
 
+/**
+ * Student-facing wording for the Phase 3.1 recent-evidence reasons (the FIRST adaptive layer -- deterministic rules over the
+ * last attempt's observable outcome, not AI, not a diagnosis). Each line states an observation and what the question is
+ * relative to it; none says why the student got it wrong or what they are like.
+ */
+const RECENT_EVIDENCE_COPY: Partial<Record<string, { modeLabel: string; headline: string; explanation: string }>> = {
+  recent_incorrect: {
+    modeLabel: "After an incorrect answer",
+    headline: "Try a related question",
+    explanation: "Your last answer was incorrect, so here's a related question that isn't harder."
+  },
+  recent_skip: {
+    modeLabel: "After a skipped question",
+    headline: "Try a question that isn't harder",
+    explanation: "You skipped your last question, so here's one that isn't harder."
+  },
+  recent_slow: {
+    modeLabel: "Steady pace",
+    headline: "Stay at this level",
+    explanation: "Your last answer was correct but took longer than expected, so here's another at the same level before moving up."
+  },
+  recent_correct_on_pace: {
+    modeLabel: "Next step",
+    headline: "Move on a step",
+    explanation: "Your last answer was correct within the expected time, so here's one that isn't easier."
+  }
+};
+
 export function toRecommendationView(result: TrainingOrchestrationResult): RecommendationView {
   if (result.status === "no_action") {
     return { questionId: null, modeLabel: "Up to date", headline: "You're all caught up", explanation: "Nothing urgent right now. Keep practicing to build up more evidence." };
@@ -76,6 +104,10 @@ export function toRecommendationView(result: TrainingOrchestrationResult): Recom
   }
 
   // adaptive_practice
+  // Phase 3.1: when the pick was decided by the student's most recent attempt, say so -- in fixed copy that states only what
+  // was observed ("your last answer was incorrect"), never a claim about the student. Anything else keeps the coverage copy.
+  const recentCopy = RECENT_EVIDENCE_COPY[result.providerResult.primaryReason];
+  if (recentCopy) return { questionId: result.question.questionId, ...recentCopy };
   return { questionId: result.question.questionId, modeLabel: "Coverage", headline: "Keep building your coverage", explanation: "This targets a part of the topic you haven't practiced much yet." };
 }
 

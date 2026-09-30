@@ -1,4 +1,5 @@
 import { validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
+import { compareByRecentPreference, explainRecentEvidence, RECENT_EVIDENCE_REASON_BY_SIGNAL } from "./recentEvidence.js";
 import { applyOveruseAvoidance, rankCandidates } from "./tieBreak.js";
 import { buildTrainingNeedContext, computeProgressionTargetTier, determineSatisfiedReasons } from "./trainingNeeds.js";
 import {
@@ -9,12 +10,19 @@ import {
   type AdaptiveSelectionOutcome,
   type AdaptiveSelectionResult,
   type DifficultyTier,
+  type RecentEvidence,
   type TrainingNeedReasonCode
 } from "./types.js";
 
-function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion): string {
+function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion, recentEvidence: RecentEvidence | null): string {
   const q = candidate.question;
   switch (reason) {
+    case "recent_incorrect":
+    case "recent_skip":
+    case "recent_slow":
+    case "recent_correct_on_pace":
+      // Only reachable when a candidate satisfied the reason, which requires recent evidence to exist.
+      return recentEvidence ? explainRecentEvidence(reason, candidate, recentEvidence) : `This question follows the student's most recent attempt.`;
     case "repair_priority":
       return `A confirmed diagnosis is actively targeting "${q.patternFamilyName}" in "${q.conceptName}" — this question directly addresses it.`;
     case "repeated_error":
@@ -171,8 +179,16 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     }
   }
 
-  const afterOveruseAvoidance = applyOveruseAvoidance(winningPool, ctx.exposure);
-  const ranked = rankCandidates(afterOveruseAvoidance, { exposure: ctx.exposure, progressionTargetTierByConcept });
+  // Phase 3.1: the question the student JUST attempted is not immediately re-served from any bucket -- unless it is the only
+  // candidate left (repeating is still better than returning nothing, the same rule overuse avoidance follows).
+  const justAttemptedId = ctx.recentEvidence?.question.questionId;
+  const withoutJustAttempted = justAttemptedId ? winningPool.filter((c) => c.question.questionId !== justAttemptedId) : winningPool;
+  const afterOveruseAvoidance = applyOveruseAvoidance(withoutJustAttempted.length > 0 ? withoutJustAttempted : winningPool, ctx.exposure);
+  let ranked = rankCandidates(afterOveruseAvoidance, { exposure: ctx.exposure, progressionTargetTierByConcept });
+  if (ctx.recentEvidence !== null && (Object.values(RECENT_EVIDENCE_REASON_BY_SIGNAL) as TrainingNeedReasonCode[]).includes(winningReason)) {
+    // Phase 3.1: the recent-evidence rule's own preference comes first; the generic tie-breaks above keep ordering everything it leaves tied (stable sort).
+    ranked = [...ranked].sort(compareByRecentPreference(ctx.recentEvidence));
+  }
 
   const [winner, ...rest] = ranked;
   if (!winner) {
@@ -202,12 +218,13 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     allReasonsSatisfied: winnerReasons,
     targetConceptName: winner.question.conceptName,
     isFallback,
-    explanation: explainReason(winningReason, winner),
+    explanation: explainReason(winningReason, winner, ctx.recentEvidence),
     coverageGapAddressed: coverageGapFor(winningReason, winner),
     rankedAlternatives,
     candidatesConsidered: candidates.length,
     excludedMalformedCount,
-    excludedUnpublishedCount
+    excludedUnpublishedCount,
+    recentEvidence: ctx.recentEvidence
   };
 
   return { status: "selected", result };

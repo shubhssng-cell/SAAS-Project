@@ -64,7 +64,8 @@ describe("training-orchestration — regression guards: no hidden score/confiden
         rankedAlternatives: [],
         candidatesConsidered: 1,
         excludedMalformedCount: 0,
-        excludedUnpublishedCount: 0
+        excludedUnpublishedCount: 0,
+        recentEvidence: null
       },
       wasFallbackFromRepair: false,
       wasFallbackFromTrainingSystems: false,

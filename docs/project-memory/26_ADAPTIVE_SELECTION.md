@@ -15,6 +15,10 @@ repair_priority > repeated_error > prerequisite_weakness > accuracy_weakness > s
 
 A candidate is bucketed by the single **highest-priority** reason it satisfies; the first non-empty bucket, iterated in this order, wins. `difficulty_progression` is the deliberate universal fallback — if nothing satisfies any named reason, every eligible candidate is `difficulty_progression` and `isFallback: true`; a candidate that genuinely satisfies difficulty_progression's own predicate reports `isFallback: false`.
 
+## Phase 3.1 addendum (Unit 9): four recent-attempt reasons
+
+The vocabulary above is now **fourteen** codes: `recent_incorrect > recent_skip > recent_slow` sit between `speed_weakness` and `coverage_gap` (immediate reactions to the student's most recent finalized attempt; the multi-attempt measured reasons still outrank them), and `recent_correct_on_pace` is the lowest named reason (a correct on-pace answer is not a need). They use only outcome, verdict, server-derived time vs expected time (the existing 1.3 ratio), and Question DNA; `selectNextQuestion()` also never immediately re-serves the just-attempted question. Full rules, limits and evidence: [PHASE_3_ADAPTIVE_PRACTICE.md](../product-roadmap/PHASE_3_ADAPTIVE_PRACTICE.md); decision: D-065.
+
 ## Every signal reused from an existing, real contract — never a second model
 
 - Accuracy/speed/novelty/pressure weaknesses read `MasteryStateResult.measures` directly.
