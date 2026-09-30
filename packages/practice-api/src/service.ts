@@ -109,8 +109,10 @@ export class PracticeApiService {
         event: { type: "answer_selected", occurredAt: now, selectedAnswer: input.chosenAnswer }
       });
       const { attempt, correctAnswer } = await this.deps.practiceLoopService.submitAttempt({ attemptId: input.attemptId, claim: ownershipClaim, now });
-      const content = await this.deps.questionContentReader.findPublishedById(input.questionId);
-      return toAttemptResultView(attempt, correctAnswer, content?.expectedTimeSeconds ?? null);
+      // The attempt's OWN questionId (not the request's) decides which solution is revealed.
+      const content = await this.deps.questionContentReader.findPublishedById(attempt.questionId);
+      const canonical = await this.deps.questionReader.findById(attempt.questionId);
+      return toAttemptResultView(attempt, correctAnswer, content?.expectedTimeSeconds ?? null, { solutionSteps: canonical?.solutionSteps, content });
     } catch (error) {
       throw toPracticeApiError(error);
     }
@@ -160,16 +162,18 @@ export class PracticeApiService {
 
       let correctAnswer: string | null = null;
       let expectedTimeSeconds: number | null = null;
+      let reveal: Parameters<typeof toAttemptResultView>[3] = {};
       if (attempt.status === "submitted") {
         const canonical = await this.deps.questionReader.findById(attempt.questionId);
         correctAnswer = canonical?.correctAnswer ?? null;
         expectedTimeSeconds = canonical?.expectedTimeSeconds ?? null;
+        reveal = { solutionSteps: canonical?.solutionSteps, content: await this.deps.questionContentReader.findPublishedById(attempt.questionId) };
       } else {
         const content = await this.deps.questionContentReader.findPublishedById(attempt.questionId);
         expectedTimeSeconds = content?.expectedTimeSeconds ?? null;
       }
 
-      return toAttemptResultView(attempt, correctAnswer, expectedTimeSeconds);
+      return toAttemptResultView(attempt, correctAnswer, expectedTimeSeconds, reveal);
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);

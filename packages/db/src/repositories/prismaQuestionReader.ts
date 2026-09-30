@@ -21,11 +21,15 @@ export class PrismaQuestionReader implements QuestionReader {
 
     const options = Array.isArray(row.options) && row.options.length > 0 ? row.options.map(String) : null;
 
+    // `solution_steps` is a Json column: only an array of strings counts as a stored solution -- anything else is "none", never coerced.
+    const solutionSteps = Array.isArray(row.solutionSteps) && row.solutionSteps.length > 0 && row.solutionSteps.every((step) => typeof step === "string") ? (row.solutionSteps as string[]) : null;
+
     return {
       id: row.id,
       conceptId: row.conceptId,
       options,
       correctAnswer: row.correctAnswer,
+      solutionSteps,
       expectedTimeSeconds: row.expectedTimeSeconds,
       validationState: row.validationState
     };

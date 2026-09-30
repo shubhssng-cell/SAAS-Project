@@ -309,6 +309,13 @@ export interface CanonicalQuestion {
   /** Non-null only for multiple_choice, matching `AttemptQuestionContext.options` (`@ipmat/attempt`). */
   options: string[] | null;
   correctAnswer: string;
+  /**
+   * The authored worked solution, server-side only. Revealed to a student
+   * ONLY in the result of their own SUBMITTED attempt (`@ipmat/practice-api`),
+   * never before submission. Optional: absent/`null` means no solution is
+   * stored for this question -- never a reason to invent one.
+   */
+  solutionSteps?: string[] | null;
   expectedTimeSeconds: number;
   validationState: ValidationState;
 }

@@ -533,6 +533,10 @@ a.btn {
   color: var(--danger);
 }
 
+.result-question {
+  margin-bottom: var(--space-4, 16px);
+}
+
 .fact-row {
   display: flex;
   flex-wrap: wrap;

@@ -80,6 +80,10 @@ export interface AttemptResultView {
   correctAnswer: string | null;
   timeSpentSeconds: number | null;
   expectedTimeSeconds: number | null;
+  /** The authored worked solution -- present ONLY when `status === "submitted"` and one is stored; otherwise `[]` (never invented, never before submission). */
+  solutionSteps: string[];
+  /** The question as the student saw it (already student-visible content), for showing context beside the result. `null` unless `status === "submitted"` and the content could be read. */
+  question: { prompt: string; chapterName: string; conceptName: string } | null;
 }
 
 /**

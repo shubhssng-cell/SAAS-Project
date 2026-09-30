@@ -49,6 +49,7 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
   const confirmedRepairPlans: RepairPlan[] = [];
   const pendingAutopsy = new Map<string, { output: AutopsyOutput; hypothesis: AutopsyHypothesis }>();
   const inProgressByQuestion = new Map<string, AttemptState>();
+  const resultsByAttempt = new Map<string, AttemptResultViewModel>();
 
   function now(): string {
     return new Date().toISOString();
@@ -135,7 +136,7 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
         pendingAutopsy.set(attempt.id, { output, hypothesis });
       }
 
-      return {
+      const result: AttemptResultViewModel = {
         attemptId: attempt.id,
         questionId: input.questionId,
         isCorrect,
@@ -144,8 +145,17 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
         timeTakenSeconds: attempt.timeSpentSeconds ?? input.timeTakenSeconds,
         expectedTimeSeconds: q.attemptContext.expectedTimeSeconds ?? 60,
         solutionSteps: q.solutionSteps,
+        question: { prompt: q.prompt, chapterName: q.dna.chapterName, conceptName: q.dna.conceptName },
         hasAutopsy
       };
+      resultsByAttempt.set(attempt.id, result);
+      return result;
+    },
+
+    async getAttemptResult(attemptId: string): Promise<AttemptResultViewModel> {
+      const result = resultsByAttempt.get(attemptId);
+      if (!result) throw new Error(`No result for attempt "${attemptId}".`);
+      return result;
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

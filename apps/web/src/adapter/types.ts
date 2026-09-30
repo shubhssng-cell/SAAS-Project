@@ -47,7 +47,10 @@ export interface AttemptResultViewModel {
   correctAnswer: string;
   timeTakenSeconds: number;
   expectedTimeSeconds: number;
+  /** The authored worked solution from the server; `[]` when none is stored (the UI then offers no solution control -- nothing is invented). */
   solutionSteps: string[];
+  /** The question the student answered, as returned with the result (`null` if the server did not supply it). */
+  question: { prompt: string; chapterName: string; conceptName: string } | null;
   /** Whether an autopsy hypothesis was generated for this attempt (only ever true for an incorrect, diagnosable answer). */
   hasAutopsy: boolean;
 }
@@ -66,6 +69,8 @@ export interface TrainingRecommendationAdapter {
   getDashboard(): Promise<DashboardViewModel>;
   loadQuestion(questionId: string): Promise<QuestionViewModel>;
   submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel>;
+  /** Re-reads the result of an already-submitted attempt from the server (e.g. after a page refresh). Rejects when the result is unavailable. */
+  getAttemptResult(attemptId: string): Promise<AttemptResultViewModel>;
   getAutopsy(attemptId: string): Promise<AutopsyViewModel>;
   /** Applies the student's response to the pending hypothesis and returns the resulting recommendation — a confirmed hypothesis may (transparently, via the real domain layer) become a targeted repair recommendation. */
   respondToAutopsy(input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel>;

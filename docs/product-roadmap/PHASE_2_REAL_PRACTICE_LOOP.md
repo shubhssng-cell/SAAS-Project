@@ -10,7 +10,8 @@ From the master roadmap: *a real student can practice real published questions e
 |---|---|---|
 | 1 | Real published practice content foundation (dev/in-memory content path) | **COMPLETE** (this document) |
 | 2 | Real question → timer → answer → submit | **COMPLETE** (below) |
-| 3+ | Not defined here yet — result/explanation, next-question loop, persistence/recovery, real database — **NOT STARTED** | NOT STARTED |
+| 3 | Real submission → result → explanation | **COMPLETE** (below) |
+| 4+ | Not defined here yet — next-question loop, persistence/recovery, real database — **NOT STARTED** | NOT STARTED |
 
 ## Unit 1 — Real published practice content foundation
 
@@ -71,4 +72,38 @@ No API contract, adapter interface, backend, or dependency changed. No grading, 
 - Refreshing a question page still starts a fresh attempt (no recovery of an in-progress attempt) — a later unit.
 - The displayed timer restarts at page load, while the server's clock starts when the attempt is created; server time is authoritative.
 
-**Unit 3+ status: NOT STARTED.**
+## Unit 3 — Real submission → result → explanation
+
+**Objective.** After submitting a real question, the student sees a clear, student-safe result — correct/incorrect, their answer, the correct answer, the question, and the authored worked solution — all from the real API path. No next-question loop (Unit 4).
+
+**What already worked (inspected).** Submit → server-graded result (`isCorrect`, `correctAnswer`, server-derived time) → `ResultScreen` with a solution toggle, and `GET /v1/attempts/:id/result` already existed in `@ipmat/practice-api`/`apps/api` (ownership-checked, submitted-only answer key) but the web adapter never used it.
+
+**What was actually missing.**
+1. **No explanation data reached the student.** `AttemptResultView` had no solution field; the real adapter hard-coded `solutionSteps: []`, so the solution control never appeared. The authored steps already exist in the content model (`Question.solutionSteps`; the dev fixtures/demo carry them) but were not readable server-side.
+2. **No question context on the result** (a refreshed result would be a bare verdict).
+3. **Result lost on hard refresh** (Unit 2 limitation).
+
+**Implementation.**
+- `@ipmat/db`: `CanonicalQuestion` (the server-side, answer-key-bearing model) gained optional `solutionSteps`; `PrismaQuestionReader` maps the Json column, accepting only a non-empty array of strings (else `null` — never coerced). The student-facing `StudentQuestionRecord` is unchanged and still excludes solutions.
+- `@ipmat/practice-api`: `AttemptResultView` gained `solutionSteps: string[]` and `question: { prompt, chapterName, conceptName } | null`. Both are populated **only for `status === "submitted"`** (same rule as `correctAnswer`), in `submitAttempt()` and `getAttemptResult()`, resolved from the attempt's own `questionId`. `startAttempt()` exposes neither. A skip reveals none.
+- `apps/api/src/devContent.ts`: the dev canonical questions carry their authored `solutionSteps` (from the same fixtures/demo content — nothing written for this unit).
+- `apps/web`: adapter maps `solutionSteps`/`question`, validates that a result is renderable (ids, boolean verdict, both answers) and rejects otherwise; new `getAttemptResult(attemptId)` uses the existing endpoint. Submit now navigates to `/practice/:questionId/result?attempt=<id>` (new `practice/resultLocation.ts`); `PracticeResultRoute` shows the in-session result if it is that attempt, else fetches it by id, with loading, retry/back error, and expired-session states, and refuses a result whose question differs from the route's. `ResultScreen` shows the question and hides the solution control when there are no steps. The fixture adapter got the matching (test-only) fields.
+- Route shape unchanged (only a query parameter added), so this was a small fix rather than the route redesign the old comment feared. The attempt id in the URL is opaque and useless to anyone but the owner (server re-checks ownership; verified 403 for another student).
+- No grading, mastery, autopsy, adaptive or fixture-runtime logic entered `apps/web`; `createApiTrainingAdapter()` is still the only runtime adapter. No dependency changes.
+
+**Tests (new).** `packages/practice-api/test/resultReveal.test.ts` (6: revealed on submit and on re-read; absent from `startAttempt`; none for a skip; empty when none stored; attempt's own question decides), `packages/db/test/repositories/prismaQuestionReaderSolution.test.ts` (6 mapping cases), two new HTTP tests in `apps/api/test/devContent.test.ts` (solutions present in dev content; submit → graded result with solution + question, re-read equals submit response, another student gets 403 with nothing leaked, nothing leaked before submission), and `apps/web/test/practice/resultFlow.test.ts` (23: real `react-dom/server` renders of `ResultScreen` for correct/incorrect/with-solution/no-solution/no-question; result-URL helpers; adapter mapping, malformed/skipped/404/401/network failures; route boundary checks).
+
+**Validation.** apps/web 247/247 (was 224); full repository 1637/1637 across 169 files (was 1600); typecheck, build, lint and `git diff --check` clean.
+
+**Browser verification** (raw CDP / headless Edge, real `apps/api` + `apps/web`, Unit 1 dev content, fresh account): 15/15 checks. Signup → onboarding → enrollment → dashboard → Start Practice → question → picked an option → **Correct.** (answer shown, no redundant correct-answer row, question prompt shown) → "View solution" showed the 3 authored steps (`aria-expanded=true`) → **hard refresh** re-read the result via `GET /v1/attempts/:id/result` and showed the same verdict/answer → same question again with a wrong option → **Not quite.** with Your answer 5.5 and Correct answer 5 → unknown attempt id shows the student-safe "We couldn't load this result." with Try again / Back to dashboard and no ids/JSON → result URL with no attempt id shows "This result isn't available anymore." → clearing cookies then refreshing on the result URL redirected to `/login` with no result shown.
+
+**Known limitations.**
+- **Explanation = the stored worked solution only.** The model-written `explanation` field from the generation pipeline is not persisted anywhere (no column), so there is no separate "why" prose; nothing was invented or hardcoded.
+- A question with no stored solution shows the result without a solution control (covered by tests; every dev question has steps, so not seen in the browser).
+- The "unavailable result" and "network error" cases share one error screen (the transport layer maps every non-401 failure to one kind); the offline/timeout branch is unit-tested, not induced in the browser.
+- Dev StrictMode fires the result read twice on a refresh (idempotent GET; the attempt-start duplicate was fixed in Unit 2).
+- "Time taken" reflects the server's attempt clock, so scripted instant answers show 0s.
+- The Autopsy screen and the Continue button's next-question behavior are unchanged Phase 1 behavior — Unit 4+.
+- Still dev/in-memory content; Prisma readers (including the new solution mapping) are unit-tested against a fake client, never a live database.
+
+**Unit 4+ status: NOT STARTED.**

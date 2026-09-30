@@ -93,8 +93,30 @@ function readQuestion(body: unknown): QuestionViewModel {
   };
 }
 
+const MALFORMED_RESULT = "Something went wrong. Please try again.";
+
+/** A result is only renderable if the server said it was a graded, submitted attempt -- anything else (missing ids, no boolean verdict, a skip) is treated as malformed, never rendered as a guess. */
+function isRenderableResult(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.attemptId === "string" &&
+    value.attemptId !== "" &&
+    typeof value.questionId === "string" &&
+    typeof value.isCorrect === "boolean" &&
+    typeof value.chosenAnswer === "string" &&
+    typeof value.correctAnswer === "string"
+  );
+}
+
+function readQuestionContext(value: unknown): AttemptResultViewModel["question"] {
+  const q = asObject(value);
+  return typeof q.prompt === "string" && q.prompt !== "" ? { prompt: q.prompt, chapterName: typeof q.chapterName === "string" ? q.chapterName : "", conceptName: typeof q.conceptName === "string" ? q.conceptName : "" } : null;
+}
+
 function readAttemptResult(body: unknown, hasAutopsy: boolean): AttemptResultViewModel {
   const value = asObject(body);
+  if (!isRenderableResult(value)) {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: MALFORMED_RESULT });
+  }
   return {
     attemptId: typeof value.attemptId === "string" ? value.attemptId : "",
     questionId: typeof value.questionId === "string" ? value.questionId : "",
@@ -103,7 +125,8 @@ function readAttemptResult(body: unknown, hasAutopsy: boolean): AttemptResultVie
     correctAnswer: typeof value.correctAnswer === "string" ? value.correctAnswer : "",
     timeTakenSeconds: typeof value.timeSpentSeconds === "number" ? value.timeSpentSeconds : 0,
     expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60,
-    solutionSteps: [],
+    solutionSteps: Array.isArray(value.solutionSteps) ? value.solutionSteps.filter((step): step is string => typeof step === "string") : [],
+    question: readQuestionContext(value.question),
     hasAutopsy
   };
 }
@@ -159,14 +182,16 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     attemptIdByQuestion.delete(input.questionId);
     questionsPracticedSoFar += 1;
 
-    // Whether an autopsy hypothesis is actually pending is resolved via the
-    // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
-    // response, which carries no such signal) -- see this file's own doc comment.
-    const pending = await get(`/v1/attempts/${attemptId}/autopsy`)
+    return readAttemptResult(submitted, await isAutopsyPending(attemptId));
+  }
+
+  // Whether an autopsy hypothesis is actually pending is resolved via the
+  // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
+  // response, which carries no such signal) -- see this file's own doc comment.
+  async function isAutopsyPending(attemptId: string): Promise<boolean> {
+    return get(`/v1/attempts/${attemptId}/autopsy`)
       .then((body) => readPendingAutopsy(body).pending)
       .catch(() => false);
-
-    return readAttemptResult(submitted, pending);
   }
 
   return {
@@ -181,6 +206,11 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
 
     submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel> {
       return submitFlights.run(input.questionId, () => submitAttemptFor(input));
+    },
+
+    async getAttemptResult(attemptId: string): Promise<AttemptResultViewModel> {
+      const body = await get(`/v1/attempts/${encodeURIComponent(attemptId)}/result`);
+      return readAttemptResult(body, await isAutopsyPending(attemptId));
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

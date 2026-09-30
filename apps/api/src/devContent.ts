@@ -65,6 +65,7 @@ interface DevQuestion {
   answerFormat: "multiple_choice" | "numeric_entry";
   options: string[] | null;
   correctAnswer: string;
+  solutionSteps: string[];
 }
 
 function cellId(dna: DevQuestion["dna"]): string {
@@ -116,7 +117,8 @@ async function publishedFixtureQuestions(): Promise<DevQuestion[]> {
       body: candidate.stem,
       answerFormat: candidate.answerFormat,
       options: candidate.options,
-      correctAnswer: candidate.correctAnswer
+      correctAnswer: candidate.correctAnswer,
+      solutionSteps: candidate.solutionSteps
     });
   }
   return questions;
@@ -148,7 +150,8 @@ function demonstrationQuestion(): DevQuestion {
     body: content.body,
     answerFormat: "multiple_choice",
     options: content.options,
-    correctAnswer: content.correctAnswer
+    correctAnswer: content.correctAnswer,
+    solutionSteps: content.solutionSteps
   };
 }
 
@@ -184,6 +187,7 @@ export async function buildDevContentSeed(): Promise<DevContentSeed> {
       conceptId: DEV_CONCEPT_ID,
       options: q.options,
       correctAnswer: q.correctAnswer,
+      solutionSteps: q.solutionSteps,
       expectedTimeSeconds: q.dna.expectedTimeSeconds,
       validationState: "published"
     })),

@@ -3,6 +3,7 @@ import { isSessionExpiredError, type QuestionViewModel } from "../adapter/index.
 import { FailureScreen } from "../components/FailureScreen.js";
 import { QuestionPlayer } from "../components/QuestionPlayer.js";
 import { LoadingState } from "../design/index.js";
+import { resultPath } from "../practice/resultLocation.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
 
@@ -69,7 +70,7 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
     try {
       const result = await adapter.submitAnswer({ questionId, chosenAnswer, timeTakenSeconds });
       setLastResult(questionId, result);
-      navigate(`/practice/${questionId}/result`);
+      navigate(resultPath(questionId, result.attemptId));
     } catch (error) {
       // A dead session can never be fixed by resubmitting -- fall through to the same expired-session screen a failed load uses.
       if (isSessionExpiredError(error)) {

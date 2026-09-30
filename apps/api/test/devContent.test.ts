@@ -136,6 +136,38 @@ describe("dev content set -- through the real apps/api HTTP path", () => {
     expect(canonical.correctAnswer).toBeTruthy();
   });
 
+  it("every dev question carries an authored solution in the canonical store", () => {
+    for (const q of seed.questions) expect(q.solutionSteps?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("submit returns a server-graded result with solution + question context; the same result is re-readable by attempt id; nothing leaks before submission", async () => {
+    const cookie = await signupOnboardEnroll("devcontent-result@example.com");
+    const rec = await request("POST", "/v1/recommendation", undefined, cookie);
+    const questionId = rec.json.questionId as string;
+    const canonical = seed.questions.find((q) => q.id === questionId)!;
+
+    const started = await request("POST", "/v1/attempts", { questionId }, cookie);
+    const startedJson = JSON.stringify(started.json);
+    expect(startedJson).not.toContain("solutionSteps");
+    expect(startedJson).not.toContain(canonical.solutionSteps![0]!);
+    const attemptId = started.json.attemptId as string;
+
+    const wrong = canonical.options!.find((o) => o !== canonical.correctAnswer)!;
+    const submitted = await request("POST", `/v1/attempts/${attemptId}/submit`, { questionId, chosenAnswer: wrong }, cookie);
+    expect(submitted.status).toBe(200);
+    expect(submitted.json).toMatchObject({ status: "submitted", isCorrect: false, chosenAnswer: wrong, correctAnswer: canonical.correctAnswer });
+    expect(submitted.json.solutionSteps).toEqual(canonical.solutionSteps);
+    expect((submitted.json.question as { prompt: string }).prompt).toBe(seed.questionContent.find((q) => q.id === questionId)!.prompt);
+
+    const reread = await request("GET", `/v1/attempts/${attemptId}/result`, undefined, cookie);
+    expect(reread.json).toEqual(submitted.json);
+
+    const otherCookie = await signupOnboardEnroll("devcontent-result-other@example.com");
+    const stolen = await request("GET", `/v1/attempts/${attemptId}/result`, undefined, otherCookie);
+    expect(stolen.status).toBe(403);
+    expect(JSON.stringify(stolen.json)).not.toContain("solutionSteps");
+  });
+
   it("an unseeded wiring is still genuinely empty (the default is unchanged)", async () => {
     const empty = createServer(createInMemoryDependencies());
     await new Promise<void>((resolve) => empty.listen(0, resolve));

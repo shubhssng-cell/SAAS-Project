@@ -98,7 +98,12 @@ export function toStudentQuestionView(record: StudentQuestionRecord): StudentQue
  * (mirrors `@ipmat/attempt`'s own "a skip is neither correct nor
  * incorrect" rule).
  */
-export function toAttemptResultView(attempt: AttemptState, correctAnswer: string | null, expectedTimeSeconds: number | null): AttemptResultView {
+export function toAttemptResultView(
+  attempt: AttemptState,
+  correctAnswer: string | null,
+  expectedTimeSeconds: number | null,
+  reveal: { solutionSteps?: string[] | null; content?: Pick<StudentQuestionRecord, "prompt" | "chapterName" | "conceptName"> | null } = {}
+): AttemptResultView {
   const status = attempt.status as AttemptResultStatus;
   return {
     attemptId: attempt.id,
@@ -108,7 +113,10 @@ export function toAttemptResultView(attempt: AttemptState, correctAnswer: string
     chosenAnswer: attempt.chosenAnswer,
     correctAnswer: status === "submitted" ? correctAnswer : null,
     timeSpentSeconds: attempt.timeSpentSeconds,
-    expectedTimeSeconds
+    expectedTimeSeconds,
+    // Post-submission material only: a skip/abandon is never shown a solution or question, same rule as `correctAnswer`.
+    solutionSteps: status === "submitted" ? [...(reveal.solutionSteps ?? [])] : [],
+    question: status === "submitted" && reveal.content ? { prompt: reveal.content.prompt, chapterName: reveal.content.chapterName, conceptName: reveal.content.conceptName } : null
   };
 }
 
