@@ -47,6 +47,8 @@ import type {
  *   adapter's own `if (!pending) return computeRecommendation();` fallback.
  */
 
+const MALFORMED_RESULT = "Something went wrong. Please try again.";
+
 class PracticeApiRequestError extends Error {
   readonly failure: AuthFailure;
   constructor(failure: AuthFailure) {
@@ -70,8 +72,17 @@ function asObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+/**
+ * The server always answers `/v1/recommendation` with an object whose `questionId` is a string (a
+ * question to practice) or `null` (genuinely nothing to recommend). Anything else -- a non-object
+ * body, a missing/odd `questionId` -- is a malformed response and is an ERROR, never quietly read
+ * as "nothing available" (Product Phase 2 Unit 4).
+ */
 function readRecommendation(body: unknown): RecommendationViewModel {
   const value = asObject(body);
+  if (!("questionId" in value) || (value.questionId !== null && (typeof value.questionId !== "string" || value.questionId === ""))) {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: MALFORMED_RESULT });
+  }
   const questionId = typeof value.questionId === "string" ? value.questionId : null;
   const headline = typeof value.headline === "string" ? value.headline : "";
   const explanation = typeof value.explanation === "string" ? value.explanation : "";
@@ -92,8 +103,6 @@ function readQuestion(body: unknown): QuestionViewModel {
     expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60
   };
 }
-
-const MALFORMED_RESULT = "Something went wrong. Please try again.";
 
 /** A result is only renderable if the server said it was a graded, submitted attempt -- anything else (missing ids, no boolean verdict, a skip) is treated as malformed, never rendered as a guess. */
 function isRenderableResult(value: Record<string, unknown>): boolean {
@@ -149,6 +158,9 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
   // Phase 2 Unit 2: one in-flight start / submit per question -- a duplicate call (StrictMode's double mount effect, a double click) shares the first request instead of creating a second attempt or a second submission.
   const startFlights = createSingleFlight<QuestionViewModel>();
   const submitFlights = createSingleFlight<AttemptResultViewModel>();
+  // Phase 2 Unit 4: concurrent recommendation reads (StrictMode's double mount, a double activation) share one request.
+  const recommendationFlights = createSingleFlight<RecommendationViewModel>();
+  const fetchRecommendation = () => recommendationFlights.run("next", async () => readRecommendation(await post("/v1/recommendation")));
 
   async function post(path: string, body?: unknown): Promise<unknown> {
     const result = await jsonRequest(fetchImpl, "POST", path, body ?? {});
@@ -196,7 +208,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
 
   return {
     async getDashboard(): Promise<DashboardViewModel> {
-      const recommendation = readRecommendation(await post("/v1/recommendation"));
+      const recommendation = await fetchRecommendation();
       return { studentDisplayName: "there", questionsPracticedSoFar, recommendation };
     },
 
@@ -219,11 +231,11 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     },
 
     async respondToAutopsy(_input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel> {
-      return readRecommendation(await post("/v1/recommendation"));
+      return await fetchRecommendation();
     },
 
     async getNextRecommendation(): Promise<RecommendationViewModel> {
-      return readRecommendation(await post("/v1/recommendation"));
+      return await fetchRecommendation();
     }
   };
 }

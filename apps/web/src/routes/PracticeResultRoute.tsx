@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isSessionExpiredError, type AttemptResultViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { ResultScreen } from "../components/ResultScreen.js";
@@ -22,8 +22,19 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
   const navigate = useNavigate();
   const attemptId = readAttemptParam(window.location.search);
   const remembered = getLastResult(questionId);
-  // A remembered result only counts if it is the attempt the URL names (an earlier attempt at the same question must not be shown for a newer link).
-  const inSession = remembered && (!attemptId || remembered.attemptId === attemptId) ? remembered : undefined;
+  // A remembered result only counts if it is EXACTLY the attempt the URL names -- an earlier attempt at the same
+  // question (e.g. when practice cycles back to it) must never be shown for a different or missing attempt.
+  const inSession = remembered && attemptId !== null && remembered.attemptId === attemptId ? remembered : undefined;
+  // "Continue" hands off to `/practice/next` exactly once per result view (a second activation is ignored).
+  const continued = useRef(false);
+  useEffect(() => {
+    continued.current = false;
+  }, [questionId, attemptId]);
+  function handleContinue() {
+    if (continued.current) return;
+    continued.current = true;
+    navigate("/practice/next");
+  }
   const [state, setState] = useState<ResultLoadState>(inSession ? { status: "loaded", result: inSession } : { status: "loading" });
   const [retryCount, setRetryCount] = useState(0);
 
@@ -73,5 +84,5 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
     );
   }
 
-  return <ResultScreen result={state.result} onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={() => navigate("/practice/next")} />;
+  return <ResultScreen result={state.result} onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
 }

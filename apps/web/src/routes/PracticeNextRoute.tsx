@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isSessionExpiredError, type RecommendationViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { NextTrainingCard } from "../components/NextTrainingCard.js";
@@ -27,10 +27,13 @@ export function PracticeNextRoute() {
   const navigate = useNavigate();
   const [state, setState] = useState<PracticeNextState>({ status: "loading" });
   const [retryCount, setRetryCount] = useState(0);
+  // Continue starts exactly one navigation into the recommended question; a second activation is ignored (re-armed on every fresh recommendation).
+  const continued = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+    continued.current = false;
     adapter
       .getNextRecommendation()
       .then((recommendation) => {
@@ -68,5 +71,11 @@ export function PracticeNextRoute() {
     );
   }
 
-  return <NextTrainingCard recommendation={state.recommendation} onContinue={() => navigate(`/practice/${outcome.questionId}`)} />;
+  const handleContinue = () => {
+    if (continued.current) return;
+    continued.current = true;
+    navigate(`/practice/${outcome.questionId}`);
+  };
+
+  return <NextTrainingCard recommendation={state.recommendation} onContinue={handleContinue} />;
 }

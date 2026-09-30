@@ -64,7 +64,7 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
         {result.hasAutopsy ? (
           <Button onClick={onSeeWhatHappened}>See what the system noticed</Button>
         ) : (
-          <Button onClick={onContinue}>Continue</Button>
+          <Button onClick={onContinue}>Continue to next question</Button>
         )}
       </div>
     </Screen>

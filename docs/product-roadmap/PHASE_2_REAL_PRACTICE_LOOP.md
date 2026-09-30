@@ -11,7 +11,8 @@ From the master roadmap: *a real student can practice real published questions e
 | 1 | Real published practice content foundation (dev/in-memory content path) | **COMPLETE** (this document) |
 | 2 | Real question → timer → answer → submit | **COMPLETE** (below) |
 | 3 | Real submission → result → explanation | **COMPLETE** (below) |
-| 4+ | Not defined here yet — next-question loop, persistence/recovery, real database — **NOT STARTED** | NOT STARTED |
+| 4 | Continuous next-question practice loop | **COMPLETE** (below) |
+| 5+ | Not defined here yet — persistence/recovery, real database — **NOT STARTED** | NOT STARTED |
 
 ## Unit 1 — Real published practice content foundation
 
@@ -106,4 +107,37 @@ No API contract, adapter interface, backend, or dependency changed. No grading, 
 - The Autopsy screen and the Continue button's next-question behavior are unchanged Phase 1 behavior — Unit 4+.
 - Still dev/in-memory content; Prisma readers (including the new solution mapping) are unit-tested against a fake client, never a live database.
 
-**Unit 4+ status: NOT STARTED.**
+## Unit 4 — Continuous next-question practice loop
+
+**Objective.** Question → Submit → Result → Explanation → **Continue → Practice Next → a NEW real question** → … repeatedly, with every next question resolved through the existing recommendation API path and no selection logic in the frontend. Transport/UI loop only — no adaptive work.
+
+**What already worked (inspected).** The skeleton was in place from Phase 1: the result screen's Continue → `/practice/next` → `PracticeNextRoute` → `adapter.getNextRecommendation()` → `POST /v1/recommendation` → recommendation card → `/practice/:recommendedId` → `PracticeQuestionRoute` → a fresh attempt. Loading / unavailable / retryable-error / expired-session screens for `/practice/next` also already existed (Phase 1 Units 9 and 11), as did per-question state reset (the player's effect is keyed on the question id) and browser back/forward (plain pushState routes). No routing change was needed.
+
+**Gaps found and fixed (the only source changes).**
+1. **Continue label.** The result screen's action was a bare "Continue"; it now reads "Continue to next question".
+2. **Duplicate recommendation requests.** StrictMode's double mount (and any double activation) fired two `POST /v1/recommendation` calls when resolving the next question. `createApiTrainingAdapter()` now coalesces concurrent recommendation reads with the Unit 2 single-flight helper (dashboard and `/practice/next` both benefit). Sequential calls still each ask the server afresh — every Continue gets a fresh recommendation.
+3. **Malformed recommendation read as "nothing available".** A non-object body or a missing/odd `questionId` silently became `questionId: null` and showed "Practice isn't available right now." `readRecommendation()` now treats anything other than a non-empty string or an explicit `null` as a malformed response and rejects, so the student gets the retryable error screen instead of a false empty state.
+4. **Duplicate Continue.** Both Continue actions (result → next, recommendation card → question) now have an explicit once-only guard (a ref, re-armed when the route/attempt/recommendation changes) on top of the router's existing same-path no-op.
+5. **Result bleed.** The result route reused any remembered result for the same question id when the URL had no attempt id. It now shows a remembered result only for the exact attempt the URL names, so a result from an earlier pass over a question can never appear for a later one.
+
+No API, backend, contract, or dependency change. No selection, ranking, randomization, adaptive, mastery, autopsy or fixture logic entered `apps/web`; `createApiTrainingAdapter()` remains the only runtime adapter; no question id is hardcoded anywhere in the practice path.
+
+**Next-question flow.** Result → Continue (once) → `/practice/next` (loading → one `POST /v1/recommendation`) → recommendation card → Continue to next question (once) → `/practice/<id the server named>` → one `POST /v1/attempts` (a brand-new attempt, even if the server names a question seen before) → fresh player (nothing selected, Submit disabled, timer at 0:00) → submit → that attempt's own result. The intermediate card is Phase 1's deliberate one-click confirmation; it was kept (the student consciously continues; the brief lists "Practice Next" as a step).
+
+**Tests (new).** `apps/web/test/practice/continuousLoop.test.ts` (25): next recommendation via `POST /v1/recommendation` each time and the server's id used as-is; concurrent resolution → one request; the same question recommended again is honored; a two-question loop creating two independent attempts, each submitted to its own attempt id; a repeated question getting a new attempt; `questionId: null` → unavailable outcome; 5 malformed shapes reject; failure → retry runs a new request; 401 → expired session; network failure; result screen shows "Continue to next question"; once-only guards on both Continue actions; loading/unavailable/retry/expired states present; player state and timer reset per question; exact-attempt result matching; no hardcoded ids, no selection/adaptive/mastery/random/domain imports in the practice path (comments excluded); production adapter unchanged.
+
+**Validation.** apps/web 272/272 (was 247); full repository 1662/1662 across 170 files (was 1637); typecheck, build, lint and `git diff --check` clean.
+
+**Browser verification** (raw CDP / headless Edge, real `apps/api` + `apps/web`, Unit 1 dev content, fresh account): 33/33 checks. Four consecutive rounds of question → answer → submit → result → Continue → `/practice/next` → Continue → next question. Each round: a real question with fresh state (no option pressed, Submit disabled, timer 0:00); exactly one attempt started and one submit sent; the result showed that question's own prompt (no bleed); double-clicking Continue in the same tick added one history entry and sent exactly ONE `POST /v1/recommendation`; resolving a recommendation started no attempt; double-clicking the card's Continue started exactly one new attempt. The explanation ("View solution", 3 steps) rendered on round 1. Forcing `/v1/recommendation` responses through CDP `Fetch` interception (the real UI, a simulated server answer — the server itself was never made to fail): `questionId: null` → "Practice isn't available right now." + Back to dashboard; HTTP 500 → student-safe error with Try again + Back to dashboard, no message/stack leaked, and Try again recovered to a real recommendation; a malformed body → the error screen (not "nothing available"); 401 → "Your session has expired." + Log in; Continue from a result while nothing is recommendable → the unavailable screen, no dead end.
+
+**What the real recommendation actually did.** With the 3 dev questions the existing backend recommended, in order: percentage-point question → successive-percentage question → population/reverse question → the percentage-point question again. So the server's own coverage-based selection visits each dev question before repeating; this unit adds no guarantee of "different every time" (with 3 questions it necessarily repeats after 3), and the frontend neither enforces nor fakes uniqueness.
+
+**Known limitations.**
+- A repeat is possible/expected once the small dev pool is exhausted; uniqueness and adaptivity are backend/content concerns (later phases).
+- Browser Back from a question to a result/recommendation works, but going Back to an already-submitted `/practice/:id` starts a fresh attempt (no in-progress/finished attempt recovery) — a persistence unit's concern.
+- `questionsPracticedSoFar` remains the adapter instance's session-local count.
+- Error/empty/expired states for the next-question step were forced by interception (see above); the server was never actually made to fail or expire mid-run.
+- Autopsy/Continue-after-autopsy behavior is unchanged Phase 1 behavior and is never reached with real data.
+- Still dev/in-memory content and repositories.
+
+**Unit 5+ status: NOT STARTED.**
