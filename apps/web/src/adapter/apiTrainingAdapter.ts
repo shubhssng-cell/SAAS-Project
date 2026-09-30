@@ -90,8 +90,12 @@ function readRecommendation(body: unknown): RecommendationViewModel {
   return { questionId, headline, explanation, modeLabel };
 }
 
-function readQuestion(body: unknown): QuestionViewModel {
+/** A started/resumed attempt's question. A response without a usable question (id + prompt) is malformed -- an error, never an empty question screen. */
+function readQuestion(body: unknown, elapsedSeconds: unknown): QuestionViewModel {
   const value = asObject(body);
+  if (typeof value.questionId !== "string" || value.questionId === "" || typeof value.prompt !== "string" || value.prompt === "") {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: MALFORMED_RESULT });
+  }
   const options = Array.isArray(value.options) && value.options.every((o) => typeof o === "string") ? (value.options as string[]) : null;
   return {
     questionId: typeof value.questionId === "string" ? value.questionId : "",
@@ -100,7 +104,8 @@ function readQuestion(body: unknown): QuestionViewModel {
     prompt: typeof value.prompt === "string" ? value.prompt : "",
     answerFormat: value.answerFormat === "numeric_entry" ? "numeric_entry" : "multiple_choice",
     options,
-    expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60
+    expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60,
+    elapsedSeconds: typeof elapsedSeconds === "number" && Number.isFinite(elapsedSeconds) && elapsedSeconds > 0 ? Math.floor(elapsedSeconds) : 0
   };
 }
 
@@ -181,7 +186,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
       throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
     }
     attemptIdByQuestion.set(questionId, attemptId);
-    return readQuestion(started.question);
+    return readQuestion(started.question, started.elapsedSeconds);
   }
 
   // `timeTakenSeconds` is deliberately NOT sent: the server derives time spent from its own attempt events (D-034).

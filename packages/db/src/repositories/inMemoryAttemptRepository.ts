@@ -1,7 +1,7 @@
 import { getEventTimeline, type AttemptState } from "@ipmat/attempt";
 import { PracticeBlockLifecycleError, type PracticeBlockStatus } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
-import type { AttemptHistoryReader, AttemptRepository } from "./types.js";
+import type { AttemptHistoryReader, AttemptRepository, InProgressAttemptReader } from "./types.js";
 import {
   assertAttemptBlockMembershipUnchanged,
   assertAttemptNotRegressingFromFinalized,
@@ -42,7 +42,7 @@ export interface InMemoryAttemptRepositoryOptions {
   practiceBlocks?: Map<string, { status: PracticeBlockStatus; enrollmentId: string; studentId: string }>;
 }
 
-export class InMemoryAttemptRepository implements AttemptRepository, AttemptHistoryReader {
+export class InMemoryAttemptRepository implements AttemptRepository, AttemptHistoryReader, InProgressAttemptReader {
   private readonly byId = new Map<string, AttemptState>();
 
   constructor(private readonly options: InMemoryAttemptRepositoryOptions = {}) {}
@@ -100,6 +100,14 @@ export class InMemoryAttemptRepository implements AttemptRepository, AttemptHist
 
   async findById(attemptId: string): Promise<AttemptState | null> {
     return this.byId.get(attemptId) ?? null;
+  }
+
+  /** Same contract as `PrismaAttemptRepository.findInProgressByStudentQuestion()`: scoped by student + question + enrollment, in_progress only, newest `startedAt` first, `id DESC` tie-break. */
+  async findInProgressByStudentQuestion(scope: { studentId: string; questionId: string; enrollmentId: string }): Promise<AttemptState | null> {
+    const open = [...this.byId.values()]
+      .filter((a) => a.status === "in_progress" && a.studentId === scope.studentId && a.questionId === scope.questionId && a.enrollmentId === scope.enrollmentId)
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    return open[0] ?? null;
   }
 
   /** Same contract as `PrismaAttemptRepository.findFinalizedByStudentId()`: finalized only, `finalizedAt ASC`, `id ASC` tie-break. */

@@ -12,7 +12,8 @@ From the master roadmap: *a real student can practice real published questions e
 | 2 | Real question → timer → answer → submit | **COMPLETE** (below) |
 | 3 | Real submission → result → explanation | **COMPLETE** (below) |
 | 4 | Continuous next-question practice loop | **COMPLETE** (below) |
-| 5+ | Not defined here yet — persistence/recovery, real database — **NOT STARTED** | NOT STARTED |
+| 5 | Attempt / session recovery | **COMPLETE** (below) |
+| 6+ | Not defined here yet — real database, further loop work — **NOT STARTED** | NOT STARTED |
 
 ## Unit 1 — Real published practice content foundation
 
@@ -140,4 +141,38 @@ No API, backend, contract, or dependency change. No selection, ranking, randomiz
 - Autopsy/Continue-after-autopsy behavior is unchanged Phase 1 behavior and is never reached with real data.
 - Still dev/in-memory content and repositories.
 
-**Unit 5+ status: NOT STARTED.**
+**Unit 5+ status: NOT STARTED (Unit 5 is now complete — see below).**
+
+## Unit 5 — Attempt / session recovery
+
+**Objective.** A refresh or reload of `/practice/:questionId` must resume the student's existing in-progress attempt instead of silently starting another (the Unit 2/4 limitation), with the server remaining the authority for attempt identity, ownership and time.
+
+**What already existed (inspected).** The attempt lifecycle already persists identity and a server-side `startedAt` (`@ipmat/attempt`), `PracticeApiService.startAttempt()` created a brand-new attempt on every call, and there was no query for "this student's open attempt" (`AttemptHistoryReader` is finalized-only). Result recovery (Unit 3) already worked by attempt id. The backend therefore lacked exactly one thing: a way to find an open attempt. No domain contract changed.
+
+**Implementation.**
+- `@ipmat/db`: new narrow port `InProgressAttemptReader.findInProgressByStudentQuestion({ studentId, questionId, enrollmentId })` (same precedent as `AttemptHistoryReader`; `AttemptRepository` itself untouched, so existing doubles keep compiling). Implemented by `InMemoryAttemptRepository` and `PrismaAttemptRepository` (`findFirst`, `status: in_progress`, `startedAt DESC, id DESC`). Read-only; scoped by student **and** question **and** enrollment inside the query.
+- `@ipmat/practice-api`: `startAttempt()` is now idempotent per (student, enrollment, question). After the existing enrollment-ownership check it looks for a resumable attempt; if found it returns that attempt, otherwise it starts a new one via the unchanged `PracticeLoopService.startAttempt()`. The find-then-create runs under a per-key in-process lock, so concurrent starts cannot both create. `StartAttemptResult` gained `elapsedSeconds` (server `now − startedAt`, floored, never negative; 0 for a new attempt). `PracticeApiDependencies` gained the reader (wired in both the in-memory and Prisma wirings).
+- `apps/web`: `QuestionViewModel.elapsedSeconds` is mapped from the response (unusable values → 0); a response without a usable question (id + prompt) is now a malformed-response error. `QuestionPlayer` seeds its timer from it (`start = Date.now() − seed·1000`) — same single interval, same cleanup. No attempt id, timer value or answer is stored client-side (no storage, no id generation); the route and result URL scheme are unchanged.
+
+**Recovery semantics (server rules).**
+- No open attempt → start one. One open attempt → resume it (same id). Several open (orphans from before this unit) → the **most recently started** wins (`startedAt DESC`, `id DESC`); the others are left untouched (not abandoned).
+- Only `in_progress` attempts resume. Submitted, skipped, or abandoned attempts never do: re-opening a question after submitting starts a fresh attempt; the finished attempt's result stays reachable at `/practice/:id/result?attempt=<id>` (Unit 3).
+- Resume requires the question to still be published; an unpublished question is refused (`question_not_published`), never resumed.
+- Scope is the authenticated student + enrollment (from the session, never the client). Another student starting the same question gets their own attempt; another enrollment's attempt is never resumed; a claim pairing a student with someone else's enrollment is refused (`ownership_mismatch`).
+- Submitting a recovered attempt uses that same attempt id; time spent is `finalizedAt − startedAt` on the server, so it spans the reload. Duplicate-submit protection (ref guard + single-flight + server `invalid_state` on a second submit) is unchanged.
+- **Answer state is not restored.** The domain records `answer_selected` only at submit time, and the API has no route for intermediate selections; persisting them would be a new endpoint and event flow, which this unit deliberately did not add. After a reload nothing is selected — but the timer and attempt identity are the server's.
+
+**Tests (new).** `packages/practice-api/test/attemptRecovery.test.ts` (13), `packages/db/test/repositories/inProgressAttemptReader.test.ts` (5: in-memory scoping/ordering/finalized-ignored; Prisma query shape via a fake client), 3 HTTP tests appended to `apps/api/test/devContent.test.ts` (idempotent start with server-derived elapsed, parallel starts → one attempt, submit with the recovered id, second submit 409, finished attempt never resumes, cross-student isolation and 403, unauthenticated 401), and `apps/web/test/practice/attemptRecovery.test.ts` (22: a fresh adapter instance = a reload; elapsed mapping and sanitizing; submit to the original id; StrictMode coalescing; new attempt after submit; malformed/401/403/network responses; no client storage/id generation; timer seeding and cleanup; duplicate-submit protections). Two existing tests were updated for the new `elapsedSeconds` field.
+
+**Validation.** apps/web 294/294 (was 272); apps/api 52/52; practice-api 57/57; db 262/262; full repository 1705/1705 across 173 files (was 1662); typecheck, build, lint and `git diff --check` clean.
+
+**Browser verification** (raw CDP / headless Edge, real `apps/api` + `apps/web`, Unit 1 dev content; start-response bodies read from the network log): 18/18. First load sent exactly one `POST /v1/attempts` (elapsedSeconds 0). After ~5s of working, a hard refresh resumed the **same attempt id**, the timer continued from the server's clock (server reported 7s, timer showed 7s — not 0:00), and nothing was selected/Submit disabled. Two further refreshes still resolved to that one attempt id (4 start responses, 1 distinct id). A double-clicked Submit sent exactly one `POST /v1/attempts/<original id>/submit`; the result URL named that attempt, rendered normally, and its "Time taken" (16s) spanned the reloads. Re-opening the question afterwards created a new attempt with a fresh timer, while the submitted attempt's result URL still rendered its result. Clearing cookies and reloading the question redirected to `/login` with no question shown. (My first run of one timer assertion used too tight a window — the reload itself took several seconds, during which the server clock correctly kept running; I corrected the assertion to compare against the server-reported elapsed value. Behavior was unchanged between the runs.)
+
+**Known limitations.**
+- Unsaved answer selections are lost on reload (see above); persisting them would need an answer-selection endpoint/event — a later unit if wanted.
+- The find-then-create lock is in-process: correct for this single-server in-memory runtime, but multiple API instances against a real database would need a database-level guarantee (e.g. a partial unique index on open attempts per student/question/enrollment). Not added; the live Prisma database is still unavailable and `findInProgressByStudentQuestion` is only verified against a fake client.
+- Pre-existing orphan open attempts are not cleaned up or abandoned; only the newest is resumed.
+- An attempt left open indefinitely resumes indefinitely (no expiry/abandonment policy exists yet); its elapsed time simply keeps growing.
+- Hard refresh on the autopsy screen is unchanged Phase 1 behavior (never reached with real data).
+
+**Unit 6+ status: NOT STARTED.**

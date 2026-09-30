@@ -27,9 +27,12 @@ export function QuestionPlayer({
 
   useEffect(() => {
     setSelected(null);
-    setElapsedSeconds(0);
-    elapsedRef.current = 0;
-    const startedAt = Date.now();
+    // Seeded from the SERVER's attempt clock (0 for a fresh attempt; larger when a reload resumed an open one), then
+    // advanced by the wall clock. Display only -- time spent is always derived server-side.
+    const seed = question.elapsedSeconds;
+    setElapsedSeconds(seed);
+    elapsedRef.current = seed;
+    const startedAt = Date.now() - seed * 1000;
     const interval = window.setInterval(() => {
       elapsedRef.current = elapsedSecondsBetween(startedAt, Date.now());
       setElapsedSeconds(elapsedRef.current);

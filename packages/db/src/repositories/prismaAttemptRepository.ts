@@ -4,7 +4,7 @@ import { PracticeBlockLifecycleError } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
 import { asJson } from "./json.js";
 import { runSerializableTransaction } from "./serializable.js";
-import type { AttemptHistoryReader, AttemptRepository } from "./types.js";
+import type { AttemptHistoryReader, AttemptRepository, InProgressAttemptReader } from "./types.js";
 import {
   assertAttemptBlockMembershipUnchanged,
   assertAttemptNotRegressingFromFinalized,
@@ -54,7 +54,7 @@ import {
  * `SerializationFailureError` by `runSerializableTransaction()`), not a
  * silently-duplicated sequence number.
  */
-export class PrismaAttemptRepository implements AttemptRepository, AttemptHistoryReader {
+export class PrismaAttemptRepository implements AttemptRepository, AttemptHistoryReader, InProgressAttemptReader {
   constructor(private readonly prisma: PrismaClient) {}
 
   async save(state: AttemptState, blockAllocationRequest?: { practiceBlockId: string }): Promise<AttemptState> {
@@ -170,6 +170,16 @@ export class PrismaAttemptRepository implements AttemptRepository, AttemptHistor
   async findById(attemptId: string): Promise<AttemptState | null> {
     const row = await this.prisma.attempt.findUnique({
       where: { id: attemptId },
+      include: { events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
+    });
+    return row ? toAttemptState(row) : null;
+  }
+
+  /** Scoped by studentId + questionId + enrollmentId in the query itself; `in_progress` only; newest `startedAt` first, `id DESC` tie-break. Read-only. */
+  async findInProgressByStudentQuestion(scope: { studentId: string; questionId: string; enrollmentId: string }): Promise<AttemptState | null> {
+    const row = await this.prisma.attempt.findFirst({
+      where: { studentId: scope.studentId, questionId: scope.questionId, enrollmentId: scope.enrollmentId, status: "in_progress" },
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
       include: { events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
     });
     return row ? toAttemptState(row) : null;

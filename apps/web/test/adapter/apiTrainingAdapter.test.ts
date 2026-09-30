@@ -86,7 +86,8 @@ describe("createApiTrainingAdapter -- loadQuestion / submitAnswer", () => {
       prompt: "Find the base.",
       answerFormat: "multiple_choice",
       options: ["A", "B"],
-      expectedTimeSeconds: 60
+      expectedTimeSeconds: 60,
+      elapsedSeconds: 0
     });
     expect(calls[0]?.url).toMatch(/\/v1\/attempts$/);
     const sentBody = JSON.parse(String(calls[0]?.init?.body ?? "{}"));

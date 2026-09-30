@@ -1,4 +1,4 @@
-import type { AutopsyRepository, EnrollmentReader, QuestionContentReader, QuestionReader } from "@ipmat/db";
+import type { AutopsyRepository, EnrollmentReader, InProgressAttemptReader, QuestionContentReader, QuestionReader } from "@ipmat/db";
 import type { PracticeLoopService } from "@ipmat/practice-loop";
 import type { TrainingRecommendationService } from "@ipmat/training-recommendation";
 
@@ -19,6 +19,8 @@ import type { TrainingRecommendationService } from "@ipmat/training-recommendati
 export interface PracticeApiDependencies {
   trainingRecommendationService: TrainingRecommendationService;
   practiceLoopService: PracticeLoopService;
+  /** Product Phase 2 Unit 5: finds the student's already-open attempt so a reload resumes it instead of starting another. Read-only. */
+  inProgressAttemptReader: InProgressAttemptReader;
   enrollmentReader: EnrollmentReader;
   /** Server-side answer-key resolution ONLY (D-048) — never returned to a caller directly; used only to build a post-finalization result view. */
   questionReader: QuestionReader;
@@ -66,6 +68,12 @@ export interface RecommendationView {
 export interface StartAttemptResult {
   attemptId: string;
   question: StudentQuestionView;
+  /**
+   * Whole seconds since the attempt started, by the SERVER's clock (`now - attempt.startedAt`) --
+   * 0 for a brand-new attempt, larger when an already-open attempt was resumed after a reload.
+   * The browser only uses it to seed its display; it is never sent back as a duration.
+   */
+  elapsedSeconds: number;
 }
 
 export type AttemptResultStatus = "submitted" | "skipped" | "abandoned";

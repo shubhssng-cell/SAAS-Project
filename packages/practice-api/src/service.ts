@@ -1,4 +1,4 @@
-import { AttemptLifecycleError, type AttemptOwnershipClaim } from "@ipmat/attempt";
+import { AttemptLifecycleError, type AttemptOwnershipClaim, type AttemptState } from "@ipmat/attempt";
 import { assertEnrollmentOwnership } from "@ipmat/training-recommendation";
 import { toPracticeApiError } from "./errors.js";
 import { toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
@@ -62,11 +62,17 @@ export class PracticeApiService {
     try {
       assertEnrollmentOwnership(await this.deps.enrollmentReader.findById(claim.enrollmentId), claim);
 
-      const attempt = await this.deps.practiceLoopService.startAttempt({
-        studentId: claim.studentId,
-        questionId: input.questionId,
-        enrollmentId: claim.enrollmentId,
-        now
+      // Product Phase 2 Unit 5 -- idempotent per (student, enrollment, question): find-then-create runs under a
+      // per-key lock so two concurrent starts (a double request, two tabs on one server) cannot both create.
+      const attempt = await this.withStartLock(`${claim.studentId}|${claim.enrollmentId}|${input.questionId}`, async () => {
+        const resumable = await this.findResumableAttempt(claim, input.questionId);
+        if (resumable) return resumable;
+        return this.deps.practiceLoopService.startAttempt({
+          studentId: claim.studentId,
+          questionId: input.questionId,
+          enrollmentId: claim.enrollmentId,
+          now
+        });
       });
 
       const content = await this.deps.questionContentReader.findPublishedById(input.questionId);
@@ -79,10 +85,47 @@ export class PracticeApiService {
         throw new PracticeApiError("infrastructure_failure", "This question could not be loaded right now. Please try again.", 500);
       }
 
-      return { attemptId: attempt.id, question: toStudentQuestionView(content) };
+      const elapsedSeconds = Math.max(0, Math.floor((Date.parse(now) - Date.parse(attempt.startedAt)) / 1000));
+      return { attemptId: attempt.id, question: toStudentQuestionView(content), elapsedSeconds };
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);
+    }
+  }
+
+  /**
+   * The attempt a reload should resume, or `null` (=> start a new one). Resumable means: still
+   * `in_progress`, owned by THIS student and enrollment, for THIS question (all re-checked here even
+   * though the reader already scopes by them), AND the question is still published. An unpublished
+   * question is never resumed -- `null` falls through to `startAttempt()`, which refuses it with the
+   * ordinary `question_not_published` error. A finalized attempt never resumes.
+   */
+  private async findResumableAttempt(claim: StudentRequestClaim, questionId: string): Promise<AttemptState | null> {
+    const canonical = await this.deps.questionReader.findById(questionId);
+    if (!canonical || canonical.validationState !== "published") return null;
+    const open = await this.deps.inProgressAttemptReader.findInProgressByStudentQuestion({ studentId: claim.studentId, questionId, enrollmentId: claim.enrollmentId });
+    if (!open) return null;
+    const valid = open.status === "in_progress" && open.studentId === claim.studentId && open.enrollmentId === claim.enrollmentId && open.questionId === questionId;
+    return valid ? open : null;
+  }
+
+  private readonly startLocks = new Map<string, Promise<void>>();
+
+  /** Runs `operation` after any earlier operation with the same key has settled (in-process serialization only). */
+  private async withStartLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.startLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => mine);
+    this.startLocks.set(key, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.startLocks.get(key) === tail) this.startLocks.delete(key);
     }
   }
 

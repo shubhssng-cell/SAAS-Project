@@ -130,6 +130,7 @@ export function createInMemoryDependencies(
   return {
     trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
     practiceLoopService: new PracticeLoopService(attempts, questions),
+    inProgressAttemptReader: attempts,
     enrollmentReader,
     questionReader: questions,
     questionContentReader: questionContent,
@@ -178,6 +179,7 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
   return {
     trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
     practiceLoopService: new PracticeLoopService(attempts, questionReader),
+    inProgressAttemptReader: attempts,
     enrollmentReader,
     questionReader,
     questionContentReader: new PrismaQuestionContentReader(prisma),

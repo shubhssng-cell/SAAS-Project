@@ -129,6 +129,7 @@ export class World {
     const deps: PracticeApiDependencies = {
       trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
       practiceLoopService,
+      inProgressAttemptReader: this.attempts,
       enrollmentReader,
       questionReader,
       questionContentReader: new InMemoryQuestionContentReader(this.questionContent),

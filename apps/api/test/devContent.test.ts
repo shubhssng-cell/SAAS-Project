@@ -185,3 +185,47 @@ describe("dev content set -- through the real apps/api HTTP path", () => {
     }
   });
 });
+
+describe("attempt recovery through the real HTTP path (Product Phase 2 Unit 5)", () => {
+  it("POST /v1/attempts is idempotent for an open attempt: a reload gets the SAME attempt id with server-derived elapsedSeconds, and submit uses it", async () => {
+    const cookie = await signupOnboardEnroll("recovery-same@example.com");
+    const questionId = seed.questionContent[0]!.id;
+    const first = await request("POST", "/v1/attempts", { questionId }, cookie);
+    expect(first.json.elapsedSeconds).toBe(0);
+    await new Promise((r) => setTimeout(r, 1200));
+    const reloaded = await request("POST", "/v1/attempts", { questionId }, cookie);
+    expect(reloaded.json.attemptId).toBe(first.json.attemptId);
+    expect(reloaded.json.elapsedSeconds as number).toBeGreaterThanOrEqual(1);
+    const parallel = await Promise.all([1, 2, 3].map(() => request("POST", "/v1/attempts", { questionId }, cookie)));
+    expect(new Set(parallel.map((r) => r.json.attemptId))).toEqual(new Set([first.json.attemptId]));
+
+    const canonical = seed.questions.find((q) => q.id === questionId)!;
+    const submitted = await request("POST", `/v1/attempts/${reloaded.json.attemptId as string}/submit`, { questionId, chosenAnswer: canonical.correctAnswer }, cookie);
+    expect(submitted.status).toBe(200);
+    expect(submitted.json).toMatchObject({ attemptId: first.json.attemptId, isCorrect: true, status: "submitted" });
+    const again = await request("POST", `/v1/attempts/${first.json.attemptId as string}/submit`, { questionId, chosenAnswer: canonical.correctAnswer }, cookie);
+    expect(again.status).toBe(409);
+
+    const next = await request("POST", "/v1/attempts", { questionId }, cookie);
+    expect(next.json.attemptId).not.toBe(first.json.attemptId); // a finished attempt never resumes
+  });
+
+  it("another student starting the same question gets their own attempt and cannot use the first student's", async () => {
+    const a = await signupOnboardEnroll("recovery-a@example.com");
+    const b = await signupOnboardEnroll("recovery-b@example.com");
+    const questionId = seed.questionContent[0]!.id;
+    const mine = await request("POST", "/v1/attempts", { questionId }, a);
+    const theirs = await request("POST", "/v1/attempts", { questionId }, b);
+    expect(theirs.json.attemptId).not.toBe(mine.json.attemptId);
+    const stolen = await request("POST", `/v1/attempts/${mine.json.attemptId as string}/submit`, { questionId, chosenAnswer: "x" }, b);
+    expect(stolen.status).toBe(403);
+    expect(JSON.stringify(stolen.json)).not.toMatch(/startedAt|studentId/);
+    const stillMine = await request("POST", "/v1/attempts", { questionId }, a);
+    expect(stillMine.json.attemptId).toBe(mine.json.attemptId);
+  });
+
+  it("an unauthenticated start is 401 and creates nothing", async () => {
+    const res = await request("POST", "/v1/attempts", { questionId: seed.questionContent[0]!.id });
+    expect(res.status).toBe(401);
+  });
+});

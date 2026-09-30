@@ -22,6 +22,8 @@ export interface QuestionViewModel {
   answerFormat: AnswerFormat;
   options: string[] | null;
   expectedTimeSeconds: number;
+  /** Seconds already elapsed on the SERVER's attempt clock when the question was (re)opened -- 0 for a fresh attempt, larger when a reload resumed an open one. Display seed only; never sent back as a duration. */
+  elapsedSeconds: number;
 }
 
 export interface RecommendationViewModel {

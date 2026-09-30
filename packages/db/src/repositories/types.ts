@@ -172,6 +172,25 @@ export interface AttemptRepository {
 }
 
 /**
+ * Product Phase 2 Unit 5 (attempt recovery) -- the one read that lets a reload find the
+ * attempt a student already has open, instead of starting another. A narrow interface of
+ * its own (implemented by both `PrismaAttemptRepository` and `InMemoryAttemptRepository`)
+ * rather than a new method on `AttemptRepository`, the same precedent as
+ * `AttemptHistoryReader`.
+ */
+export interface InProgressAttemptReader {
+  /**
+   * The student's still-`in_progress` attempt at this question under this enrollment, or
+   * `null`. Scoped by `studentId`, `questionId` AND `enrollmentId` in the query itself --
+   * another student's, another enrollment's, or a finalized attempt is never returned. If
+   * several are open (orphans from before recovery existed), the MOST RECENTLY started one
+   * wins (`startedAt DESC`, `id DESC` tie-break) -- a fixed server-side rule, never a
+   * caller's choice. Nothing is modified.
+   */
+  findInProgressByStudentQuestion(scope: { studentId: string; questionId: string; enrollmentId: string }): Promise<AttemptState | null>;
+}
+
+/**
  * Training Recommendation Composition (docs/project-memory/37_TRAINING_RECOMMENDATION.md
  * §6) — the two bulk, read-only attempt queries the composition layer needs.
  * Kept as its OWN narrow interface (implemented by both

@@ -108,7 +108,8 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
         prompt: q.prompt,
         answerFormat: q.attemptContext.answerFormat,
         options: q.attemptContext.options,
-        expectedTimeSeconds: q.attemptContext.expectedTimeSeconds ?? 60
+        expectedTimeSeconds: q.attemptContext.expectedTimeSeconds ?? 60,
+        elapsedSeconds: 0
       };
     },
 

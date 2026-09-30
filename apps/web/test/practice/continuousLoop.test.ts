@@ -211,7 +211,7 @@ describe("Continue in the UI", () => {
 describe("state reset between questions", () => {
   it("the player resets selection, elapsed time and the timer together whenever the question changes", () => {
     const player = src("components/QuestionPlayer.tsx");
-    expect(player).toMatch(/setSelected\(null\);\s+setElapsedSeconds\(0\);\s+elapsedRef\.current = 0;/);
+    expect(player).toMatch(/setSelected\(null\);[\s\S]*?setElapsedSeconds\(seed\);\s+elapsedRef\.current = seed;/);
     expect(player).toMatch(/\[question\.questionId\]\)/);
     expect(player).toMatch(/return \(\) => window\.clearInterval\(interval\)/);
   });
