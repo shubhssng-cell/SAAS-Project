@@ -229,3 +229,44 @@ describe("attempt recovery through the real HTTP path (Product Phase 2 Unit 5)",
     expect(res.status).toBe(401);
   });
 });
+
+describe("skip through the real HTTP path (Product Phase 2 Unit 6)", () => {
+  it("start -> skip: a terminal 'skipped' result with no answer key; skip/submit again are 409; result re-readable; next start is a NEW attempt", async () => {
+    const cookie = await signupOnboardEnroll("skip-flow@example.com");
+    const questionId = seed.questionContent[0]!.id;
+    const canonical = seed.questions.find((q) => q.id === questionId)!;
+    const started = await request("POST", "/v1/attempts", { questionId }, cookie);
+    const attemptId = started.json.attemptId as string;
+
+    const skipped = await request("POST", `/v1/attempts/${attemptId}/skip`, { questionId }, cookie);
+    expect(skipped.status).toBe(200);
+    expect(skipped.json).toMatchObject({ attemptId, status: "skipped", isCorrect: null, chosenAnswer: null, correctAnswer: null, solutionSteps: [], question: null });
+    expect(JSON.stringify(skipped.json)).not.toContain(canonical.solutionSteps![0]!);
+
+    expect((await request("POST", `/v1/attempts/${attemptId}/skip`, { questionId }, cookie)).status).toBe(409);
+    expect((await request("POST", `/v1/attempts/${attemptId}/submit`, { questionId, chosenAnswer: canonical.correctAnswer }, cookie)).status).toBe(409);
+
+    const reread = await request("GET", `/v1/attempts/${attemptId}/result`, undefined, cookie);
+    expect(reread.json).toEqual(skipped.json);
+
+    const next = await request("POST", "/v1/attempts", { questionId }, cookie);
+    expect(next.json.attemptId).not.toBe(attemptId); // a skipped attempt never resumes
+    expect(next.json.elapsedSeconds).toBe(0);
+    const submitted = await request("POST", `/v1/attempts/${next.json.attemptId as string}/submit`, { questionId, chosenAnswer: canonical.correctAnswer }, cookie);
+    expect(submitted.json).toMatchObject({ status: "submitted", isCorrect: true });
+    const stillSkipped = await request("GET", `/v1/attempts/${attemptId}/result`, undefined, cookie);
+    expect(stillSkipped.json).toMatchObject({ status: "skipped" });
+  });
+
+  it("another student cannot skip someone else's attempt (403) and an unauthenticated skip is 401", async () => {
+    const a = await signupOnboardEnroll("skip-owner@example.com");
+    const b = await signupOnboardEnroll("skip-other@example.com");
+    const questionId = seed.questionContent[0]!.id;
+    const attemptId = (await request("POST", "/v1/attempts", { questionId }, a)).json.attemptId as string;
+    const stolen = await request("POST", `/v1/attempts/${attemptId}/skip`, { questionId }, b);
+    expect(stolen.status).toBe(403);
+    expect(JSON.stringify(stolen.json)).not.toMatch(/startedAt|studentId/);
+    expect((await request("POST", `/v1/attempts/${attemptId}/skip`, { questionId })).status).toBe(401);
+    expect((await request("POST", "/v1/attempts", { questionId }, a)).json.attemptId).toBe(attemptId); // still open for its owner
+  });
+});

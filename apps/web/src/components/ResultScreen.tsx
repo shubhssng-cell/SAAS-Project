@@ -7,6 +7,33 @@ export function ResultScreen({ result, onSeeWhatHappened, onContinue }: { result
   // Solution steps are the server's authored worked solution. When none is stored the list is empty, and a "View solution" control that reveals nothing would be a control that does nothing -- so none is offered.
   const hasSolution = result.solutionSteps.length > 0;
 
+  // A skipped attempt is its own outcome -- no answer was submitted and nothing was graded -- so it is
+  // never presented as "incorrect" and shows no answers, correct answer, or solution.
+  if (result.status === "skipped") {
+    return (
+      <Screen>
+        <Card>
+          <div className="result-banner">
+            <div className="result-icon skipped" aria-hidden="true">
+              →
+            </div>
+            <h1 className="headline headline-compact">Skipped.</h1>
+          </div>
+          <p className="subtext">You skipped this question, so no answer was submitted.</p>
+          <div className="fact-row">
+            <span className="fact-label">Time spent</span>
+            <span className="fact-value">
+              {result.timeTakenSeconds}s <span className="fact-value-note">(expected {result.expectedTimeSeconds}s)</span>
+            </span>
+          </div>
+        </Card>
+        <div className="btn-row">
+          <Button onClick={onContinue}>Continue to next question</Button>
+        </div>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Card>

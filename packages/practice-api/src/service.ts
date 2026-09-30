@@ -171,7 +171,9 @@ export class PracticeApiService {
 
     try {
       const attempt = await this.deps.practiceLoopService.skipAttempt({ attemptId: input.attemptId, claim: ownershipClaim, now });
-      return toAttemptResultView(attempt, null, null);
+      // Same expected time `getAttemptResult()` reports for a skipped attempt, so the skip response and a later re-read agree.
+      const content = await this.deps.questionContentReader.findPublishedById(attempt.questionId);
+      return toAttemptResultView(attempt, null, content?.expectedTimeSeconds ?? null);
     } catch (error) {
       throw toPracticeApiError(error);
     }

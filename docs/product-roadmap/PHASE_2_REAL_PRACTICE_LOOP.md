@@ -2,18 +2,19 @@
 
 ## Phase objective
 
-From the master roadmap: *a real student can practice real published questions end-to-end against a real database.* Phase 2 is delivered as a sequence of small units. Only **Unit 1** has started.
+From the master roadmap: *a real student can practice real published questions end-to-end against a real database.* Phase 2 is delivered as a sequence of small units. **Units 1–6 are complete** (student-facing practice loop against dev/in-memory content); **Unit 7 and later have not started**, and the "real database" half of the phase objective is still open — no live database has ever been reachable in this environment.
 
 ## Unit status
 
 | Unit | Scope | Status |
 |---|---|---|
-| 1 | Real published practice content foundation (dev/in-memory content path) | **COMPLETE** (this document) |
+| 1 | Real published practice content foundation (dev/in-memory content path) | **COMPLETE** (below) |
 | 2 | Real question → timer → answer → submit | **COMPLETE** (below) |
 | 3 | Real submission → result → explanation | **COMPLETE** (below) |
 | 4 | Continuous next-question practice loop | **COMPLETE** (below) |
 | 5 | Attempt / session recovery | **COMPLETE** (below) |
-| 6+ | Not defined here yet — real database, further loop work — **NOT STARTED** | NOT STARTED |
+| 6 | Practice lifecycle completeness (Skip) | **COMPLETE** (below) |
+| 7+ | Not defined here yet — real database, further loop work — **NOT STARTED** | NOT STARTED |
 
 ## Unit 1 — Real published practice content foundation
 
@@ -141,7 +142,7 @@ No API, backend, contract, or dependency change. No selection, ranking, randomiz
 - Autopsy/Continue-after-autopsy behavior is unchanged Phase 1 behavior and is never reached with real data.
 - Still dev/in-memory content and repositories.
 
-**Unit 5+ status: NOT STARTED (Unit 5 is now complete — see below).**
+*(Status when Unit 4 landed: Unit 5 not yet started. Unit 5 and Unit 6 have since been completed — see the table above and the sections below.)*
 
 ## Unit 5 — Attempt / session recovery
 
@@ -175,4 +176,34 @@ No API, backend, contract, or dependency change. No selection, ranking, randomiz
 - An attempt left open indefinitely resumes indefinitely (no expiry/abandonment policy exists yet); its elapsed time simply keeps growing.
 - Hard refresh on the autopsy screen is unchanged Phase 1 behavior (never reached with real data).
 
-**Unit 6+ status: NOT STARTED.**
+*(Status when Unit 5 landed: Unit 6 not yet started. Unit 6 has since been completed — below.)*
+
+## Unit 6 — Practice lifecycle completeness (Skip)
+
+**Scope (defined here, since the roadmap left it open).** Make the practice loop complete for a student who does **not** submit an answer: a student-facing **Skip** that goes through the existing server-side attempt lifecycle, ends in a terminal state distinct from a submitted answer, and lets the student continue via the existing `/practice/next` path. Deliberately narrow: no new statuses, no new state machine, nothing adaptive.
+
+**What already existed (inspected).** The whole backend: `@ipmat/attempt`'s `skipAttempt()` (in-progress only → terminal `skipped`, `isCorrect`/`chosenAnswer` stay `null`, time = `finalizedAt − startedAt`), `PracticeLoopService.skipAttempt()`, `PracticeApiService.skipAttempt()`, `POST /v1/attempts/:id/skip` (session-derived identity, ownership-checked), and `GET /v1/attempts/:id/result` already returning `status: "skipped"`. Unit 5's recovery already excludes non-`in_progress` attempts. What was missing was entirely on the web side, plus one small server inconsistency (below).
+
+**Implementation.**
+- `apps/web` adapter contract: new `skipQuestion({ questionId })`; `AttemptResultViewModel` gained an explicit `status: "submitted" | "skipped"`. For a skip, `isCorrect`/`chosenAnswer`/`correctAnswer` are empty and UI must branch on `status` first. `createApiTrainingAdapter()` implements it with `POST /v1/attempts/<attempt>/skip` sending **only** `{ questionId }` (no duration, no state), guarded by the Unit 2 single-flight so a double activation is one request. It forgets the attempt on success (a submit afterwards never reaches the server) and keeps it on failure (retry works). A skip response is accepted only if it is a `skipped` result with ids; a non-object body, a "submitted"-shaped body, or a missing attempt id is malformed and rejects. The result-by-id read now accepts both outcomes (so a refresh on a skipped result works) and never asks about an autopsy for a skip. The fixture adapter got the matching field/method (test-only, via the same domain `skipAttempt()`); it is still not in the production runtime.
+- `QuestionPlayer`: a secondary (`btn-secondary`), block-width **"Skip question"** button under Submit. Native button → keyboard-operable with a real accessible name. It is disabled whenever *any* submit/skip request is in flight, and every other control is disabled meanwhile; labels read "Skipping…"/"Submitting…". The timer effect is untouched (one interval, cleared on unmount — navigation to the result unmounts it).
+- `PracticeQuestionRoute`: `handleSkip` shares the existing ref guard with submit (so skip+skip and skip+submit cannot overlap), calls `adapter.skipQuestion()`, stores the result, and navigates to the existing result URL `/practice/:id/result?attempt=<id>`. Failures show fixed copy ("We couldn't skip this question. Please try again."), expired sessions the standard expired screen; controls re-enable so the student can retry.
+- `ResultScreen`: a skipped result renders its own screen — "Skipped." with a neutral icon, "You skipped this question, so no answer was submitted.", time spent vs expected, and **Continue to next question** (→ `/practice/next`, unchanged). It shows no verdict, no answers, no correct answer, no solution, and is never styled or worded as "incorrect".
+- **Server fix (found by a test):** `PracticeApiService.skipAttempt()` returned `expectedTimeSeconds: null`, while re-reading the same skipped attempt returned the real value — so the skipped screen would have said "expected 60s" (the adapter default) right after skipping and the correct value after a refresh. It now resolves the expected time from the published content exactly as `getAttemptResult()` does. No other backend change; no domain, schema, or dependency change.
+
+**Attempt lifecycle & recovery interaction.** Skipped, submitted and in-progress stay three distinct states, all owned by the server. A skipped attempt is terminal: it can't be submitted (409 `invalid_state`), skipped again (409), or resumed. Reloading after a skip, or reopening that question later, starts a brand-new attempt (`elapsedSeconds` 0); a later submitted attempt never touches the skipped one, whose result stays reachable and still reads "skipped". Time on a skip is the server's `finalizedAt − startedAt`.
+
+**Tests (new).** `apps/web/test/practice/skipFlow.test.ts` (26): real-adapter skip request shape and outcome mapping; not dressed up as an answer; double skip → one request; submit after skip never sent; server 409 on submit-after-skip (fake server); no attempt → no request; reload after skip → new attempt, later submit to the new id, skipped attempt re-read as skipped without an autopsy call; submitted stays submitted; malformed / 500 / 401 / network / retry-after-failure; real `react-dom/server` renders (Skip secondary and enabled while Submit is disabled; all controls disabled while in flight; skipped screen vs the unchanged incorrect screen); route/player boundaries (shared guard, safe copy, timer cleanup, no attempt-state authority or storage, no domain imports, production adapter). `packages/practice-api/test/skipLifecycle.test.ts` (11): terminal skipped result with no key/solution/question; distinct from an incorrect answer; submit-after-skip and skip-twice and skip-after-submit refused; recovery (not resumed, later submit leaves it skipped); server-derived time; ownership; not_found; malformed; skip response equals re-read. Two HTTP tests appended to `apps/api/test/devContent.test.ts` (start → skip → 409s → re-read → new attempt → submit → original still skipped; cross-student 403; unauthenticated 401). One old test that asserted "a skipped result is malformed" was removed, since that is exactly the behavior this unit changes.
+
+**Validation.** apps/web 319/319 (was 294); apps/api 54/54; practice-api 68/68; full repository 1743/1743 across 175 files (was 1705); typecheck, build, lint and `git diff --check` clean.
+
+**Browser verification** (raw CDP / headless Edge, real `apps/api` + `apps/web`, Unit 1 dev content, network logged): 19/19. The unanswered question shows an enabled secondary "Skip question" with Submit disabled. A **simulated** server 500 on the skip request (CDP `Fetch` interception — the real server never failed) showed the safe notice with nothing leaked and re-enabled controls on the same question. A real double-click on Skip sent exactly one skip request and landed on "Skipped." (no "Not quite"/answers/solution/ids/JSON; "expected 45s" matching the question; no timer left on screen). Direct API calls from the browser session confirmed the server refuses to submit or skip that attempt again (409/409). Refreshing the skipped result still showed "Skipped.". A double-clicked Continue sent one `POST /v1/recommendation`, then opened a new real question with a new attempt. Reopening the skipped question created a new attempt (elapsed 0); submitting it was graded normally, and the original attempt still read "Skipped.". Skip worked from the keyboard (focus + Enter). With cookies cleared, Skip hit a **real** 401 and showed the expired-session screen with no internals.
+
+**Known limitations.**
+- Skip is available only on an unanswered/any open question in the player; there is no "skip" from the recommendation card or a confirmation dialog before skipping (a deliberate minimal choice — the result screen is the confirmation).
+- A skip is recorded in the attempt history, but nothing in this unit decides what it means for recommendation, mastery, or autopsy (the existing backend reads attempt history as it always did; no logic was added or changed).
+- The failure states for skip other than 401 were simulated at the browser layer; the server was never made to fail on its own.
+- Abandonment (an attempt left open and never finalized) still has no policy — unchanged from Unit 5.
+- Still dev/in-memory content and repositories; the live database is unavailable and nothing here was verified against one.
+
+**Unit 7+ status: NOT STARTED.**

@@ -533,6 +533,15 @@ a.btn {
   color: var(--danger);
 }
 
+.result-icon.skipped {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.skip-button {
+  margin-top: var(--space-2);
+}
+
 .result-question {
   margin-bottom: var(--space-4, 16px);
 }

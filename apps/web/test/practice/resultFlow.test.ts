@@ -20,6 +20,7 @@ const src = (file: string) => readFileSync(join(__dirname, "..", "..", "src", fi
 
 function view(overrides: Partial<AttemptResultViewModel> = {}): AttemptResultViewModel {
   return {
+    status: "submitted",
     attemptId: "attempt-1",
     questionId: "q-1",
     isCorrect: false,
@@ -140,7 +141,6 @@ describe("adapter -- getAttemptResult (refresh recovery)", () => {
   it.each([
     ["null body", null],
     ["no verdict", { ...SERVER_RESULT, isCorrect: undefined }],
-    ["a skipped attempt (no answer)", { ...SERVER_RESULT, status: "skipped", isCorrect: null, chosenAnswer: null, correctAnswer: null }],
     ["a non-object", "oops"]
   ])("a malformed/unrenderable response (%s) rejects instead of rendering a guess", async (_label, body) => {
     await expect(createApiTrainingAdapter(fetchReturning(200, body).fetchImpl).getAttemptResult("attempt-1")).rejects.toThrow();

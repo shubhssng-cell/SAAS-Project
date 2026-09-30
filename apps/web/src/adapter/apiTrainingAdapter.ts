@@ -109,12 +109,20 @@ function readQuestion(body: unknown, elapsedSeconds: unknown): QuestionViewModel
   };
 }
 
-/** A result is only renderable if the server said it was a graded, submitted attempt -- anything else (missing ids, no boolean verdict, a skip) is treated as malformed, never rendered as a guess. */
-function isRenderableResult(value: Record<string, unknown>): boolean {
+type ResultStatus = AttemptResultViewModel["status"];
+
+/**
+ * A result is only renderable if it is an attempt the server reports as finished in a way the caller allows:
+ * a graded, submitted attempt (ids + a boolean verdict + both answers), or a skipped one (ids only -- nothing was
+ * answered or graded). Anything else (missing ids, no verdict, an unexpected status) is malformed and is never
+ * rendered as a guess.
+ */
+function isRenderableResult(value: Record<string, unknown>, allowed: readonly ResultStatus[]): boolean {
+  const status: ResultStatus = value.status === "skipped" ? "skipped" : "submitted";
+  if (!allowed.includes(status)) return false;
+  if (typeof value.attemptId !== "string" || value.attemptId === "" || typeof value.questionId !== "string") return false;
+  if (status === "skipped") return true;
   return (
-    typeof value.attemptId === "string" &&
-    value.attemptId !== "" &&
-    typeof value.questionId === "string" &&
     typeof value.isCorrect === "boolean" &&
     typeof value.chosenAnswer === "string" &&
     typeof value.correctAnswer === "string"
@@ -126,22 +134,24 @@ function readQuestionContext(value: unknown): AttemptResultViewModel["question"]
   return typeof q.prompt === "string" && q.prompt !== "" ? { prompt: q.prompt, chapterName: typeof q.chapterName === "string" ? q.chapterName : "", conceptName: typeof q.conceptName === "string" ? q.conceptName : "" } : null;
 }
 
-function readAttemptResult(body: unknown, hasAutopsy: boolean): AttemptResultViewModel {
+function readAttemptResult(body: unknown, hasAutopsy: boolean, allowed: readonly ResultStatus[] = ["submitted"]): AttemptResultViewModel {
   const value = asObject(body);
-  if (!isRenderableResult(value)) {
+  if (!isRenderableResult(value, allowed)) {
     throw new PracticeApiRequestError({ kind: "unexpected", message: MALFORMED_RESULT });
   }
+  const skipped = value.status === "skipped";
   return {
+    status: skipped ? "skipped" : "submitted",
     attemptId: typeof value.attemptId === "string" ? value.attemptId : "",
     questionId: typeof value.questionId === "string" ? value.questionId : "",
-    isCorrect: value.isCorrect === true,
-    chosenAnswer: typeof value.chosenAnswer === "string" ? value.chosenAnswer : "",
-    correctAnswer: typeof value.correctAnswer === "string" ? value.correctAnswer : "",
+    isCorrect: !skipped && value.isCorrect === true,
+    chosenAnswer: !skipped && typeof value.chosenAnswer === "string" ? value.chosenAnswer : "",
+    correctAnswer: !skipped && typeof value.correctAnswer === "string" ? value.correctAnswer : "",
     timeTakenSeconds: typeof value.timeSpentSeconds === "number" ? value.timeSpentSeconds : 0,
     expectedTimeSeconds: typeof value.expectedTimeSeconds === "number" ? value.expectedTimeSeconds : 60,
-    solutionSteps: Array.isArray(value.solutionSteps) ? value.solutionSteps.filter((step): step is string => typeof step === "string") : [],
-    question: readQuestionContext(value.question),
-    hasAutopsy
+    solutionSteps: !skipped && Array.isArray(value.solutionSteps) ? value.solutionSteps.filter((step): step is string => typeof step === "string") : [],
+    question: skipped ? null : readQuestionContext(value.question),
+    hasAutopsy: !skipped && hasAutopsy
   };
 }
 
@@ -163,6 +173,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
   // Phase 2 Unit 2: one in-flight start / submit per question -- a duplicate call (StrictMode's double mount effect, a double click) shares the first request instead of creating a second attempt or a second submission.
   const startFlights = createSingleFlight<QuestionViewModel>();
   const submitFlights = createSingleFlight<AttemptResultViewModel>();
+  const skipFlights = createSingleFlight<AttemptResultViewModel>();
   // Phase 2 Unit 4: concurrent recommendation reads (StrictMode's double mount, a double activation) share one request.
   const recommendationFlights = createSingleFlight<RecommendationViewModel>();
   const fetchRecommendation = () => recommendationFlights.run("next", async () => readRecommendation(await post("/v1/recommendation")));
@@ -202,6 +213,18 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     return readAttemptResult(submitted, await isAutopsyPending(attemptId));
   }
 
+  // `timeSpentSeconds`/status come back from the server; nothing about the skip (not even a duration) is sent from here.
+  async function skipAttemptFor(questionId: string): Promise<AttemptResultViewModel> {
+    const attemptId = attemptIdByQuestion.get(questionId);
+    if (!attemptId) {
+      throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
+    }
+    const skipped = readAttemptResult(await post(`/v1/attempts/${attemptId}/skip`, { questionId }), false, ["skipped"]);
+    attemptIdByQuestion.delete(questionId);
+    questionsPracticedSoFar += 1;
+    return skipped;
+  }
+
   // Whether an autopsy hypothesis is actually pending is resolved via the
   // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
   // response, which carries no such signal) -- see this file's own doc comment.
@@ -225,9 +248,15 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
       return submitFlights.run(input.questionId, () => submitAttemptFor(input));
     },
 
+    skipQuestion(input: { questionId: string }): Promise<AttemptResultViewModel> {
+      return skipFlights.run(input.questionId, () => skipAttemptFor(input.questionId));
+    },
+
     async getAttemptResult(attemptId: string): Promise<AttemptResultViewModel> {
       const body = await get(`/v1/attempts/${encodeURIComponent(attemptId)}/result`);
-      return readAttemptResult(body, await isAutopsyPending(attemptId));
+      const parsed = readAttemptResult(body, false, ["submitted", "skipped"]);
+      // A skipped attempt has nothing to diagnose; only a graded one can have a pending autopsy.
+      return parsed.status === "skipped" ? parsed : { ...parsed, hasAutopsy: await isAutopsyPending(attemptId) };
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

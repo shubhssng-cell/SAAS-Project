@@ -13,12 +13,19 @@ import { Timer } from "./Timer.js";
 export function QuestionPlayer({
   question,
   onSubmit,
+  onSkip,
   submitting = false,
+  skipping = false,
   submitError = null
 }: {
   question: QuestionViewModel;
   onSubmit: (chosenAnswer: string, timeTakenSeconds: number) => void;
+  /** Skips the question (server-side terminal `skipped` state). The player only asks; it never decides what a skip means. */
+  onSkip: () => void;
+  /** True while EITHER a submit or a skip request is in flight -- every control is disabled, so neither can be repeated or mixed. */
   submitting?: boolean;
+  /** Which of the two in-flight operations it is (labels only). */
+  skipping?: boolean;
   submitError?: string | null;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -96,7 +103,10 @@ export function QuestionPlayer({
       {submitError && <ErrorNotice>{submitError}</ErrorNotice>}
 
       <Button block disabled={!selected || submitting} onClick={handleSubmit}>
-        {submitting ? "Submitting…" : "Submit answer"}
+        {submitting && !skipping ? "Submitting…" : "Submit answer"}
+      </Button>
+      <Button block variant="secondary" className="skip-button" disabled={submitting} onClick={onSkip}>
+        {skipping ? "Skipping…" : "Skip question"}
       </Button>
     </Screen>
   );

@@ -1,6 +1,7 @@
 import { FixtureProvider } from "@ipmat/ai";
 import {
   recordAttemptEvent,
+  skipAttempt,
   startAttempt,
   submitAttempt,
   toAutopsyEvidence,
@@ -138,6 +139,7 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
       }
 
       const result: AttemptResultViewModel = {
+        status: "submitted",
         attemptId: attempt.id,
         questionId: input.questionId,
         isCorrect,
@@ -150,6 +152,30 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
         hasAutopsy
       };
       resultsByAttempt.set(attempt.id, result);
+      return result;
+    },
+
+    // Fixture-only: mirrors the real adapter's contract using the same domain skip function.
+    async skipQuestion(input: { questionId: string }): Promise<AttemptResultViewModel> {
+      const attempt = inProgressByQuestion.get(input.questionId);
+      if (!attempt) throw new Error(`No in-progress attempt for question "${input.questionId}" -- call loadQuestion() first.`);
+      const skipped = skipAttempt(attempt, { studentId: STUDENT_ID, questionId: input.questionId }, { now: now() });
+      inProgressByQuestion.delete(input.questionId);
+      attempts.push(skipped);
+      const result: AttemptResultViewModel = {
+        status: "skipped",
+        attemptId: skipped.id,
+        questionId: input.questionId,
+        isCorrect: false,
+        chosenAnswer: "",
+        correctAnswer: "",
+        timeTakenSeconds: skipped.timeSpentSeconds ?? 0,
+        expectedTimeSeconds: getQuestion(input.questionId).attemptContext.expectedTimeSeconds ?? 60,
+        solutionSteps: [],
+        question: null,
+        hasAutopsy: false
+      };
+      resultsByAttempt.set(skipped.id, result);
       return result;
     },
 

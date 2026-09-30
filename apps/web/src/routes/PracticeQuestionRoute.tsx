@@ -25,7 +25,9 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
   const [state, setState] = useState<QuestionLoadState>({ status: "loading" });
   const [retryCount, setRetryCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [submitFailed, setSubmitFailed] = useState(false);
+  // Student-safe copy for the last failed submit/skip (never an error object); `null` = none.
+  const [failure, setFailure] = useState<string | null>(null);
+  const [skipping, setSkipping] = useState(false);
   // A ref (not just `submitting` state) so two clicks in the same frame cannot both pass the guard before React re-renders.
   const submitInFlight = useRef(false);
 
@@ -34,7 +36,8 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
     setState({ status: "loading" });
     setSubmitting(false);
     submitInFlight.current = false;
-    setSubmitFailed(false);
+    setSkipping(false);
+    setFailure(null);
     adapter
       .loadQuestion(questionId)
       .then((question) => {
@@ -65,7 +68,7 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
   async function handleSubmit(chosenAnswer: string, timeTakenSeconds: number) {
     if (submitting || submitInFlight.current) return;
     submitInFlight.current = true;
-    setSubmitFailed(false);
+    setFailure(null);
     setSubmitting(true);
     try {
       const result = await adapter.submitAnswer({ questionId, chosenAnswer, timeTakenSeconds });
@@ -76,12 +79,36 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
       if (isSessionExpiredError(error)) {
         setState({ status: "error", sessionExpired: true });
       } else {
-        setSubmitFailed(true);
+        setFailure("We couldn't submit your answer. Please try again.");
       }
       submitInFlight.current = false;
       setSubmitting(false);
     }
   }
 
-  return <QuestionPlayer question={state.question} onSubmit={handleSubmit} submitting={submitting} submitError={submitFailed ? "We couldn't submit your answer. Please try again." : null} />;
+  // Skip shares the submit in-flight guard, so a submit and a skip (or two skips) can never overlap. The SERVER decides what a
+  // skip means (terminal `skipped` state); this only asks for it and then shows the outcome on the result route.
+  async function handleSkip() {
+    if (submitting || submitInFlight.current) return;
+    submitInFlight.current = true;
+    setFailure(null);
+    setSkipping(true);
+    setSubmitting(true);
+    try {
+      const result = await adapter.skipQuestion({ questionId });
+      setLastResult(questionId, result);
+      navigate(resultPath(questionId, result.attemptId));
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        setState({ status: "error", sessionExpired: true });
+      } else {
+        setFailure("We couldn't skip this question. Please try again.");
+      }
+      submitInFlight.current = false;
+      setSkipping(false);
+      setSubmitting(false);
+    }
+  }
+
+  return <QuestionPlayer question={state.question} onSubmit={handleSubmit} onSkip={handleSkip} submitting={submitting} skipping={skipping} submitError={failure} />;
 }

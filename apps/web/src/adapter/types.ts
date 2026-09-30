@@ -42,6 +42,12 @@ export interface DashboardViewModel {
 }
 
 export interface AttemptResultViewModel {
+  /**
+   * The attempt's terminal state as the SERVER reported it. `"skipped"` is a different thing from an incorrect
+   * answer: no answer was submitted, nothing was graded, and `isCorrect`/`chosenAnswer`/`correctAnswer` carry
+   * no meaning (`false`/`""`/`""`) -- UI must branch on `status` before reading them.
+   */
+  status: "submitted" | "skipped";
   attemptId: string;
   questionId: string;
   isCorrect: boolean;
@@ -72,6 +78,8 @@ export interface TrainingRecommendationAdapter {
   loadQuestion(questionId: string): Promise<QuestionViewModel>;
   submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel>;
   /** Re-reads the result of an already-submitted attempt from the server (e.g. after a page refresh). Rejects when the result is unavailable. */
+  /** Skips the question's in-progress attempt (server-side terminal `skipped` state) and returns the skipped outcome. Rejects on failure; a skipped attempt can never be submitted afterwards. */
+  skipQuestion(input: { questionId: string }): Promise<AttemptResultViewModel>;
   getAttemptResult(attemptId: string): Promise<AttemptResultViewModel>;
   getAutopsy(attemptId: string): Promise<AutopsyViewModel>;
   /** Applies the student's response to the pending hypothesis and returns the resulting recommendation — a confirmed hypothesis may (transparently, via the real domain layer) become a targeted repair recommendation. */

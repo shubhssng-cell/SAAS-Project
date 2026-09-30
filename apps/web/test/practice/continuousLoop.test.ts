@@ -168,6 +168,7 @@ describe("empty / failure / malformed handling of the next-question step", () =>
 
 describe("Continue in the UI", () => {
   const result: AttemptResultViewModel = {
+    status: "submitted",
     attemptId: "attempt-1",
     questionId: "q-a",
     isCorrect: true,
