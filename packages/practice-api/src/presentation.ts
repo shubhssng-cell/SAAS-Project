@@ -79,6 +79,57 @@ const RECENT_EVIDENCE_COPY: Partial<Record<string, { modeLabel: string; headline
   }
 };
 
+/**
+ * Phase 3.2 -- student-facing wording for ACCUMULATED evidence (the existing multi-attempt reasons, which need the shared
+ * minimum number of observations). Every sentence states a COUNT or RATIO taken from the student's own persisted attempts
+ * ("2 of your 4 graded answers on Percentages were incorrect") and what the question is ("more practice on it") -- never a
+ * label, a score, a cause, or a claim about the student. Returns `null` (=> the neutral coverage copy) when the facts needed to
+ * state it truthfully are not present, rather than inventing a number.
+ */
+function accumulatedEvidenceCopy(
+  reason: string,
+  evidence: { conceptName: string; gradedAttempts: number; incorrectCount: number; trailingIncorrectStreak: number; speedObservations: number; meanSpeedRatio: number | null; highestDemonstratedTier: { tier: string; attempts: number; correct: number } | null } | null | undefined,
+  selection: { isFallback: boolean; questionTier: string }
+): { modeLabel: string; headline: string; explanation: string } | null {
+  if (!evidence) return null;
+  const topic = evidence.conceptName;
+  switch (reason) {
+    case "repeated_error":
+      if (evidence.trailingIncorrectStreak < 2) return null;
+      return {
+        modeLabel: "Repeated incorrect answers",
+        headline: "More practice on this topic",
+        explanation: `Your last ${evidence.trailingIncorrectStreak} graded answers on ${topic} were all incorrect, so here's more practice on ${topic}.`
+      };
+    case "accuracy_weakness":
+      if (evidence.gradedAttempts < 1 || evidence.incorrectCount < 1) return null;
+      return {
+        modeLabel: "Accuracy so far",
+        headline: "More practice on this topic",
+        explanation: `${evidence.incorrectCount} of your ${evidence.gradedAttempts} graded answers on ${topic} were incorrect, so here's more practice on ${topic}.`
+      };
+    case "speed_weakness":
+      if (evidence.meanSpeedRatio === null || evidence.speedObservations < 1) return null;
+      return {
+        modeLabel: "Time so far",
+        headline: "Practice at a steady pace",
+        explanation: `Across ${evidence.speedObservations} attempts on ${topic}, your answers took about ${evidence.meanSpeedRatio.toFixed(1)} times the expected time, so here's more practice on ${topic} while you build speed.`
+      };
+    case "difficulty_progression": {
+      // Only when progression is a genuine, evidence-backed reason (not the last-resort fallback) and there IS a demonstrated tier to cite.
+      const demonstrated = evidence.highestDemonstratedTier;
+      if (selection.isFallback || !demonstrated) return null;
+      return {
+        modeLabel: "Your progress so far",
+        headline: "Try the next level",
+        explanation: `You answered ${demonstrated.correct} of ${demonstrated.attempts} graded ${demonstrated.tier}-tier questions on ${topic} correctly, so here's a question at the ${selection.questionTier} tier.`
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 export function toRecommendationView(result: TrainingOrchestrationResult): RecommendationView {
   if (result.status === "no_action") {
     return { questionId: null, modeLabel: "Up to date", headline: "You're all caught up", explanation: "Nothing urgent right now. Keep practicing to build up more evidence." };
@@ -108,6 +159,9 @@ export function toRecommendationView(result: TrainingOrchestrationResult): Recom
   // was observed ("your last answer was incorrect"), never a claim about the student. Anything else keeps the coverage copy.
   const recentCopy = RECENT_EVIDENCE_COPY[result.providerResult.primaryReason];
   if (recentCopy) return { questionId: result.question.questionId, ...recentCopy };
+  // Phase 3.2: accumulated evidence -- counts/ratios of observed performance across persisted attempts, stated as facts.
+  const accumulated = accumulatedEvidenceCopy(result.providerResult.primaryReason, result.providerResult.accumulatedEvidence, { isFallback: result.providerResult.isFallback, questionTier: result.question.difficultyTier });
+  if (accumulated) return { questionId: result.question.questionId, ...accumulated };
   return { questionId: result.question.questionId, modeLabel: "Coverage", headline: "Keep building your coverage", explanation: "This targets a part of the topic you haven't practiced much yet." };
 }
 

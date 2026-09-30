@@ -339,3 +339,72 @@ describe("first adaptive layer through the real HTTP path (Phase 3.1)", () => {
     expect(recB.json.modeLabel).toBe("Coverage");
   });
 });
+
+describe("accumulated evidence through the real HTTP path (Phase 3.2)", () => {
+  const training = () => (seed.trainingQuestions.get(DEV_EXAM_ID) ?? []).map((r) => r.question);
+  const idOf = (family: string) => training().find((q) => q.patternFamilyName === family)!.questionId;
+  const canonicalOf = (id: string) => seed.questions.find((q) => q.id === id)!;
+
+  async function answer(cookie: string, questionId: string, outcome: "correct" | "wrong") {
+    const started = await request("POST", "/v1/attempts", { questionId }, cookie);
+    const c = canonicalOf(questionId);
+    const chosenAnswer = outcome === "correct" ? c.correctAnswer : c.options!.find((o) => o !== c.correctAnswer)!;
+    return request("POST", `/v1/attempts/${started.json.attemptId as string}/submit`, { questionId, chosenAnswer }, cookie);
+  }
+  const play = async (cookie: string, steps: Array<[string, "correct" | "wrong"]>) => {
+    for (const [family, outcome] of steps) await answer(cookie, idOf(family), outcome);
+  };
+  const recommendation = async (cookie: string) => (await request("POST", "/v1/recommendation", undefined, cookie)).json;
+  const SUCC = "Successive Percentage Change", REV = "Reverse Percentage", POINT = "Percentage Point vs Percentage Change";
+
+  it("CASE A -- one incorrect answer is met by the recent rule only, never as an accumulated pattern", async () => {
+    const cookie = await signupOnboardEnroll("acc-a@example.com");
+    await play(cookie, [[SUCC, "wrong"]]);
+    const rec = await recommendation(cookie);
+    expect(rec.modeLabel).toBe("After an incorrect answer");
+    expect(JSON.stringify(rec)).not.toMatch(/Repeated incorrect|Accuracy so far|graded answers/);
+  });
+
+  it("CASE B -- three incorrect answers: the accumulated copy states the count as a fact; the just-attempted question is not re-served", async () => {
+    const cookie = await signupOnboardEnroll("acc-b@example.com");
+    await play(cookie, [[SUCC, "wrong"], [REV, "wrong"], [SUCC, "wrong"]]);
+    const rec = await recommendation(cookie);
+    expect(rec).toMatchObject({ modeLabel: "Repeated incorrect answers", headline: "More practice on this topic" });
+    expect(rec.explanation).toBe("Your last 3 graded answers on Percentages were all incorrect, so here's more practice on Percentages.");
+    expect(rec.questionId).not.toBe(idOf(SUCC));
+    expect(JSON.stringify(rec)).not.toMatch(/repeated_error|accuracy_weakness|recent_|primaryReason|correctAnswer|solutionSteps|groundTruth/);
+    expect(Object.keys(rec).sort()).toEqual(["explanation", "headline", "modeLabel", "questionId"]);
+  });
+
+  it("CASE E -- mixed results state the observed proportion, and it stops once later answers are correct (not permanent)", async () => {
+    const cookie = await signupOnboardEnroll("acc-e@example.com");
+    await play(cookie, [[POINT, "wrong"], [SUCC, "correct"], [REV, "wrong"], [SUCC, "correct"]]);
+    const mixed = await recommendation(cookie);
+    expect(mixed.modeLabel).toBe("Accuracy so far");
+    expect(mixed.explanation).toBe("2 of your 4 graded answers on Percentages were incorrect, so here's more practice on Percentages.");
+    await play(cookie, [[POINT, "correct"], [SUCC, "correct"], [REV, "correct"]]);
+    expect((await recommendation(cookie)).modeLabel).not.toBe("Accuracy so far");
+  });
+
+  it("PERMANENCE -- two early misses then a long run of correct answers do not keep reporting repeated errors", async () => {
+    const cookie = await signupOnboardEnroll("acc-perm@example.com");
+    await play(cookie, [[SUCC, "wrong"], [REV, "wrong"], [POINT, "correct"], [SUCC, "correct"], [REV, "correct"], [POINT, "correct"], [SUCC, "correct"], [REV, "correct"]]);
+    const rec = await recommendation(cookie);
+    expect(String(rec.modeLabel)).not.toMatch(/Repeated incorrect|Accuracy so far/);
+  });
+
+  it("CASE D -- three correct on-pace answers on the standard tier: the recommendation moves off the basic question to the advanced tier", async () => {
+    const cookie = await signupOnboardEnroll("acc-d@example.com");
+    await play(cookie, [[POINT, "correct"], [POINT, "correct"], [POINT, "correct"]]);
+    const rec = await recommendation(cookie);
+    expect([idOf(SUCC), idOf(REV)]).toContain(rec.questionId);
+    expect(String(rec.modeLabel)).not.toMatch(/incorrect|Accuracy/);
+  });
+
+  it("isolation: another student's three incorrect answers do not change this student's recommendation", async () => {
+    const a = await signupOnboardEnroll("acc-iso-a@example.com");
+    const b = await signupOnboardEnroll("acc-iso-b@example.com");
+    await play(a, [[SUCC, "wrong"], [REV, "wrong"], [SUCC, "wrong"]]);
+    expect((await recommendation(b)).modeLabel).toBe("Coverage");
+  });
+});

@@ -1,5 +1,5 @@
-import { MASTERY_CONSTANTS } from "@ipmat/mastery";
 import { computeExposureCounts, type ExposureCounts } from "./exposure.js";
+import { highestDemonstratedTier, trailingIncorrectStreak } from "./accumulatedEvidence.js";
 import { deriveRecentEvidence, recentEvidenceReasonFor } from "./recentEvidence.js";
 import {
   ADAPTIVE_SELECTION_CONSTANTS,
@@ -54,17 +54,8 @@ export function buildTrainingNeedContext(input: {
  * single tier yet).
  */
 export function computeProgressionTargetTier(mastery: MasteryStateResult | undefined): DifficultyTier {
-  if (!mastery) return "standard";
-
-  let highestMastered: DifficultyTier | null = null;
-  for (const tier of DIFFICULTY_TIER_ORDER) {
-    const stats = mastery.detail.difficultyBreakdown.byTier[tier];
-    if (!stats || stats.attempts < MASTERY_CONSTANTS.MIN_OBSERVATIONS_FOR_COMPONENT) continue;
-    if (stats.correct / stats.attempts >= ADAPTIVE_SELECTION_CONSTANTS.PROGRESSION_ACCURACY_THRESHOLD) {
-      highestMastered = tier;
-    }
-  }
-
+  // Phase 3.2: the rule itself lives in `highestDemonstratedTier()` (accumulatedEvidence.ts) -- one implementation, shared with the explanation.
+  const highestMastered = highestDemonstratedTier(mastery)?.tier ?? null;
   if (!highestMastered) return "standard";
   const idx = DIFFICULTY_TIER_ORDER.indexOf(highestMastered);
   return DIFFICULTY_TIER_ORDER[Math.min(idx + 1, DIFFICULTY_TIER_ORDER.length - 1)]!;
@@ -104,7 +95,8 @@ export function determineSatisfiedReasons(candidate: AdaptiveCandidateQuestion, 
     }
   }
 
-  if (mastery && mastery.detail.errorRecurrence.longestIncorrectStreak >= ADAPTIVE_SELECTION_CONSTANTS.REPEATED_ERROR_MIN_STREAK) {
+  // Phase 3.2: the CURRENT run of consecutive incorrect answers, not the longest run ever (which would never expire).
+  if (mastery && trailingIncorrectStreak(mastery.detail.accuracyStability.sequence) >= ADAPTIVE_SELECTION_CONSTANTS.REPEATED_ERROR_MIN_STREAK) {
     reasons.push("repeated_error");
   }
 

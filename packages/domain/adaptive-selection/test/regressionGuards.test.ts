@@ -60,7 +60,8 @@ describe("adaptive-selection — regression guards: no hidden score/confidence/m
       candidatesConsidered: 1,
       excludedMalformedCount: 0,
       excludedUnpublishedCount: 0,
-      recentEvidence: null
+      recentEvidence: null,
+      accumulatedEvidence: null
     };
     // @ts-expect-error -- AdaptiveSelectionResult has no overallMastery/score field and must never gain one.
     const withScore: AdaptiveSelectionResult = { ...base, overallMastery: 0.8 };

@@ -466,6 +466,109 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     }
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3.2 -- ACCUMULATED evidence on the real Prisma readers + real Postgres. The decision is a pure function of the
+  // persisted attempts: a brand-new instance (fresh client, fresh services) reconstructs it from the database alone.
+  // ---------------------------------------------------------------------------------------------
+
+  const card = async (instance: Instance, cookie: string) => (await call(instance, "POST", "/v1/recommendation", cookie)).json;
+
+  it("PHASE 3.2 CASE A: one incorrect answer -> only the recent rule reacts; no accumulated pattern is claimed", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "acc-a");
+    await practiceOnce(a, s.cookie, ids.successive, "wrong");
+    const rec = await card(a, s.cookie);
+    expect(rec.modeLabel).toBe("After an incorrect answer");
+    expect(JSON.stringify(rec)).not.toMatch(/Repeated incorrect|Accuracy so far|graded answers/);
+  });
+
+  it("PHASE 3.2 CASE B: three incorrect answers -> accumulated evidence decides, stated as a fact; a RESTARTED instance and a SECOND instance reconstruct the identical decision from Postgres", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "acc-b");
+    await practiceOnce(a, s.cookie, ids.successive, "wrong");
+    await practiceOnce(a, s.cookie, ids.reverse, "wrong");
+    await practiceOnce(a, s.cookie, ids.successive, "wrong");
+    const rec = await card(a, s.cookie);
+    expect(rec).toMatchObject({ modeLabel: "Repeated incorrect answers", headline: "More practice on this topic" });
+    expect(rec.explanation).toBe("Your last 3 graded answers on Percentages were all incorrect, so here's more practice on Percentages.");
+    expect(rec.questionId).not.toBe(ids.successive); // the just-attempted question is not re-served
+    expect(JSON.stringify(rec)).not.toMatch(/repeated_error|accuracy_weakness|recent_|primaryReason|correctAnswer|solutionSteps|groundTruth/);
+
+    const restarted = await startInstance(); // nothing but the database carries over
+    try {
+      expect(await card(restarted, s.cookie)).toEqual(rec);
+    } finally {
+      await restarted.close();
+    }
+    expect(await card(b, s.cookie)).toEqual(rec);
+    expect(await a.prisma.attempt.count({ where: { studentId: s.studentId, status: "submitted", isCorrect: false } })).toBe(3);
+  });
+
+  it("PHASE 3.2 CASE C: three correct-but-slow answers (persisted timestamps) -> the existing accumulated-speed response (Speed Lab) takes over, identically after a restart", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "acc-c");
+    for (const q of [ids.successive, ids.reverse, ids.successive]) {
+      const attemptId = await practiceOnce(a, s.cookie, q, "correct", 220); // expected 75-90s; ~220s elapsed on the server's clock
+      expect((await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId } })).timeSpentSeconds!).toBeGreaterThanOrEqual(200);
+    }
+    const rec = await card(a, s.cookie);
+    expect(rec.modeLabel).toBe("Solving speed"); // Speed Lab's existing observation-style copy
+    const restarted = await startInstance();
+    try {
+      expect(await card(restarted, s.cookie)).toEqual(rec);
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("PHASE 3.2 CASE D: three correct on-pace answers on the standard tier -> the recommendation moves off the basic question to the advanced tier", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "acc-d");
+    for (let i = 0; i < 3; i++) await practiceOnce(a, s.cookie, ids.point, "correct");
+    const rec = await card(a, s.cookie);
+    expect([ids.successive, ids.reverse]).toContain(rec.questionId);
+    expect(String(rec.modeLabel)).not.toMatch(/incorrect|Accuracy/);
+  });
+
+  it("PHASE 3.2 CASE E: mixed results state the observed proportion and are NOT permanent -- more correct answers clear it; two early misses never become permanent", async () => {
+    const ids = await familyIds();
+    const mixed = await newStudent(a, "acc-e");
+    await practiceOnce(a, mixed.cookie, ids.point, "wrong");
+    await practiceOnce(a, mixed.cookie, ids.successive, "correct");
+    await practiceOnce(a, mixed.cookie, ids.reverse, "wrong");
+    await practiceOnce(a, mixed.cookie, ids.successive, "correct");
+    const rec = await card(a, mixed.cookie);
+    expect(rec).toMatchObject({ modeLabel: "Accuracy so far", explanation: "2 of your 4 graded answers on Percentages were incorrect, so here's more practice on Percentages." });
+    for (const q of [ids.point, ids.successive, ids.reverse]) await practiceOnce(a, mixed.cookie, q, "correct");
+    expect((await card(a, mixed.cookie)).modeLabel).not.toBe("Accuracy so far");
+
+    const early = await newStudent(a, "acc-perm");
+    for (const [q, o] of [[ids.successive, "wrong"], [ids.reverse, "wrong"], [ids.point, "correct"], [ids.successive, "correct"], [ids.reverse, "correct"], [ids.point, "correct"], [ids.successive, "correct"], [ids.reverse, "correct"]] as const) {
+      await practiceOnce(a, early.cookie, q, o);
+    }
+    expect(String((await card(a, early.cookie)).modeLabel)).not.toMatch(/Repeated incorrect|Accuracy so far/);
+  });
+
+  it("PHASE 3.2: another student's accumulated history never influences this student; published-only holds inside the accumulated path", async () => {
+    const ids = await familyIds();
+    const other = await newStudent(a, "acc-iso-a");
+    const me = await newStudent(b, "acc-iso-b");
+    for (const q of [ids.successive, ids.reverse, ids.successive]) await practiceOnce(a, other.cookie, q, "wrong");
+    expect((await card(b, me.cookie)).modeLabel).toBe("Coverage");
+
+    const original = await a.prisma.question.findUniqueOrThrow({ where: { id: ids.point } });
+    const draftId = randomUUID();
+    const { id: _id, provenanceId: _prov, ...rest } = original;
+    void _id;
+    void _prov;
+    await a.prisma.question.create({ data: { ...rest, id: draftId, validationState: "human_reviewed", provenanceId: null } as never });
+    try {
+      expect((await card(a, other.cookie)).questionId).not.toBe(draftId);
+    } finally {
+      await a.prisma.question.delete({ where: { id: draftId } });
+    }
+  });
+
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
     const s = await newStudent(a, "repo");
     const enrollment = await a.prisma.enrollment.findFirstOrThrow({ where: { studentId: s.studentId } });

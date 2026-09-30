@@ -19,6 +19,8 @@ A candidate is bucketed by the single **highest-priority** reason it satisfies; 
 
 The vocabulary above is now **fourteen** codes: `recent_incorrect > recent_skip > recent_slow` sit between `speed_weakness` and `coverage_gap` (immediate reactions to the student's most recent finalized attempt; the multi-attempt measured reasons still outrank them), and `recent_correct_on_pace` is the lowest named reason (a correct on-pace answer is not a need). They use only outcome, verdict, server-derived time vs expected time (the existing 1.3 ratio), and Question DNA; `selectNextQuestion()` also never immediately re-serves the just-attempted question. Full rules, limits and evidence: [PHASE_3_ADAPTIVE_PRACTICE.md](../product-roadmap/PHASE_3_ADAPTIVE_PRACTICE.md); decision: D-065.
 
+**Phase 3.2 (Unit 10) addendum — accumulated evidence.** No new reason codes and no new threshold. `repeated_error` now reads the CURRENT run of consecutive incorrect graded answers (`trailingIncorrectStreak()`, from the existing ordered accuracy sequence), not the all-time longest run, which never expired; the progression rule is one shared function (`highestDemonstratedTier()`); `AdaptiveSelectionResult.accumulatedEvidence` exposes descriptive counts/ratios so `practice-api` can state them truthfully (e.g. "Your last 3 graded answers on Percentages were all incorrect"). The minimum-observation rule is the existing `MASTERY_CONSTANTS.MIN_OBSERVATIONS_FOR_COMPONENT` (3); `repeated_error` keeps its own existing 2-in-a-row rule. Decision: D-066; evidence and limits in PHASE_3_ADAPTIVE_PRACTICE.md.
+
 ## Every signal reused from an existing, real contract — never a second model
 
 - Accuracy/speed/novelty/pressure weaknesses read `MasteryStateResult.measures` directly.

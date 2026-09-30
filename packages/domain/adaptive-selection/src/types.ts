@@ -2,9 +2,10 @@ import type { AutopsyQuestionContext, RepairPlan } from "@ipmat/autopsy";
 import type { MasteryAttemptRecord, MasteryStateResult, PatternTaxonomyCellData } from "@ipmat/mastery";
 import type { PrepPhaseResult } from "@ipmat/prep-phase";
 import type { DifficultyTier, NoveltyLevel, ValidationState } from "@ipmat/question-engine";
+import type { AccumulatedEvidence } from "./accumulatedEvidence.js";
 import type { RecentEvidence } from "./recentEvidence.js";
 
-export type { RecentEvidence };
+export type { AccumulatedEvidence, RecentEvidence };
 
 export type {
   AutopsyQuestionContext,
@@ -53,7 +54,7 @@ export const ADAPTIVE_SELECTION_CONSTANTS = {
   PRESSURE_WEAKNESS_THRESHOLD: 0.6,
   /** A tier is "mastered enough to progress" once accuracy on it is at or above this, given sufficient observations. */
   PROGRESSION_ACCURACY_THRESHOLD: 0.8,
-  /** `MasteryComponentDetail.errorRecurrence.longestIncorrectStreak` at or above this counts as a repeated-error signal. Mirrors `@ipmat/autopsy`'s `AUTOPSY_THRESHOLDS.REPEATED_EVIDENCE_MIN_COUNT` (2) in spirit ("a single occurrence is never repeated"), declared locally since it thresholds a different, package-local statistic. */
+  /** The CURRENT run of consecutive incorrect graded answers (Phase 3.2: `trailingIncorrectStreak()`, ending at the most recent graded attempt -- no longer the all-time longest run) at or above this counts as a repeated-error signal. Mirrors `@ipmat/autopsy`'s `AUTOPSY_THRESHOLDS.REPEATED_EVIDENCE_MIN_COUNT` (2) in spirit ("a single occurrence is never repeated"), declared locally since it thresholds a different, package-local statistic. Unchanged value; only WHAT it is applied to changed. */
   REPEATED_ERROR_MIN_STREAK: 2,
   /** A candidate the student has already attempted at least this many times is deprioritized within its bucket, mirroring `@ipmat/repair-selection`'s `REPAIR_SELECTION_CONSTANTS.OVERUSE_MIN_ATTEMPT_COUNT` — the same policy, independently declared (siblings do not depend on each other). */
   OVERUSE_MIN_ATTEMPT_COUNT: 2,
@@ -175,6 +176,8 @@ export interface AdaptiveSelectionResult {
   excludedUnpublishedCount: number;
   /** Phase 3.1: the observable evidence from the student's most recent finalized attempt that the recent-evidence reasons reacted to -- `null` when there is none (cold start), whether or not it decided this pick. */
   recentEvidence: RecentEvidence | null;
+  /** Phase 3.2: descriptive counts/ratios of the ACCUMULATED persisted evidence for the SELECTED question's concept (read from the existing mastery aggregates) -- `null` when the student has no attempts on it. Facts only; never a label or a score. */
+  accumulatedEvidence: AccumulatedEvidence | null;
 }
 
 export type AdaptiveNoSelectionReason = "no_candidates_supplied" | "no_published_candidates" | "no_structurally_valid_candidates";

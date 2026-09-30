@@ -1,12 +1,15 @@
 import { validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
+import { deriveAccumulatedEvidence } from "./accumulatedEvidence.js";
 import { compareByRecentPreference, explainRecentEvidence, RECENT_EVIDENCE_REASON_BY_SIGNAL } from "./recentEvidence.js";
 import { applyOveruseAvoidance, rankCandidates } from "./tieBreak.js";
 import { buildTrainingNeedContext, computeProgressionTargetTier, determineSatisfiedReasons } from "./trainingNeeds.js";
 import {
   TRAINING_NEED_PRIORITY_ORDER,
+  type AccumulatedEvidence,
   type AdaptiveCandidateExplanation,
   type AdaptiveCandidateQuestion,
   type AdaptiveSelectionInput,
+  ADAPTIVE_SELECTION_CONSTANTS,
   type AdaptiveSelectionOutcome,
   type AdaptiveSelectionResult,
   type DifficultyTier,
@@ -14,7 +17,7 @@ import {
   type TrainingNeedReasonCode
 } from "./types.js";
 
-function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion, recentEvidence: RecentEvidence | null): string {
+function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandidateQuestion, recentEvidence: RecentEvidence | null, accumulated: AccumulatedEvidence | null): string {
   const q = candidate.question;
   switch (reason) {
     case "recent_incorrect":
@@ -26,13 +29,19 @@ function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandid
     case "repair_priority":
       return `A confirmed diagnosis is actively targeting "${q.patternFamilyName}" in "${q.conceptName}" — this question directly addresses it.`;
     case "repeated_error":
-      return `This student has a repeated-error pattern in "${q.conceptName}" — this question offers further practice on it.`;
+      return accumulated
+        ? `The most recent ${accumulated.trailingIncorrectStreak} graded answers on "${q.conceptName}" were all incorrect — this question offers further practice on it.`
+        : `Consecutive incorrect answers were observed on "${q.conceptName}" — this question offers further practice on it.`;
     case "prerequisite_weakness":
       return `"${q.conceptName}" is a prerequisite flagged by a confirmed diagnosis elsewhere, and this student's mastery of it is weak or unmeasured.`;
     case "accuracy_weakness":
-      return `This student's measured accuracy on "${q.conceptName}" is below the training threshold.`;
+      return accumulated
+        ? `${accumulated.incorrectCount} of ${accumulated.gradedAttempts} graded answers on "${q.conceptName}" were incorrect (accuracy below the training threshold).`
+        : `Measured accuracy on "${q.conceptName}" is below the training threshold.`;
     case "speed_weakness":
-      return `This student's measured speed on "${q.conceptName}" is below the training threshold (taking notably longer than expected).`;
+      return accumulated && accumulated.meanSpeedRatio !== null
+        ? `Across ${accumulated.speedObservations} timed attempts on "${q.conceptName}", answers took on average ${accumulated.meanSpeedRatio.toFixed(2)}x the expected time (threshold ${ADAPTIVE_SELECTION_CONSTANTS.SPEED_WEAKNESS_RATIO}x).`
+        : `Measured time on "${q.conceptName}" is above the training threshold relative to the expected time.`;
     case "coverage_gap":
       return `This student has never attempted this exact taxonomy cell (pattern family "${q.patternFamilyName}") for "${q.conceptName}".`;
     case "underexposure":
@@ -206,6 +215,7 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
   }
 
   const winnerReasons = satisfiedByQuestionId.get(winner.question.questionId) ?? [];
+  const accumulatedEvidence = deriveAccumulatedEvidence(ctx.masteryByConcept.get(winner.question.conceptName));
   const rankedAlternatives: AdaptiveCandidateExplanation[] = rest.map((candidate) => ({
     questionId: candidate.question.questionId,
     primaryReason: TRAINING_NEED_PRIORITY_ORDER.find((r) => (satisfiedByQuestionId.get(candidate.question.questionId) ?? []).includes(r)) ?? "difficulty_progression",
@@ -218,13 +228,14 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     allReasonsSatisfied: winnerReasons,
     targetConceptName: winner.question.conceptName,
     isFallback,
-    explanation: explainReason(winningReason, winner, ctx.recentEvidence),
+    explanation: explainReason(winningReason, winner, ctx.recentEvidence, accumulatedEvidence),
     coverageGapAddressed: coverageGapFor(winningReason, winner),
     rankedAlternatives,
     candidatesConsidered: candidates.length,
     excludedMalformedCount,
     excludedUnpublishedCount,
-    recentEvidence: ctx.recentEvidence
+    recentEvidence: ctx.recentEvidence,
+    accumulatedEvidence
   };
 
   return { status: "selected", result };
