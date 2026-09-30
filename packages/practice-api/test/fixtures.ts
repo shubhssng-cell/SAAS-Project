@@ -100,7 +100,11 @@ export class World {
     { id: ENROLLMENT, studentId: STUDENT, examId: EXAM },
     { id: OTHER_ENROLLMENT, studentId: OTHER_STUDENT, examId: EXAM }
   ];
-  readonly attempts = new InMemoryAttemptRepository();
+  readonly attempts: InMemoryAttemptRepository;
+
+  constructor(attemptOptions: ConstructorParameters<typeof InMemoryAttemptRepository>[0] = {}) {
+    this.attempts = new InMemoryAttemptRepository(attemptOptions);
+  }
   readonly autopsy = new FakeAutopsyReader();
   questions: CanonicalQuestion[] = [publishedQuestion];
   questionContent: StudentQuestionRecord[] = [publishedQuestionContent];

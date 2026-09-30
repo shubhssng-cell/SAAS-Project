@@ -1,4 +1,5 @@
 import { AttemptLifecycleError, type AttemptOwnershipClaim, type AttemptState } from "@ipmat/attempt";
+import { PersistenceError, SerializationFailureError } from "@ipmat/db";
 import { assertEnrollmentOwnership } from "@ipmat/training-recommendation";
 import { toPracticeApiError } from "./errors.js";
 import { toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
@@ -67,12 +68,23 @@ export class PracticeApiService {
       const attempt = await this.withStartLock(`${claim.studentId}|${claim.enrollmentId}|${input.questionId}`, async () => {
         const resumable = await this.findResumableAttempt(claim, input.questionId);
         if (resumable) return resumable;
-        return this.deps.practiceLoopService.startAttempt({
-          studentId: claim.studentId,
-          questionId: input.questionId,
-          enrollmentId: claim.enrollmentId,
-          now
-        });
+        try {
+          return await this.deps.practiceLoopService.startAttempt({
+            studentId: claim.studentId,
+            questionId: input.questionId,
+            enrollmentId: claim.enrollmentId,
+            now
+          });
+        } catch (error) {
+          // Product Phase 2 Unit 7: the in-process lock above cannot see another API instance. If the database's
+          // "one open attempt" guarantee rejected our create (or a concurrent serializable write beat us), the
+          // other instance's attempt is the winner -- resume it instead of failing the student.
+          if ((error instanceof PersistenceError && error.code === "conflict") || error instanceof SerializationFailureError) {
+            const winner = await this.findResumableAttempt(claim, input.questionId);
+            if (winner) return winner;
+          }
+          throw error;
+        }
       });
 
       const content = await this.deps.questionContentReader.findPublishedById(input.questionId);

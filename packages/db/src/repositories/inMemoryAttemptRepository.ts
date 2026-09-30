@@ -40,6 +40,12 @@ export interface InMemoryAttemptRepositoryOptions {
    * care); a test that exercises ownership verification MUST supply this.
    */
   practiceBlocks?: Map<string, { status: PracticeBlockStatus; enrollmentId: string; studentId: string }>;
+  /**
+   * Mirrors migration 0010's partial unique index: refuse (`PersistenceError("conflict")`) to create a second
+   * `in_progress` attempt for the same student + question + enrollment, exactly as the real database does.
+   * Off by default (the pre-Unit-7 behavior every existing test relies on); a test of the conflict path opts in.
+   */
+  enforceSingleOpenAttempt?: boolean;
 }
 
 export class InMemoryAttemptRepository implements AttemptRepository, AttemptHistoryReader, InProgressAttemptReader {
@@ -71,6 +77,14 @@ export class InMemoryAttemptRepository implements AttemptRepository, AttemptHist
       );
     } else {
       this.assertReferencesExist(state);
+      if (this.options.enforceSingleOpenAttempt && state.status === "in_progress") {
+        const open = [...this.byId.values()].some(
+          (a) => a.status === "in_progress" && a.studentId === state.studentId && a.questionId === state.questionId && a.enrollmentId === state.enrollmentId
+        );
+        if (open) {
+          throw new PersistenceError("conflict", `Attempt "${state.id}" conflicts with an existing open attempt for the same student, question and enrollment.`);
+        }
+      }
       const retryOf = state.retryOfAttemptId ? (this.byId.get(state.retryOfAttemptId) ?? null) : null;
 
       if (blockAllocationRequest) {

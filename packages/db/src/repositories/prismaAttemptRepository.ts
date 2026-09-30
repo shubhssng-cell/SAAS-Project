@@ -65,6 +65,26 @@ export class PrismaAttemptRepository implements AttemptRepository, AttemptHistor
     // transaction could race against.
     const timeline = getEventTimeline(state);
 
+    try {
+      await this.saveInTransaction(state, timeline, blockAllocationRequest);
+    } catch (error) {
+      // A unique-constraint violation here is the DB-level "one open attempt per student/question/
+      // enrollment" guarantee (migration 0010) -- or an id collision from a concurrent identical write.
+      // Either way the caller lost a race: report it as a typed conflict, never as an opaque driver error.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new PersistenceError("conflict", `Attempt "${state.id}" conflicts with an existing record (a concurrent write already created one).`);
+      }
+      throw error;
+    }
+
+    const saved = await this.findById(state.id);
+    if (!saved) {
+      throw new Error(`internal: Attempt "${state.id}" vanished immediately after being saved`);
+    }
+    return saved;
+  }
+
+  private async saveInTransaction(state: AttemptState, timeline: ReturnType<typeof getEventTimeline>, blockAllocationRequest?: { practiceBlockId: string }): Promise<void> {
     await runSerializableTransaction(this.prisma, async (tx) => {
       const existing = await tx.attempt.findUnique({ where: { id: state.id } });
       let resolvedBlockMembership = state.blockMembership;
@@ -159,12 +179,6 @@ export class PrismaAttemptRepository implements AttemptRepository, AttemptHistor
         });
       }
     });
-
-    const saved = await this.findById(state.id);
-    if (!saved) {
-      throw new Error(`internal: Attempt "${state.id}" vanished immediately after being saved`);
-    }
-    return saved;
   }
 
   async findById(attemptId: string): Promise<AttemptState | null> {

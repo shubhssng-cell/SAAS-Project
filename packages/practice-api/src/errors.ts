@@ -70,6 +70,8 @@ export function toPracticeApiError(error: unknown): PracticeApiError {
         return new PracticeApiError("not_found", "A referenced record could not be found.", 404);
       case "ownership_mismatch":
         return new PracticeApiError("ownership_mismatch", "This record does not belong to the requesting student.", 403);
+      case "conflict":
+        return new PracticeApiError("invalid_state", "This request conflicts with the current state. Please try again.", 409);
       case "invalid_record":
         return new PracticeApiError("infrastructure_failure", "This request could not be completed right now. Please try again.", 500);
     }

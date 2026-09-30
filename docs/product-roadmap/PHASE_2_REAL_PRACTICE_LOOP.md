@@ -2,7 +2,7 @@
 
 ## Phase objective
 
-From the master roadmap: *a real student can practice real published questions end-to-end against a real database.* Phase 2 is delivered as a sequence of small units. **Units 1–6 are complete** (student-facing practice loop against dev/in-memory content); **Unit 7 and later have not started**, and the "real database" half of the phase objective is still open — no live database has ever been reachable in this environment.
+From the master roadmap: *a real student can practice real published questions end-to-end against a real database.* Phase 2 is delivered as a sequence of small units. **Units 1–7 are complete**: Units 1–6 built the student-facing practice loop (verified against dev/in-memory content); Unit 7 established the database persistence path and, for the first time in this project, ran the practice lifecycle against a **real Postgres** (a disposable local container — not a shared, staging, or production database, and no deployment). **Unit 8 and later have not started.**
 
 ## Unit status
 
@@ -14,7 +14,8 @@ From the master roadmap: *a real student can practice real published questions e
 | 4 | Continuous next-question practice loop | **COMPLETE** (below) |
 | 5 | Attempt / session recovery | **COMPLETE** (below) |
 | 6 | Practice lifecycle completeness (Skip) | **COMPLETE** (below) |
-| 7+ | Not defined here yet — real database, further loop work — **NOT STARTED** | NOT STARTED |
+| 7 | Real database / persistence foundation | **COMPLETE** (below) |
+| 8+ | Not defined here yet — **NOT STARTED** | NOT STARTED |
 
 ## Unit 1 — Real published practice content foundation
 
@@ -204,6 +205,58 @@ No API, backend, contract, or dependency change. No selection, ranking, randomiz
 - A skip is recorded in the attempt history, but nothing in this unit decides what it means for recommendation, mastery, or autopsy (the existing backend reads attempt history as it always did; no logic was added or changed).
 - The failure states for skip other than 401 were simulated at the browser layer; the server was never made to fail on its own.
 - Abandonment (an attempt left open and never finalized) still has no policy — unchanged from Unit 5.
-- Still dev/in-memory content and repositories; the live database is unavailable and nothing here was verified against one.
+- Still dev/in-memory content and repositories; the live database is unavailable and nothing here was verified against one. *(True when Unit 6 landed; Unit 7 below changes it.)*
 
-**Unit 7+ status: NOT STARTED.**
+*(Status when Unit 6 landed: Unit 7 not yet started. Unit 7 has since been completed — below.)*
+
+## Unit 7 — Real database / persistence foundation
+
+**Objective.** Move the practice persistence path from development-only in-memory storage toward the repository's existing Prisma/Postgres architecture, without redesigning the practice system, and determine whether the real practice lifecycle can run against an actual database.
+
+**Verification levels — used precisely below.**
+- **A. Typechecked** — compiles against the generated Prisma types.
+- **B. Fake-client tested** — exercised against a hand-rolled `PrismaClient` double (query shape/mapping only).
+- **C. Real-database verified** — executed against an actual Postgres.
+
+Before Unit 7 every `PrismaXRepository` was at level A/B only (`docs/project-memory/53_PERSISTENCE.md`: "never executed against a real database"). After Unit 7, the paths listed under "Real-database verified" are at level C, against **one disposable local Postgres 16 container** (details below). Everything else remains A/B.
+
+**Persistence architecture (inspected).** `apps/web` → `apps/api` (`server.ts`) → `@ipmat/practice-api` → `@ipmat/practice-loop` / `@ipmat/training-recommendation` → `@ipmat/db` port interfaces → either `InMemory*` doubles or `Prisma*` classes. `apps/api/src/wiring.ts` already had both `createInMemoryDependencies()` and `createPrismaDependencies(prisma)`; the Prisma one was structurally complete (all repositories the practice/auth/enrollment/recommendation services need, including Unit 5's `InProgressAttemptReader`) but `index.ts` never used it. Schema: PostgreSQL (`schema.prisma`), 9 migrations, `DATABASE_URL`, repo-documented local service = `docker-compose.yml` (`postgres:16-alpine`, `ipmat`/`ipmat`/`ipmat_dev` on 5432). No test-database workflow existed.
+
+**Environment findings (exact blocker → how it was resolved).**
+- A *different* Postgres (`postgres.exe`, native install, running since before this session) was listening on 5432. The gitignored `packages/db/.env` pointed at it with the repo's documented credentials, and it **rejected them** (`Authentication failed`). I did not try other passwords or touch that server.
+- Docker Desktop was installed but stopped. I started it, ran a **disposable** container of the repo's own image (`postgres:16-alpine`) on `127.0.0.1:55432` with a random throwaway password (kept only in the shell/temp, never written to the repo), used it, then stopped the container (it was `--rm`, so removed) and stopped Docker Desktop. The other Postgres on 5432 was never accessed after the failed authentication probe, and `packages/db/.env` was not modified.
+- No credentials, connection strings, or database URLs were added to the repository.
+
+**Real-database verified (level C).**
+- All 9 existing migrations applied cleanly from an empty database (first time ever), and `prisma migrate diff` from the migrated database to `schema.prisma` reported **no drift**. `prisma/seed.ts` ran successfully (exam, 15 chapters, 12 concepts, taxonomy, and the one published demonstration question, including the existing `questions_published_requires_provenance` CHECK).
+- The practice lifecycle through the **real `apps/api` server on the real Prisma repositories**: signup → onboarding → enrollment → recommendation (the seeded published question) → start attempt → resume the open attempt (same id, server-derived elapsed) → submit (graded from the DB row; solution steps read from the `Json` column) → repeat submit refused (409) → result re-read → skip (persisted `skipped`, not graded, terminal) → a later start creates a new attempt and does not touch the skipped one. Rows checked directly in Postgres: `attempts` status/answer/verdict/time, and `attempt_events` in order (`answer_selected`, `answer_submitted`; `question_skipped` for a skip).
+- **Restart persistence:** a freshly constructed server + new `PrismaClient` sees the session cookie, enrollment, the in-progress attempt (resumed with the same id) and finalized results. In the browser run the API process was killed and restarted three times mid-flow with no loss.
+- **Ownership isolation:** another student gets 403 on reading/submitting/skipping someone else's attempt (attempt row left `in_progress`), gets their own attempt, and an unauthenticated start is 401.
+- **Publication filtering:** a non-published question row cannot be started (4xx), is not recommended, and creates no attempt; publishing without provenance is rejected by the database CHECK.
+
+**A real bug found by the real database, and fixed (the Unit 5 limitation).** Unit 5's find-then-create lock is in-process only. With **two API instances** on one database, 20 parallel starts (split across them) produced duplicate open attempts in **6 of 6 trials** (reproduced before any fix). Fixed with the smallest database-level guarantee:
+- **Migration `0010_one_open_attempt_per_student_question`** (hand-written, like the existing CHECK constraints — Prisma's DSL cannot express partial indexes): `CREATE UNIQUE INDEX … ON attempts (student_id, question_id, enrollment_id) WHERE status = 'in_progress'`. No table/column added. Verified: applies from scratch on real Postgres; Prisma reports no schema drift with the index present; **it fails closed** on existing data — applying it to the database that still held the duplicates from the reproduction was refused with a clear duplicate-key error and rolled back (nothing was auto-abandoned or guessed).
+- `PersistenceErrorCode` gained `"conflict"`. `PrismaAttemptRepository.save()` maps a unique violation (P2002) to `PersistenceError("conflict")` (no driver detail in the message); the repository enforces the constraint but adds no business rule.
+- `PracticeApiService.startAttempt()`: if the create loses the race (`conflict`, or a serializable write conflict), it re-reads and **resumes the winner's attempt**; a conflict with no resumable winner surfaces as a safe 409. The in-process lock stays as the cheap fast path.
+- `InMemoryAttemptRepository` gained an opt-in `enforceSingleOpenAttempt` mirror (default off, so all earlier tests are unchanged) so the conflict path is unit-testable without a database.
+- Result on the real database: 3 rounds × 20 parallel starts across two instances → exactly **one** attempt id returned and exactly one open row each time. To prove the test is meaningful, the index was dropped and the same test **failed** (2 open attempts), then the index was restored.
+
+**Wiring (minimal abstraction).** `apps/api/src/persistence.ts`: `IPMAT_PERSISTENCE` unset/`memory` → in-memory + dev content (unchanged default); `prisma` → Prisma repositories, **requires `DATABASE_URL`** and fails at startup otherwise — it never silently falls back to in-memory, and a `DATABASE_URL` alone does not switch modes. `@ipmat/db` gained `createPrismaClient(url)` (explicit URL, never implicit `.env` discovery), so `apps/api` imports no `@prisma/client` value and `apps/web` nothing at all. In Prisma mode `index.ts` connects eagerly (fails fast on a bad database) and disconnects on SIGINT/SIGTERM. No API route, DTO, or frontend code changed; `createApiTrainingAdapter()` is untouched.
+
+**Tests.** Default suite (no database; A/B level): `apps/api/test/persistence.test.ts` (6), `packages/db/test/repositories/attemptOpenConflict.test.ts` (7: in-memory mirror on/off, P2002 → conflict with no driver detail, other errors unchanged, `createPrismaClient` validation), two service tests in `packages/practice-api/test/attemptRecovery.test.ts` (racing instances resume the winner; no-winner conflict → safe 409). **Real-database suite (level C):** `apps/api/test/prismaPersistence.integration.test.ts` — 10 tests: index exists with its predicate; seed content recommended; full start/resume/submit/result with row and event checks; skip lifecycle; restart / second-instance persistence; ownership isolation; publication filtering; provenance CHECK; **concurrency across two instances**; repository-level conflict + finalized-attempts-don't-block. It is **skipped unless `IPMAT_TEST_DATABASE_URL` is set** (a distinct variable from `DATABASE_URL`) and **refuses to run against a database whose name doesn't contain "test"** (verified). It writes rows (uniquely-named students) and never cleans up, so it belongs on a disposable database. Run: start any Postgres 16, `DATABASE_URL=… npx prisma migrate deploy` and `npx tsx prisma/seed.ts` in `packages/db`, then `IPMAT_TEST_DATABASE_URL=… npx vitest run apps/api/test/prismaPersistence.integration.test.ts`. Result: 10/10 passing against the disposable Postgres 16 (run twice, including after the index drop/restore).
+
+**Validation.** Default suite: apps/web 319/319 (unchanged); apps/api 60 passed + 10 skipped (the opt-in real-database suite) of 70; practice-api 70/70 (was 68); db 269/269 (was 262); full repository **1758 passed + 10 skipped** across 178 files (was 1743 across 175) — the 10 skipped are the integration suite, which was run separately on the real Postgres and passed 10/10. Typecheck, build, lint, `prisma validate` and `git diff --check` clean.
+
+**Browser verification** (raw CDP / headless Edge; real `apps/web` + real `apps/api` in Prisma mode + the real disposable Postgres; the API process was killed and restarted by the script): signup → onboarding → enrollment → dashboard → Start Practice → question → (API restart) → refresh → **same attempt resumed from Postgres**, timer resumed from the persisted attempt clock (3s before restart, server reported 14s after) with the session still valid → submit → graded result with solution → (second API restart) → result re-read unchanged → next visit = new attempt → skip → (third restart) still "Skipped." → Postgres shows exactly `submitted, skipped` and no open attempt → cookies cleared → `/login`. 17 substantive checks passed (an 18th, an unconditional placeholder, is excluded; the "no Prisma/`DATABASE_URL` in the frontend" property was instead checked statically: zero references in `apps/web`). This **is** a live-database proof, for the paths above.
+
+**Security review.** No credentials or URLs committed (the throwaway password appears nowhere in the tree; `packages/db/.env` remains gitignored and unmodified). `DATABASE_URL` is read only by the server process; the frontend has no reference to it or to Prisma. Identity remains session-derived; answer keys stay server-side; student DTOs are unchanged (the start response still has exactly `attemptId`, `question`, `elapsedSeconds`, checked on real data).
+
+**Known limitations.**
+- Real-database verification was on a **disposable local container**, not staging/production; no deployment, backup, pooling, or migration-rollout process exists or was added. The other Postgres on this machine (port 5432) was not usable and not touched.
+- Only the paths listed above were exercised against Postgres. The rest of the Prisma repositories (autopsy, repair plan, mastery state, practice session/block, question import/publication, etc.) remain level A/B — nothing in Unit 7 changed that, and no student-facing flow uses them yet.
+- Real-database content is only the seed's single published question (so a student sees the same question repeatedly); the 3-question dev set exists only in in-memory mode. Publishing more content into a database is a content/publication task, not done here.
+- Migration `0010` refuses to apply if a database already holds duplicate open attempts (deliberately fail-closed); such rows would have to be finalized by an operator first.
+- The integration suite is opt-in and not part of CI/`npm test`; there is no automated provisioning of a test database (a `docker-compose` service on port 5432 conflicts with the local Postgres here, so the run used a one-off container on 55432).
+- Serializable-transaction retry policy is still absent (unchanged, D-060); the new conflict handling resumes the winner but does not retry other conflicts.
+
+**Unit 8+ status: NOT STARTED.**

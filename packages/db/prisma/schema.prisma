@@ -577,6 +577,9 @@ model Attempt {
   events        AttemptEvent[]
   autopsy       Autopsy?
 
+  // Hand-written in migration 0010 (Prisma's DSL cannot express a partial index): a UNIQUE index on
+  // (student_id, question_id, enrollment_id) WHERE status = 'in_progress' -- at most one open attempt per
+  // student/question/enrollment (Product Phase 2 Unit 7). Not declared here on purpose.
   @@unique([practiceBlockId, blockSequenceNumber])
   @@index([studentId])
   @@index([questionId])

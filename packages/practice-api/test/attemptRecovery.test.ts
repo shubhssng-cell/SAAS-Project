@@ -122,3 +122,23 @@ describe("startAttempt -- recovery of an open attempt", () => {
     expect(JSON.stringify(early)).not.toMatch(/startedAt|studentId|enrollmentId|events|status/);
   });
 });
+
+describe("startAttempt -- losing a race to another API instance (Unit 7)", () => {
+  it("when the database's one-open-attempt guarantee rejects our create, the WINNER's attempt is resumed, not an error", async () => {
+    // Two services with independent in-process locks over ONE shared store that mirrors the DB index.
+    const world = new World({ enforceSingleOpenAttempt: true });
+    const instanceA = world.service();
+    const instanceB = world.service();
+    const results = await Promise.all([instanceA, instanceB, instanceA, instanceB, instanceA, instanceB].map((svc) => svc.startAttempt(claim, { questionId: QID, now: t(0) })));
+    expect(new Set(results.map((r) => r.attemptId)).size).toBe(1);
+    expect(await hasOpen(world)).toBe(true);
+  });
+
+  it("a conflict with NO resumable winner is not swallowed: it surfaces as a safe 409", async () => {
+    const world = new World({ enforceSingleOpenAttempt: true });
+    await world.service().startAttempt(claim, { questionId: QID, now: t(0) });
+    // Simulate the reader never finding the winner (e.g. it was finalized in between).
+    world.attempts.findInProgressByStudentQuestion = async () => null;
+    await expect(world.service().startAttempt(claim, { questionId: QID, now: t(1) })).rejects.toMatchObject({ code: "invalid_state", httpStatus: 409 });
+  });
+});

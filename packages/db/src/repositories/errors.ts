@@ -5,8 +5,13 @@
  * `PracticeBlock -> PracticeSession -> Enrollment -> Student`) does not
  * match the caller's claimed `studentId`/`enrollmentId` — a security
  * boundary violation, never a shape/validity problem.
+ *
+ * `conflict` (Product Phase 2 Unit 7) means a database uniqueness guarantee rejected the write -- today,
+ * the "at most one open attempt per student/question/enrollment" partial unique index (migration 0010)
+ * when a concurrent start already created one. The data is well-formed; the caller lost a race and
+ * should re-read (`PracticeApiService.startAttempt()` resumes the winner).
  */
-export type PersistenceErrorCode = "invalid_record" | "missing_reference" | "ownership_mismatch";
+export type PersistenceErrorCode = "invalid_record" | "missing_reference" | "ownership_mismatch" | "conflict";
 
 /**
  * Fail-closed guard for the persistence boundary specifically — distinct

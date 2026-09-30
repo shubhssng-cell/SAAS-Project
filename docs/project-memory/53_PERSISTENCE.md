@@ -40,6 +40,8 @@ The 5 `MasteryState` scalar columns are nullable `Float?` — SQL `NULL` means e
 
 ## No live database, anywhere, ever, in this project's history
 
+> **Update (Product Phase 2 Unit 7):** this section describes the state through Phase 5I. In Unit 7 a **disposable local Postgres 16** was used for the first time: all 9 migrations (plus the new `0010`) applied cleanly, `seed.ts` ran, and the practice lifecycle (auth, enrollment, attempts/events, start/resume/submit/skip/result, ownership, publication filtering, restart persistence, cross-instance concurrency) was verified end to end against real Prisma repositories — see `docs/product-roadmap/PHASE_2_REAL_PRACTICE_LOOP.md`, "Unit 7". Repositories outside that path (autopsy, repair plan, mastery state, practice session/block, question import/publication) remain typechecked/fake-tested only. No shared, staging, or production database exists.
+
 Every `PrismaXRepository` class is typechecked against the real generated Prisma Client types but has **never been executed against a real database.** Round-trip persistence semantics are verified exclusively against `InMemoryXRepository` doubles or hand-rolled fake `PrismaClient` objects (`vi.fn()`-based, proving exact query shape/isolation level without a live connection). This is a standing, repeatedly-disclosed caveat across every single phase — see [92_CURRENT_STATE.md](92_CURRENT_STATE.md).
 
 See also: [54_SECURITY_AND_OWNERSHIP.md](54_SECURITY_AND_OWNERSHIP.md).
