@@ -1,5 +1,6 @@
 import type { AuthFailure } from "../auth/failureMapping.js";
 import { jsonRequest, type FetchLike } from "../http.js";
+import { createSingleFlight } from "../practice/singleFlight.js";
 import type {
   AttemptResultViewModel,
   AutopsyResponse,
@@ -122,6 +123,9 @@ function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { su
 export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): TrainingRecommendationAdapter {
   const attemptIdByQuestion = new Map<string, string>();
   let questionsPracticedSoFar = 0;
+  // Phase 2 Unit 2: one in-flight start / submit per question -- a duplicate call (StrictMode's double mount effect, a double click) shares the first request instead of creating a second attempt or a second submission.
+  const startFlights = createSingleFlight<QuestionViewModel>();
+  const submitFlights = createSingleFlight<AttemptResultViewModel>();
 
   async function post(path: string, body?: unknown): Promise<unknown> {
     const result = await jsonRequest(fetchImpl, "POST", path, body ?? {});
@@ -135,39 +139,48 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     return result.body;
   }
 
+  async function startAttemptFor(questionId: string): Promise<QuestionViewModel> {
+    const started = asObject(await post("/v1/attempts", { questionId }));
+    const attemptId = typeof started.attemptId === "string" ? started.attemptId : "";
+    if (!attemptId) {
+      throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
+    }
+    attemptIdByQuestion.set(questionId, attemptId);
+    return readQuestion(started.question);
+  }
+
+  // `timeTakenSeconds` is deliberately NOT sent: the server derives time spent from its own attempt events (D-034).
+  async function submitAttemptFor(input: { questionId: string; chosenAnswer: string }): Promise<AttemptResultViewModel> {
+    const attemptId = attemptIdByQuestion.get(input.questionId);
+    if (!attemptId) {
+      throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
+    }
+    const submitted = await post(`/v1/attempts/${attemptId}/submit`, { questionId: input.questionId, chosenAnswer: input.chosenAnswer });
+    attemptIdByQuestion.delete(input.questionId);
+    questionsPracticedSoFar += 1;
+
+    // Whether an autopsy hypothesis is actually pending is resolved via the
+    // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
+    // response, which carries no such signal) -- see this file's own doc comment.
+    const pending = await get(`/v1/attempts/${attemptId}/autopsy`)
+      .then((body) => readPendingAutopsy(body).pending)
+      .catch(() => false);
+
+    return readAttemptResult(submitted, pending);
+  }
+
   return {
     async getDashboard(): Promise<DashboardViewModel> {
       const recommendation = readRecommendation(await post("/v1/recommendation"));
       return { studentDisplayName: "there", questionsPracticedSoFar, recommendation };
     },
 
-    async loadQuestion(questionId: string): Promise<QuestionViewModel> {
-      const started = asObject(await post("/v1/attempts", { questionId }));
-      const attemptId = typeof started.attemptId === "string" ? started.attemptId : "";
-      if (!attemptId) {
-        throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
-      }
-      attemptIdByQuestion.set(questionId, attemptId);
-      return readQuestion(started.question);
+    loadQuestion(questionId: string): Promise<QuestionViewModel> {
+      return startFlights.run(questionId, () => startAttemptFor(questionId));
     },
 
-    async submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel> {
-      const attemptId = attemptIdByQuestion.get(input.questionId);
-      if (!attemptId) {
-        throw new PracticeApiRequestError({ kind: "unexpected", message: "Something went wrong. Please try again." });
-      }
-      const submitted = await post(`/v1/attempts/${attemptId}/submit`, { questionId: input.questionId, chosenAnswer: input.chosenAnswer });
-      attemptIdByQuestion.delete(input.questionId);
-      questionsPracticedSoFar += 1;
-
-      // Whether an autopsy hypothesis is actually pending is resolved via the
-      // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
-      // response, which carries no such signal) -- see this file's own doc comment.
-      const pending = await get(`/v1/attempts/${attemptId}/autopsy`)
-        .then((body) => readPendingAutopsy(body).pending)
-        .catch(() => false);
-
-      return readAttemptResult(submitted, pending);
+    submitAnswer(input: { questionId: string; chosenAnswer: string; timeTakenSeconds: number }): Promise<AttemptResultViewModel> {
+      return submitFlights.run(input.questionId, () => submitAttemptFor(input));
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

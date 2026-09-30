@@ -352,7 +352,7 @@ describe("Shell hardening: loading/error/empty/accessibility structure (Product 
   });
 
   it("answer submission and autopsy responses cannot be duplicated: routes guard on their in-flight flag and the controls are disabled meanwhile", () => {
-    expect(src("routes/PracticeQuestionRoute.tsx")).toMatch(/if \(submitting\) return/);
+    expect(src("routes/PracticeQuestionRoute.tsx")).toMatch(/if \(submitting \|\| submitInFlight\.current\) return/);
     expect(src("components/QuestionPlayer.tsx")).toMatch(/disabled=\{submitting\}/);
     expect(src("components/QuestionPlayer.tsx")).toMatch(/disabled=\{!selected \|\| submitting\}/);
     expect(src("routes/PracticeAutopsyRoute.tsx")).toMatch(/responding\) return/);

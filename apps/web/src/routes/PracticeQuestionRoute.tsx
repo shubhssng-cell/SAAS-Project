@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isSessionExpiredError, type QuestionViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { QuestionPlayer } from "../components/QuestionPlayer.js";
@@ -25,11 +25,14 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
   const [retryCount, setRetryCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitFailed, setSubmitFailed] = useState(false);
+  // A ref (not just `submitting` state) so two clicks in the same frame cannot both pass the guard before React re-renders.
+  const submitInFlight = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
     setSubmitting(false);
+    submitInFlight.current = false;
     setSubmitFailed(false);
     adapter
       .loadQuestion(questionId)
@@ -59,7 +62,8 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
   }
 
   async function handleSubmit(chosenAnswer: string, timeTakenSeconds: number) {
-    if (submitting) return;
+    if (submitting || submitInFlight.current) return;
+    submitInFlight.current = true;
     setSubmitFailed(false);
     setSubmitting(true);
     try {
@@ -73,6 +77,7 @@ export function PracticeQuestionRoute({ questionId }: { questionId: string }) {
       } else {
         setSubmitFailed(true);
       }
+      submitInFlight.current = false;
       setSubmitting(false);
     }
   }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { QuestionViewModel } from "../adapter/index.js";
 import { Button, ErrorNotice, FormField, Screen } from "../design/index.js";
+import { elapsedSecondsBetween } from "../practice/elapsed.js";
 import { Timer } from "./Timer.js";
 
 /**
@@ -28,8 +29,9 @@ export function QuestionPlayer({
     setSelected(null);
     setElapsedSeconds(0);
     elapsedRef.current = 0;
+    const startedAt = Date.now();
     const interval = window.setInterval(() => {
-      elapsedRef.current += 1;
+      elapsedRef.current = elapsedSecondsBetween(startedAt, Date.now());
       setElapsedSeconds(elapsedRef.current);
     }, 1000);
     return () => window.clearInterval(interval);
