@@ -4,12 +4,14 @@ import type { PrismaClient } from "@prisma/client";
 import {
   InMemoryAttemptRepository,
   InMemoryEnrollmentRepository,
+  InMemoryConceptReader,
   InMemoryExamReader,
   InMemoryPrepPhaseTemplateReader,
   InMemoryQuestionContentReader,
   InMemoryQuestionReader,
   InMemorySessionRepository,
   InMemoryStudentAccountRepository,
+  InMemoryTrainingQuestionReader,
   PrismaAttemptRepository,
   PrismaAutopsyRepository,
   PrismaConceptReader,
@@ -26,9 +28,11 @@ import {
   PrismaStudentAccountRepository,
   PrismaTrainingQuestionReader,
   type AutopsyRepository,
+  type ConceptRecord,
   type EnrollmentReader,
   type ExamRecord,
-  type PrepPhaseTemplateRecord
+  type PrepPhaseTemplateRecord,
+  type TrainingQuestionRecord
 } from "@ipmat/db";
 import { ipmatPrepPhaseTemplate } from "@ipmat/prep-phase";
 import { PracticeLoopService } from "@ipmat/practice-loop";
@@ -61,8 +65,9 @@ const DEFAULT_PREP_PHASE_TEMPLATE: PrepPhaseTemplateRecord = { examId: DEFAULT_E
  * runs (`src/index.ts`), since no live database has ever been reachable
  * in this environment (docs/project-memory/72_DATABASE_AND_INFRASTRUCTURE.md).
  * Every store starts genuinely empty — this function seeds no fixture
- * data of its own; a caller (a test, a future demo script) seeds whatever
- * it needs directly against the returned repository instances.
+ * data of its own; a caller seeds whatever it needs via the `seed`
+ * parameter. `src/index.ts` seeds the development content set from
+ * `devContent.ts` (Phase 2 Unit 1); a test passes its own or nothing.
  */
 export function createInMemoryDependencies(
   seed: {
@@ -70,6 +75,9 @@ export function createInMemoryDependencies(
     questionContent?: ConstructorParameters<typeof InMemoryQuestionContentReader>[0];
     exams?: ExamRecord[];
     prepPhaseTemplates?: PrepPhaseTemplateRecord[];
+    /** Phase 2 Unit 1: published training-question / concept read models, keyed by exam id (see `devContent.ts`). Empty by default. */
+    trainingQuestions?: ReadonlyMap<string, TrainingQuestionRecord[]>;
+    concepts?: ReadonlyMap<string, ConceptRecord[]>;
   } = {}
 ): PracticeApiDependencies &
   AuthApiDependencies &
@@ -112,9 +120,9 @@ export function createInMemoryDependencies(
     enrollmentReader,
     attemptHistoryReader: attempts,
     repairPlanReader: { findConfirmedActiveByStudentId: async () => [] },
-    trainingQuestionReader: { findPublishedByExamId: async () => [] },
+    trainingQuestionReader: new InMemoryTrainingQuestionReader(seed.trainingQuestions),
     questionReader: questions,
-    conceptReader: { findWithPublishedQuestionsByExamId: async () => [] },
+    conceptReader: new InMemoryConceptReader(seed.concepts),
     practiceSessionReader: { findActiveByEnrollmentId: async () => null },
     practiceBlockReader: { findBySessionId: async () => [] }
   };

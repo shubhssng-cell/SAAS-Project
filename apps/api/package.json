@@ -12,12 +12,15 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ipmat/ai": "*",
     "@ipmat/auth-api": "*",
+    "@ipmat/concept-graph": "*",
     "@ipmat/db": "*",
     "@ipmat/enrollment-api": "*",
     "@ipmat/prep-phase": "*",
     "@ipmat/practice-api": "*",
-    "@ipmat/practice-loop": "*"
+    "@ipmat/practice-loop": "*",
+    "@ipmat/question-engine": "*"
   },
   "devDependencies": {
     "tsx": "^4.19.1"

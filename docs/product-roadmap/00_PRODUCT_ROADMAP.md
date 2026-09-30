@@ -35,9 +35,10 @@ Do not confuse the two numbering schemes. When in doubt:
 | 9 | Production / Payments / Business Layer | Real auth decision (D-004), payments, pricing, production hardening. |
 | 10 | Expansion | Second chapter / section / exam, only after the go/no-go gate in MASTER_PLAN.md is met. |
 
-This table is intentionally high-level. Only Phase 0 and Phase 1 have detailed files in this directory so far — see:
+This table is intentionally high-level. Only Phases 0, 1 and 2 have detailed files in this directory so far — see:
 - [PHASE_0_PRODUCT_DEFINITION.md](PHASE_0_PRODUCT_DEFINITION.md)
 - [PHASE_1_PLATFORM_SHELL.md](PHASE_1_PLATFORM_SHELL.md)
+- [PHASE_2_REAL_PRACTICE_LOOP.md](PHASE_2_REAL_PRACTICE_LOOP.md) (in progress -- Unit 1 only)
 
 Future phase files (2 through 10) will be added as each one is actually about to start, not speculatively ahead of time — this mirrors the existing repo's vertical-slice discipline (see [../MASTER_PLAN.md](../MASTER_PLAN.md) §"What should explicitly NOT be built yet" and the CLAUDE.md working-style rules).
 

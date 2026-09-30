@@ -1,3 +1,4 @@
+import { buildDevContentSeed } from "./devContent.js";
 import { createServer } from "./server.js";
 import { createInMemoryDependencies } from "./wiring.js";
 
@@ -10,7 +11,12 @@ import { createInMemoryDependencies } from "./wiring.js";
  */
 const PORT = Number(process.env.PORT ?? 4001);
 
-const server = createServer(createInMemoryDependencies());
+/** Phase 2 Unit 1: development-only published practice content (see `devContent.ts`) -- never production data. */
+const devContent = await buildDevContentSeed();
+
+const server = createServer(createInMemoryDependencies(devContent));
 server.listen(PORT, () => {
-  console.log(`@ipmat/api listening on http://localhost:${PORT} (in-memory dependencies, no live database)`);
+  console.log(
+    `@ipmat/api listening on http://localhost:${PORT} (in-memory dependencies, no live database; ${devContent.questionContent.length} development-only published questions)`
+  );
 });
