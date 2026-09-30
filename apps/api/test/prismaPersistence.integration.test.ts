@@ -82,7 +82,7 @@ async function newStudent(instance: Instance, label: string): Promise<{ cookie: 
 let a: Instance; // "instance A"
 let b: Instance; // "instance B" -- a second, independent API instance / a restarted process
 
-describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Phase 2 Unit 7)", () => {
+describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Phase 2 Unit 7)", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     a = await startInstance();
     b = await startInstance();
@@ -686,6 +686,89 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     expect(before.modeLabel).toBe("After an incorrect answer");
     const published = new Set((await a.prisma.question.findMany({ where: { validationState: "published" }, select: { id: true } })).map((r) => r.id));
     expect(published.has((await card(a, improver.cookie)).questionId as string)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3 Unit 4 -- the SELECTION POLICY on the real Prisma readers + real Postgres: difficulty fit, coverage, exposure, progression and the
+  // global no-immediate-repeat rule. The development pool is three published questions (Reverse [advanced], Successive [advanced], Point
+  // [standard]); this proves the policy and its persistence, not calibration on an exam-sized bank.
+  // ---------------------------------------------------------------------------------------------
+
+  it("PHASE 3 UNIT 4: repeated errors at the ADVANCED tier keep the difficulty steady (same tier, not the just-attempted question, not simply the first published one)", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "sel-steady");
+    await replay(a, s.cookie, [[ids.successive, "wrong"], [ids.reverse, "wrong"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec.modeLabel).toBe("Repeated incorrect answers");
+    expect(rec.questionId).toBe(ids.successive); // same tier as the last answer; Reverse was just attempted; Point would be a step down
+    expect(rec.questionId).not.toBe(ids.reverse);
+    expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    expect(JSON.stringify(rec)).not.toMatch(PSYCH);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3 UNIT 4: documented fallback -- repeated errors on the ONLY standard question: the harder questions are the only alternatives, so one is served (never the just-attempted one)", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "sel-noalt");
+    await replay(a, s.cookie, [[ids.point, "wrong"], [ids.point, "wrong"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec.modeLabel).toBe("Repeated incorrect answers");
+    expect([ids.successive, ids.reverse]).toContain(rec.questionId);
+    expect(rec.questionId).not.toBe(ids.point);
+  });
+
+  it("PHASE 3 UNIT 4: coverage decides between otherwise similar questions -- the unseen pattern family wins over the seen one even though its id sorts later", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "sel-cover");
+    await replay(a, s.cookie, [[ids.reverse, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    const rec = await card(a, s.cookie);
+    expect(rec.questionId).toBe(ids.successive); // Successive is unseen; Reverse (the smaller id) was already practised; Point was just attempted
+    expect(rec.questionId).not.toBe(ids.reverse);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3 UNIT 4: a progression-ready student is moved up, and following the recommendations never serves the same question twice in a row", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "sel-progress");
+    await replay(a, s.cookie, [[ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    let rec = await card(a, s.cookie);
+    expect([ids.successive, ids.reverse]).toContain(rec.questionId); // off the basic question, onto the advanced tier
+    expect(String(rec.modeLabel)).not.toMatch(/incorrect|Accuracy/);
+    const followed: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const id = rec.questionId as string;
+      if (followed.length > 0) expect(id).not.toBe(followed[followed.length - 1]);
+      followed.push(id);
+      await practiceOnce(a, s.cookie, id, "correct");
+      rec = await card(a, s.cookie);
+      expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    }
+    expect(new Set(followed).size).toBeGreaterThan(1);
+    await sameAfterRestart(s.cookie, rec);
+  });
+
+  it("PHASE 3 UNIT 4: DOCUMENTED SOLE-CANDIDATE FALLBACK -- when the just-attempted question is the only published question it is served again, and restoring the pool restores the rule", async () => {
+    const ids = await familyIds();
+    const s = await newStudent(a, "sel-sole");
+    await practiceOnce(a, s.cookie, ids.reverse, "wrong");
+    await a.prisma.question.updateMany({ where: { id: { in: [ids.successive, ids.point] } }, data: { validationState: "human_reviewed" } });
+    try {
+      const rec = await card(a, s.cookie);
+      expect(rec.questionId).toBe(ids.reverse); // the only published question
+      expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+    } finally {
+      await a.prisma.question.updateMany({ where: { id: { in: [ids.successive, ids.point] } }, data: { validationState: "published" } });
+    }
+    expect((await card(a, s.cookie)).questionId).not.toBe(ids.reverse); // alternatives exist again
+  });
+
+  it("PHASE 3 UNIT 4: another student's practice never changes this student's selection", async () => {
+    const ids = await familyIds();
+    const x = await newStudent(a, "sel-iso-x");
+    const y = await newStudent(a, "sel-iso-y");
+    const before = await card(a, x.cookie);
+    await replay(a, y.cookie, [[ids.point, "correct"], [ids.point, "correct"], [ids.point, "correct"]]);
+    expect(await card(a, x.cookie)).toEqual(before);
   });
 
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {

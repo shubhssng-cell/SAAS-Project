@@ -2,6 +2,7 @@ import { validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
 import { deriveAccumulatedEvidence } from "./accumulatedEvidence.js";
 import { compareByRecentPreference, explainRecentEvidence, RECENT_EVIDENCE_REASON_BY_SIGNAL } from "./recentEvidence.js";
 import { compareByTrendPreference } from "./trendEvidence.js";
+import { applyDifficultyFit, REMEDIATION_REASONS, type DifficultyFitAdjustment } from "./selectionFit.js";
 import { applyOveruseAvoidance, rankCandidates } from "./tieBreak.js";
 import { buildTrainingNeedContext, computeProgressionTargetTier, determineSatisfiedReasons } from "./trainingNeeds.js";
 import {
@@ -152,13 +153,34 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     activeRepairPlans: input.activeRepairPlans ?? []
   });
 
-  const satisfiedByQuestionId = new Map<string, TrainingNeedReasonCode[]>();
-  for (const candidate of eligible) {
-    satisfiedByQuestionId.set(candidate.question.questionId, determineSatisfiedReasons(candidate, ctx));
+  // STAGE 1 -- no immediate repeat, GLOBALLY: the just-attempted question is removed from the whole eligible pool (not merely from one
+  // reason bucket) whenever any other eligible candidate exists. Only when it is the SOLE eligible candidate is it re-served, and that
+  // documented fallback is reported (`repeatFallback`) -- a repeat still beats returning nothing.
+  const justAttemptedId = ctx.recentEvidence?.question.questionId;
+  const justAttemptedEligible = justAttemptedId !== undefined && eligible.some((c) => c.question.questionId === justAttemptedId);
+  const excludedJustAttempted = justAttemptedEligible && eligible.length > 1;
+  const repeatFallback = justAttemptedEligible && eligible.length === 1;
+  const pool = excludedJustAttempted ? eligible.filter((c) => c.question.questionId !== justAttemptedId) : eligible;
+
+  // STAGE 2 -- training-need reasons per candidate (unchanged evidence: repair, accumulated, trend, recent, coverage, novelty, pressure, progression).
+  const progressionTargetTierByConcept = new Map<string, DifficultyTier>();
+  for (const candidate of pool) {
+    if (!progressionTargetTierByConcept.has(candidate.question.conceptName)) {
+      progressionTargetTierByConcept.set(candidate.question.conceptName, computeProgressionTargetTier(ctx.masteryByConcept.get(candidate.question.conceptName)));
+    }
+  }
+  const rawReasons = new Map<string, TrainingNeedReasonCode[]>();
+  for (const candidate of pool) {
+    rawReasons.set(candidate.question.questionId, determineSatisfiedReasons(candidate, ctx));
   }
 
+  // STAGE 3 -- difficulty fit (selectionFit.ts): a reason no longer hands a candidate a bucket when it is at the wrong level for that reason.
+  const fit = applyDifficultyFit(pool, rawReasons, { masteryByConcept: ctx.masteryByConcept, trendByConcept: ctx.trendByConcept, recentEvidence: ctx.recentEvidence, progressionTargetTierByConcept });
+  const satisfiedByQuestionId = fit.reasonsByQuestionId;
+  const difficultyFitAdjustments: DifficultyFitAdjustment[] = fit.adjustments;
+
   const byPrimaryReason = new Map<TrainingNeedReasonCode, AdaptiveCandidateQuestion[]>();
-  for (const candidate of eligible) {
+  for (const candidate of pool) {
     const satisfied = satisfiedByQuestionId.get(candidate.question.questionId) ?? [];
     const primary = TRAINING_NEED_PRIORITY_ORDER.find((reason) => satisfied.includes(reason));
     if (!primary) continue; // satisfies nothing named -- handled by the universal fallback below
@@ -187,23 +209,16 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
   let isFallback = false;
   if (!winningReason) {
     winningReason = "difficulty_progression";
-    winningPool = eligible;
+    winningPool = pool;
     isFallback = true;
   }
 
-  const progressionTargetTierByConcept = new Map<string, DifficultyTier>();
-  for (const candidate of eligible) {
-    if (!progressionTargetTierByConcept.has(candidate.question.conceptName)) {
-      progressionTargetTierByConcept.set(candidate.question.conceptName, computeProgressionTargetTier(ctx.masteryByConcept.get(candidate.question.conceptName)));
-    }
-  }
-
-  // Phase 3.1: the question the student JUST attempted is not immediately re-served from any bucket -- unless it is the only
-  // candidate left (repeating is still better than returning nothing, the same rule overuse avoidance follows).
-  const justAttemptedId = ctx.recentEvidence?.question.questionId;
-  const withoutJustAttempted = justAttemptedId ? winningPool.filter((c) => c.question.questionId !== justAttemptedId) : winningPool;
-  const afterOveruseAvoidance = applyOveruseAvoidance(withoutJustAttempted.length > 0 ? withoutJustAttempted : winningPool, ctx.exposure);
-  let ranked = rankCandidates(afterOveruseAvoidance, { exposure: ctx.exposure, progressionTargetTierByConcept });
+  // STAGE 4 -- overuse avoidance WITHIN the winning bucket (an overused candidate that meets a real need still beats an unseen one that meets only a weaker need).
+  const afterOveruseAvoidance = applyOveruseAvoidance(winningPool, ctx.exposure);
+  // STAGE 5 -- ordered, named, lexicographic ranking (tieBreak.ts): difficulty fit, family coverage, cell coverage, question exposure, easier first, id.
+  const lastGradedTierByConcept = new Map<string, DifficultyTier>();
+  for (const [concept, trend] of ctx.trendByConcept) lastGradedTierByConcept.set(concept, trend.lastGradedTier);
+  let ranked = rankCandidates(afterOveruseAvoidance, { exposure: ctx.exposure, progressionTargetTierByConcept, lastGradedTierByConcept, remediation: REMEDIATION_REASONS.includes(winningReason) });
   if (ctx.recentEvidence !== null && (Object.values(RECENT_EVIDENCE_REASON_BY_SIGNAL) as TrainingNeedReasonCode[]).includes(winningReason)) {
     // Phase 3.1: the recent-evidence rule's own preference comes first; the generic tie-breaks above keep ordering everything it leaves tied (stable sort).
     ranked = [...ranked].sort(compareByRecentPreference(ctx.recentEvidence));
@@ -251,7 +266,10 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
     excludedUnpublishedCount,
     recentEvidence: ctx.recentEvidence,
     accumulatedEvidence,
-    trendEvidence
+    trendEvidence,
+    excludedJustAttempted,
+    repeatFallback,
+    difficultyFitAdjustments
   };
 
   return { status: "selected", result };

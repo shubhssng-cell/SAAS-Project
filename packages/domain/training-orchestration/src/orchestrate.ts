@@ -1,4 +1,4 @@
-import { selectNextQuestion } from "@ipmat/adaptive-selection";
+import { deriveRecentEvidence, selectNextQuestion } from "@ipmat/adaptive-selection";
 import { selectRepairQuestion, RepairSelectionError } from "@ipmat/repair-selection";
 import { derivePriorExposureForRepair } from "./priorExposure.js";
 import { selectPlanForOrchestration } from "./repairPlanSelection.js";
@@ -296,7 +296,17 @@ export function orchestrateNextTrainingAction(input: TrainingOrchestrationInput)
     };
   }
 
-  const repair = attemptTargetedRepair(input);
+  // Phase 3 Unit 4 -- no immediate repeat across EVERY tier. Repair and the training-system providers choose by their own rules and know
+  // nothing about what was just attempted, so the question the student JUST finished is withheld from them whenever any other candidate
+  // exists. If that leaves a tier with no match, it falls through to the next tier exactly as any other no-match does. Adaptive practice
+  // receives the full pool: it applies the same rule itself and owns the documented sole-candidate fallback (`repeatFallback`).
+  const justAttemptedQuestionId = deriveRecentEvidence(input.studentId, input.attemptRecords)?.question.questionId;
+  const tierInput: TrainingOrchestrationInput =
+    justAttemptedQuestionId !== undefined && input.candidates.length > 1 && input.candidates.some((c) => c.question.questionId === justAttemptedQuestionId)
+      ? { ...input, candidates: input.candidates.filter((c) => c.question.questionId !== justAttemptedQuestionId) }
+      : input;
+
+  const repair = attemptTargetedRepair(tierInput);
 
   if (repair.outcome?.status === "selected") {
     return {
@@ -318,7 +328,7 @@ export function orchestrateNextTrainingAction(input: TrainingOrchestrationInput)
     };
   }
 
-  const trainingSystems = attemptTrainingSystems(input);
+  const trainingSystems = attemptTrainingSystems(tierInput);
   const fallbackFromRepair = repair.attempted;
 
   if (trainingSystems.selected) {

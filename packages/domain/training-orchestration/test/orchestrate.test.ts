@@ -219,7 +219,8 @@ describe("orchestrateNextTrainingAction — 14/15. no reimplementation of either
   it("orchestrate.ts imports only the PUBLIC contract from @ipmat/adaptive-selection (selectNextQuestion, computeExposureCounts) -- never its internal trainingNeeds/tieBreak modules", () => {
     const orchestrateSource = readFileSync(join(__dirname, "..", "src", "orchestrate.ts"), "utf-8");
     const exposureSource = readFileSync(join(__dirname, "..", "src", "priorExposure.ts"), "utf-8");
-    expect(orchestrateSource).toMatch(/import\s*\{\s*selectNextQuestion\s*\}\s*from\s*"@ipmat\/adaptive-selection"/);
+    // Phase 3 Unit 4 adds `deriveRecentEvidence` (also public) so the orchestrator can withhold the just-attempted question from repair/providers.
+    expect(orchestrateSource).toMatch(/import\s*\{\s*deriveRecentEvidence,\s*selectNextQuestion\s*\}\s*from\s*"@ipmat\/adaptive-selection"/);
     expect(exposureSource).toMatch(/import\s*\{\s*computeExposureCounts\s*\}\s*from\s*"@ipmat\/adaptive-selection"/);
     expect(orchestrateSource + exposureSource).not.toMatch(/determineSatisfiedReasons|rankCandidates|computeProgressionTargetTier|TRAINING_NEED_PRIORITY_ORDER/);
   });

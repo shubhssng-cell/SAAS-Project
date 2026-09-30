@@ -67,7 +67,10 @@ describe("training-orchestration — regression guards: no hidden score/confiden
         excludedUnpublishedCount: 0,
         recentEvidence: null,
         accumulatedEvidence: null,
-        trendEvidence: null
+        trendEvidence: null,
+        excludedJustAttempted: false,
+        repeatFallback: false,
+        difficultyFitAdjustments: []
       },
       wasFallbackFromRepair: false,
       wasFallbackFromTrainingSystems: false,

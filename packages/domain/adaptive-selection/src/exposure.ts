@@ -13,6 +13,8 @@ import type { MasteryAttemptRecord } from "./types.js";
 export interface ExposureCounts {
   byQuestionId: Map<string, number>;
   byPatternFamilyName: Map<string, number>;
+  /** Phase 3 Unit 4: attempts per taxonomy cell (the finer coverage grain under a pattern family), from the same records. */
+  byTaxonomyCellId: Map<string, number>;
   /** Total attempts across every concept for this student, regardless of family/question — used to distinguish "this family is underexposed" from "this student has no history at all" (cold start), which is not a special case here but is worth being able to name explicitly in a test. */
   totalAttempts: number;
 }
@@ -20,6 +22,7 @@ export interface ExposureCounts {
 export function computeExposureCounts(studentId: string, attemptRecords: MasteryAttemptRecord[]): ExposureCounts {
   const byQuestionId = new Map<string, number>();
   const byPatternFamilyName = new Map<string, number>();
+  const byTaxonomyCellId = new Map<string, number>();
   let totalAttempts = 0;
 
   for (const record of attemptRecords) {
@@ -27,7 +30,8 @@ export function computeExposureCounts(studentId: string, attemptRecords: Mastery
     totalAttempts += 1;
     byQuestionId.set(record.contribution.questionId, (byQuestionId.get(record.contribution.questionId) ?? 0) + 1);
     byPatternFamilyName.set(record.question.patternFamilyName, (byPatternFamilyName.get(record.question.patternFamilyName) ?? 0) + 1);
+    byTaxonomyCellId.set(record.question.patternTaxonomyCellId, (byTaxonomyCellId.get(record.question.patternTaxonomyCellId) ?? 0) + 1);
   }
 
-  return { byQuestionId, byPatternFamilyName, totalAttempts };
+  return { byQuestionId, byPatternFamilyName, byTaxonomyCellId, totalAttempts };
 }

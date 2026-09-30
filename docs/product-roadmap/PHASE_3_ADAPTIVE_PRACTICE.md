@@ -11,7 +11,7 @@ From the master roadmap: *the dashboard/practice entry actually surfaces the ada
 | 9 (Phase 3.1) | First adaptive layer: react to the most recent finalized attempt | **COMPLETE** (below) |
 | 10 (Phase 3.2) | Accumulated adaptive evidence: repeated observable performance over multiple attempts | **COMPLETE** (below) |
 | Phase 3 Unit 3 (Phase 3.3) | Trend-aware adaptive evidence: how observed performance on a concept is changing (last 3 graded answers vs. the earlier ones) | **COMPLETE** (below) |
-| Phase 3 Unit 4 | Adaptive question selection across concept, pattern, difficulty, novelty, coverage and progression | **NOT STARTED** |
+| Phase 3 Unit 4 | Adaptive question selection across concept, pattern, difficulty, novelty, coverage and progression | **COMPLETE** (below) |
 | Phase 3 Unit 5 | Adaptive-system hardening / calibration / validation | **NOT STARTED** |
 
 *Numbering note: Units 9 and 10 above carry the running Phase-2-continuing numbers they were committed under. From here on units are Phase-3-relative ("Phase 3 Unit 3" = Phase 3.3), as the roadmap now defines them: Unit 1 = latest attempt, Unit 2 = accumulated evidence, Unit 3 = trend/recency/streak, Unit 4 = selection across dimensions, Unit 5 = hardening.*
@@ -336,5 +336,105 @@ Every card and the pre-submission question page were checked: no internal reason
 - **Existing behavior noticed, not changed:** the "no immediate repeat" rule is applied within the winning reason bucket, so if the winning bucket's only member is the just-attempted question it can still be re-served even though lower-priority candidates exist (Unit 1 semantics; relevant to Unit 4's selection work).
 - **Mastery sort tie-break changed** (`attemptId` for equal/missing timestamps, previously stable input order): only observable for identical timestamps; all existing mastery tests pass unchanged.
 - Real-database verification is on a disposable local container only and is opt-in (not part of `npm test`/CI).
+
+## Phase 3 Unit 4 (Phase 3.4) — Adaptive question selection
+
+> **This is still an authored, deterministic selection policy.** It makes no claim of optimal selection, calibrated difficulty, guaranteed learning improvement, or understanding of the student, and it is not Question Autopsy. There is no student score, question score, or composite of any kind — only named stages and named lexicographic comparisons.
+
+**Objective.** Units 1–3 produce evidence (recent, accumulated, trend). Unit 4 decides *which exact question* the evidence should produce, and fixes the places where a candidate could win for the wrong reason.
+
+### What selection did before (inspected, not assumed)
+
+1. **Eligibility:** structural validity, then published-only.
+2. **Reasons:** each candidate was tagged with every reason it satisfied (repair, repeated error, trend, accuracy, speed, recent, coverage, novelty, pressure, progression); its **single highest-priority reason** decided its bucket, and the first non-empty bucket won.
+3. **Inside the winning bucket:** the just-attempted question was dropped *if another member of that bucket existed*; then binary overuse avoidance (≥ 2 attempts); then the recent/trend preference; then the generic order **pattern-family exposure → distance to the progression target tier → `questionId`**.
+
+### Problems found
+
+| # | Problem | Consequence |
+|---|---|---|
+| 1 | **A reason says nothing about difficulty.** Every candidate on a weak concept satisfied `accuracy_weakness` / `repeated_error`, whatever its tier. | A student failing at the standard tier could be served an advanced question merely because its family was less practised (a limitation Unit 3 already noted). |
+| 2 | **Exploration reasons outranked progression for below-level questions.** `coverage_gap` / `underexposure` rank above `difficulty_progression`. | A student who had demonstrated the standard tier was given a basic, never-seen question instead of the step up. |
+| 3 | **No-immediate-repeat was per bucket.** If the just-attempted question was the only member of the winning bucket, it was re-served even though lower-priority candidates existed. | The Unit 3 limitation. |
+| 4 | **Coverage ignored the taxonomy cell** and ranked family exposure *before* difficulty fit. | Two questions in one family could not be told apart by cell; a slightly-novel wrong-level question could beat a right-level one. |
+| 5 | **Repair and the training-system providers knew nothing about the just-attempted question.** | They could re-serve it while adaptive practice would not. |
+| 6 | Bug found by a Unit 4 test: the new adjustment list followed candidate *input order*. | Two calls with the same candidates in a different order could return different (equal-winner) results. Fixed — the list is sorted. |
+
+### The new policy (stages, in order; `selectNextQuestion.ts`)
+
+1. **Eligibility + global no-immediate-repeat.** Structural validity, published-only, then the just-attempted question is removed from the **whole** eligible pool whenever another eligible candidate exists (`excludedJustAttempted`). **Documented fallback:** if it is the *sole* eligible candidate it is re-served and the result says so (`repeatFallback`) — a repeat beats returning nothing. An unpublished or malformed alternative is not an alternative.
+2. **Need reasons** (unchanged evidence: repair, accumulated, trend, recent, coverage, novelty, pressure, progression).
+3. **Difficulty fit** (`selectionFit.ts`, new) — removes exactly two mismatches and adds nothing:
+   - `too_aggressive_for_remediation`: a candidate **harder than the tier last answered on its concept** loses its *remediation* reasons (`repeated_error`, `recent_deterioration`, `accuracy_weakness`, `speed_weakness`, `prerequisite_weakness`), provided another eligible candidate on that concept is not harder.
+   - `below_progression_level` / `above_progression_level`: for a **progression-ready** concept, a candidate easier or harder than its progression target tier loses its *exploration* reasons (`coverage_gap`, `underexposure`, `pressure_gap`, `novelty_gap`, `recent_correct_on_pace`), provided an eligible candidate on that concept is **at** the target tier. The band is exactly one step up — a two-step jump is not an acceptable "exploration".
+   - *Progression-ready* = the existing `highestDemonstratedTier()` rule holds (≥ 3 graded attempts on a tier at ≥ 0.8) **and** nothing currently contradicts it: the trend is not `deteriorating`/`persistent_difficulty` and the latest attempt on the concept was not incorrect, skipped or slow.
+   - Both rules are **guarded by "an alternative exists"**: with no suitable alternative the reasons stay (a thin pool still yields an answer). `repair_priority` and the `recent_incorrect`/`recent_skip`/`recent_slow` reasons are never touched. Every adjustment made is returned (`difficultyFitAdjustments`: question, rule, reasons removed) and is sorted, so it is reproducible.
+4. **Bucket** by each candidate's highest *remaining* reason, in the unchanged priority order; if nothing remains the existing labelled `difficulty_progression` fallback applies.
+5. **Overuse avoidance within the winning bucket** (≥ 2 attempts at the exact question, only when a non-overused member exists) — deliberately *within* the bucket: an overused candidate that meets a real need still beats an unseen one that meets only a weaker need.
+6. **Lexicographic ranking** (`tieBreak.ts`; the recent/trend preference still sorts first where it applies): **difficulty fit** (remediation: not harder than the last tier first, then distance to it; otherwise distance to the progression target) → **pattern-family exposure** → **taxonomy-cell exposure** (new, from the same attempt records) → **question exposure** → **easier first** → **`questionId`**.
+
+Why this order: *need* first because a real observed need outranks breadth; *fit* before *coverage* so a novel question at the wrong level cannot beat a right-level one; *family* before *cell* because breadth across patterns matters more than depth inside one; *exposure* next so repeats are a last resort; *easier-first* so an equal-fit tie is never resolved toward the aggressive option; *id* so the result is fully deterministic.
+
+**Orchestration boundary (one small change).** `orchestrateNextTrainingAction()` withholds the just-attempted question from the **repair** and **training-system** tiers whenever another candidate exists (using the public `deriveRecentEvidence`). A tier with no other match falls through exactly like any no-match; adaptive practice receives the full pool and owns the sole-candidate fallback. Repair priority and the provider order are unchanged, no provider logic was merged, and no provider was modified.
+
+### How conflicts resolve
+
+| Conflict | Outcome |
+|---|---|
+| Confirmed repair vs anything | repair wins, and is never difficulty-adjusted (no confirmed diagnosis → no shortcut) |
+| Right need but overused vs better candidate | within the same need the less-used one wins; an overused *remediation* candidate still beats an unseen question that meets only a weaker need |
+| Coverage vs fit | fit first; coverage breaks ties at equal fit (family, then cell) |
+| Remediation vs a harder question | the not-harder one wins; with no not-harder alternative the harder one is served and nothing is adjusted |
+| Progression vs a basic unseen question | for a progression-ready concept the at-target question wins; with none in the pool the basic question is still served |
+| Novelty vs need / level | novelty never overrides an active need or the level; a novel question *at* the target tier does win over the plain step |
+| Trend vs progression | a deteriorating trend withdraws progression-readiness (difficulty stays steady) |
+| Just-attempted vs alternatives | never re-served while any other eligible candidate exists |
+
+### Student-facing wording
+
+No new reason codes, so **no new copy was needed**; every existing sentence still states only observations ("Your last 2 graded answers on Percentages were all incorrect…", "This targets a part of the topic you haven't practiced much yet."). The policy changes *which question* is behind the card, not what the card claims. No weakness/readiness/confidence language exists or was added.
+
+### What is deliberately NOT inferred or built
+
+No confidence, motivation, ability, intelligence, emotion or readiness-as-a-trait; "progression-ready" is only the name of an observable rule. No composite score, weighted sum, or hidden state. No Autopsy, hypothesis, student confirmation, RepairPlan generation, LLM, reasoning/voice analysis. No new mastery, exposure, trend, taxonomy or repair system — the cell count extends the existing exposure counts from the same attempt records. Nothing about providers' own logic changed.
+
+### Persistence
+
+Nothing new is stored. Every stage is a pure function of persisted attempts, question metadata and existing repair/mastery data, so a fresh API process selects the same question from the same database (verified on real Postgres, below). No counters or process-local state influence the decision.
+
+### Tests
+
+- `packages/domain/adaptive-selection/test/selectionPolicy.test.ts` (**26**): the five required conflict cases and more — repair beats progression/level (never adjusted); overuse inside one need; family coverage; cell coverage; the lexicographic order itself; the cell exposure count; appropriate difficulty beats gratuitous difficulty; remediation not pushed upward (and the documented no-alternative fallback); progression beats the basic unseen question (and the guard when no at-target question exists); Case A (equal-fit coverage tie-break), Case A2 (both sides of the band); progression-readiness withdrawn by a deteriorating trend / incorrect latest answer / no demonstrated tier; Case B (overused remediation vs unseen novel question); Case D (novel but wrong level loses; novel at the right level wins); recent/accumulated/trend interplay; global no-repeat with alternatives; the **documented sole-candidate fallback** (Case E) including an unpublished alternative; published-only and malformed exclusion; student isolation; determinism in any candidate order; no score/psychology field, no answer leakage.
+- `packages/domain/training-orchestration/test/noImmediateRepeat.test.ts` (4): repair tier and Trap Lab never re-serve the just-attempted question when another match exists; the tier falls through; repair priority intact; sole-candidate fallback.
+- `apps/api/test/prismaPersistence.integration.test.ts` (**real Postgres**, +6): steady difficulty under repeated errors; the no-alternative fallback; unseen-family coverage over a smaller id; progression with a six-step followed loop that never repeats consecutively; the sole-candidate fallback (and its reversal when the pool is restored); cross-student isolation; each decision reconstructed by a fresh instance.
+- Changed existing tests: the result-shape regression fixtures (three new result fields), one import-line assertion in the orchestrator boundary test, and the integration suite's per-test timeout (5 s → 60 s; see limitations).
+
+### Validation
+
+Default suite (no database): full repository **1939 passed + 42 skipped** across 188 files (was 1909 + 36); the 42 skipped are the opt-in real-database suite, run separately on real Postgres: **42/42 passed** (was 36). New tests: adaptive-selection +26, training-orchestration +4, real-Postgres +6. Typecheck (all workspaces), build, lint and `git diff --check` clean. Two existing guard tests needed updating (listed above); one of them caught a genuine naming problem while this unit was written — a result field named `…Demotions` contains the substring "emotion" and tripped the "no psychological field" guard, so it is `difficultyFitAdjustments`.
+
+**Real PostgreSQL** (same disposable-container procedure as before: `postgres:16-alpine` on `127.0.0.1:55432`, random throwaway password never written to the repo, database `ipmat_test`; the unrelated Postgres on 5432 was not touched), through the real HTTP server on the real Prisma repositories. The published pool is three questions: Reverse (advanced, the smallest id), Successive (advanced), Point (standard). Decisions that differ from "the first published question":
+- repeated errors at the advanced tier → **Successive** (same tier, not the just-attempted Reverse, not the easier Point);
+- Reverse practised, then Point twice → **Successive** (unseen family) rather than the smaller-id, already-practised Reverse;
+- three correct on Point → an **advanced** question, then a followed loop of six recommendations **never repeating consecutively**;
+- documented fallbacks: only the standard question failed twice → a harder question is the only alternative and is served (never Point itself); with Successive and Point temporarily unpublished the just-attempted Reverse is re-served (sole candidate) and the rule resumes when they are restored (in `try/finally`);
+- another student's practice leaves this student's card unchanged; fresh instances reproduce each decision.
+This proves the policy and its persistence, **not calibration on an exam-sized bank.**
+
+**Browser verification** (raw CDP / headless Edge; real `apps/web` + real `apps/api` in Prisma mode + the disposable Postgres; no fixture adapter): **12/12 checks.** Histories built through the real HTTP API, then the real UI loop login → dashboard card → Start Practice → card → Continue → question → answer → result → Continue:
+1. **Steady (Successive wrong, Reverse wrong):** dashboard card "Repeated incorrect answers"; the API process was **hard-killed and restarted** and the reloaded card was identical; the question page opened **Successive**, not the first published one (Reverse). The pre-submission page contained no answer key or solution.
+2. **Coverage (Reverse correct, Point correct ×2):** the question page opened **Successive** (unseen family), not Reverse.
+3. **Progression (Point correct ×3):** first pick advanced, then three real answer/Continue rounds where each next question differed from the one just answered (Reverse → Successive → Reverse → Successive).
+Every card and question page was checked: no internal reason code, no `undefined`/`null`/`[object`, no psychological vocabulary, no answer key before submission.
+
+### Limitations
+
+- **Tiny development pool (3 questions, 1 concept):** the tiers, families and cells in play are few, so the policy and its persistence are demonstrated but **nothing is calibrated** and nothing is claimed about an exam-sized bank.
+- **Authored, provisional policy.** The stage order, the "one step up" band, the "last answered tier" reference and "not harder" for remediation are design choices, not findings. Difficulty tiers remain provisional (D-021). A remediation pick stays on the *same tier* first (so a failed advanced student is offered another advanced question before a fresh easier one); whether stepping down sooner is better is unmeasured.
+- **Concept-level grain:** the guards compare candidates of the same concept; cross-concept trade-offs remain the reason-priority order.
+- **Overuse is still binary at ≥ 2 attempts, inside the bucket**, plus the graded question-exposure stage. A heavily repeated question that is the only need-matching candidate is still served.
+- **Hidden/ranked alternatives** are reported only within the winning bucket (existing behavior).
+- Real-database verification is on a disposable container only and is opt-in; on this host the suite ran about twice as slowly as in the previous unit, so its per-test timeout was raised.
+- Correctness-only evidence (no speed trend), as in Unit 3.
 
 **Unit 11+ status: NOT STARTED.**

@@ -187,6 +187,12 @@ export interface AdaptiveSelectionResult {
   accumulatedEvidence: AccumulatedEvidence | null;
   /** Phase 3.3: how the student's OBSERVED performance on the SELECTED question's concept has changed (recent window vs earlier) -- `null` when they have no graded attempt on it. Describes changes in observed performance; does not diagnose the student. */
   trendEvidence: TrendEvidence | null;
+  /** Phase 3 Unit 4: the just-attempted question was removed from the whole eligible pool because another eligible candidate existed. */
+  excludedJustAttempted: boolean;
+  /** Phase 3 Unit 4: DOCUMENTED FALLBACK -- the just-attempted question is the ONLY eligible candidate, so it is re-served (a repeat beats returning nothing). */
+  repeatFallback: boolean;
+  /** Phase 3 Unit 4: reasons removed by the difficulty-fit stage (a remediation reason on a too-hard candidate, an exploration reason on a below-level one) -- empty when none. Facts for explainability, never a score. */
+  difficultyFitAdjustments: Array<{ questionId: string; rule: "too_aggressive_for_remediation" | "below_progression_level" | "above_progression_level"; reasonsRemoved: TrainingNeedReasonCode[] }>;
 }
 
 export type AdaptiveNoSelectionReason = "no_candidates_supplied" | "no_published_candidates" | "no_structurally_valid_candidates";
