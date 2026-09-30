@@ -72,10 +72,24 @@ export class InMemoryQuestionImportRepository implements QuestionImportRepositor
       return concept.id;
     };
 
+    // Mirrors PrismaQuestionImportRepository (Product Phase 2 Unit 8): the primary concept is chapter-scoped, related
+    // concepts resolve by name across the section's chapters, failing closed on none or ambiguous.
+    const sectionChapterIds = new Set(this.world.chapters.filter((c) => c.sectionId === section.id).map((c) => c.id));
+    const resolveRelatedConcept = (name: string): string => {
+      const matches = this.world.concepts.filter((c) => sectionChapterIds.has(c.chapterId) && c.name === name);
+      if (matches.length === 0) {
+        throw new PersistenceError("missing_reference", `No Concept found named "${name}" in section "${blueprint.sectionName}".`);
+      }
+      if (matches.length > 1) {
+        throw new PersistenceError("invalid_record", `Concept name "${name}" is ambiguous in section "${blueprint.sectionName}" (${matches.length} matches).`);
+      }
+      return matches[0]!.id;
+    };
+
     const conceptId = resolveConcept(dna.conceptName);
-    dna.subconcepts.forEach(resolveConcept);
-    dna.prerequisites.forEach(resolveConcept);
-    dna.combinesWithConcepts.forEach(resolveConcept);
+    dna.subconcepts.forEach(resolveRelatedConcept);
+    dna.prerequisites.forEach(resolveRelatedConcept);
+    dna.combinesWithConcepts.forEach(resolveRelatedConcept);
 
     const patternFamily = this.world.patternFamilies.find((f) => f.conceptId === conceptId && f.name === dna.patternFamilyName);
     if (!patternFamily) {

@@ -86,10 +86,27 @@ export class PrismaQuestionImportRepository implements QuestionImportRepository 
           return concept.id;
         };
 
+        // Product Phase 2 Unit 8: the PRIMARY concept must live in the blueprint's own chapter, but the concepts it is
+        // related to (subconcepts, prerequisites, combines-with) legitimately belong to OTHER chapters of the same
+        // section -- the concept graph places e.g. "Profit and Loss" in its own chapter. Resolving them chapter-scoped
+        // made every cross-chapter candidate un-importable (found against a real database; the in-memory double had
+        // hidden it by putting every concept in one chapter). They now resolve by name within the exam's section,
+        // failing closed if the name matches no concept, or more than one (ambiguity is never guessed at).
+        const resolveRelatedConcept = async (name: string): Promise<string> => {
+          const matches = await tx.concept.findMany({ where: { name, chapter: { sectionId: section.id } }, select: { id: true } });
+          if (matches.length === 0) {
+            throw new PersistenceError("missing_reference", `No Concept found named "${name}" in section "${blueprint.sectionName}".`);
+          }
+          if (matches.length > 1) {
+            throw new PersistenceError("invalid_record", `Concept name "${name}" is ambiguous in section "${blueprint.sectionName}" (${matches.length} matches).`);
+          }
+          return matches[0]!.id;
+        };
+
         const conceptId = await resolveConcept(dna.conceptName);
-        const subconceptIds = await Promise.all(dna.subconcepts.map(resolveConcept));
-        const prerequisiteIds = await Promise.all(dna.prerequisites.map(resolveConcept));
-        const combinesWithConceptIds = await Promise.all(dna.combinesWithConcepts.map(resolveConcept));
+        const subconceptIds = await Promise.all(dna.subconcepts.map(resolveRelatedConcept));
+        const prerequisiteIds = await Promise.all(dna.prerequisites.map(resolveRelatedConcept));
+        const combinesWithConceptIds = await Promise.all(dna.combinesWithConcepts.map(resolveRelatedConcept));
 
         const patternFamily = await tx.questionPatternFamily.findUnique({
           where: { conceptId_name: { conceptId, name: dna.patternFamilyName } }

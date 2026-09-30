@@ -99,11 +99,13 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     expect(rows[0]!.indexdef).toMatch(/WHERE.*in_progress/);
   });
 
-  it("seed content is what the practice path sees: the demo question is published and recommended", async () => {
+  it("seed content is what the practice path sees: a recommended question is one of the persisted PUBLISHED questions (incl. the demonstration question)", async () => {
     const student = await newStudent(a, "seed");
     const rec = await call(a, "POST", "/v1/recommendation", student.cookie);
     expect(rec.status).toBe(200);
-    expect(rec.json.questionId).toBe(DEMO_QUESTION);
+    const published = (await a.prisma.question.findMany({ where: { validationState: "published" }, select: { id: true } })).map((q) => q.id);
+    expect(published).toContain(DEMO_QUESTION);
+    expect(published).toContain(rec.json.questionId);
   });
 
   it("start -> resume -> submit -> result: state, events and grading persist in real tables", async () => {
@@ -227,6 +229,110 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
       expect(results.every((r) => r.status === 200)).toBe(true);
       expect(new Set(results.map((r) => r.json.attemptId)).size).toBe(1);
       expect(await a.prisma.attempt.count({ where: { studentId: s.studentId, status: "in_progress" } })).toBe(1);
+    }
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Product Phase 2 Unit 8 -- the persisted practice content set (3 published questions: the base
+  // seed's demonstration question + 2 published via the real import + publication path).
+  // ---------------------------------------------------------------------------------------------
+
+  it("UNIT 8: exactly the expected published practice set exists, each with honest provenance and complete Question DNA + solution data", async () => {
+    const published = await a.prisma.question.findMany({ where: { validationState: "published" }, include: { provenance: true, concept: true, chapter: true, patternTaxonomyCell: { include: { patternFamily: true } } } });
+    expect(published.length).toBeGreaterThanOrEqual(3);
+    for (const q of published) {
+      expect(q.provenance?.sourceType).toBe("original"); // internal/original content; nothing claims to be an official IPMAT question
+      expect(q.provenance?.sourceType).not.toMatch(/official|pyq|previous/i);
+      expect(q.testingModes.length).toBeGreaterThan(0);
+      expect(Object.keys(q.difficultyDimensions as object).sort()).toEqual(["computationalLoad", "conceptualLoad", "multiStepDepth", "representationNovelty", "timePressure", "trapDensity"]);
+      expect(q.expectedTimeSeconds).toBeGreaterThan(0);
+      expect(Array.isArray(q.solutionSteps) && (q.solutionSteps as unknown[]).length > 0).toBe(true);
+      expect((q.options as string[]).includes(q.correctAnswer)).toBe(true);
+      expect(q.chapter.name).toBe("Percentages");
+      expect(q.patternTaxonomyCell.patternFamily.name).toBeTruthy();
+    }
+    // The two Unit 8 questions came in through the real pipeline -> import -> publication path (source_ref says so).
+    const viaSeed = published.filter((q) => q.provenance?.sourceRef?.startsWith("phase-2-unit-8-dev-seed:"));
+    expect(viaSeed).toHaveLength(2);
+    expect(viaSeed.map((q) => q.difficultyTier).sort()).toEqual(["advanced", "standard"]); // never a tier that needs human review
+  });
+
+  it("UNIT 8: the Prisma TrainingQuestionReader and ConceptReader see exactly the published set and exclude an unpublished question", async () => {
+    const { PrismaConceptReader, PrismaTrainingQuestionReader } = await import("@ipmat/db");
+    const exam = await a.prisma.exam.findUniqueOrThrow({ where: { code: "IPMAT_INDORE" } });
+    const publishedIds = (await a.prisma.question.findMany({ where: { validationState: "published", examId: exam.id }, select: { id: true } })).map((q) => q.id).sort();
+
+    const demo = await a.prisma.question.findUniqueOrThrow({ where: { id: DEMO_QUESTION } });
+    const draftId = randomUUID();
+    const { id: _id, provenanceId: _prov, ...rest } = demo;
+    void _id;
+    void _prov;
+    await a.prisma.question.create({ data: { ...rest, id: draftId, validationState: "human_reviewed", provenanceId: null } as never });
+    try {
+      const training = await new PrismaTrainingQuestionReader(a.prisma).findPublishedByExamId(exam.id);
+      const ids = training.map((r) => r.question.questionId).sort();
+      expect(ids).toEqual(publishedIds);
+      expect(ids).not.toContain(draftId);
+      expect(training.every((r) => r.validationState === "published" && r.question.testingModes.length > 0 && r.expectedTimeSeconds > 0)).toBe(true);
+      const concepts = await new PrismaConceptReader(a.prisma).findWithPublishedQuestionsByExamId(exam.id);
+      expect(concepts.map((c) => c.name)).toEqual(["Percentages"]);
+    } finally {
+      await a.prisma.question.delete({ where: { id: draftId } });
+    }
+  });
+
+  it("UNIT 8: recommendation discovers the persisted set, and a student can practice ALL of it through the real HTTP path (submit or skip), never leaking an answer key before submission", async () => {
+    const s = await newStudent(a, "multi");
+    const total = await a.prisma.question.count({ where: { validationState: "published" } });
+    const seen: string[] = [];
+    for (let round = 0; round < total; round++) {
+      const rec = await call(a, "POST", "/v1/recommendation", s.cookie);
+      expect(rec.status).toBe(200);
+      const questionId = rec.json.questionId as string;
+      expect(JSON.stringify(rec.json)).not.toMatch(/correctAnswer|solutionSteps/);
+      seen.push(questionId);
+
+      const started = await call(a, "POST", "/v1/attempts", s.cookie, { questionId });
+      expect(started.status).toBe(200);
+      expect(JSON.stringify(started.json)).not.toMatch(/correctAnswer|solutionSteps|groundTruth/);
+      const question = started.json.question as { options: string[]; prompt: string };
+      expect(question.prompt.length).toBeGreaterThan(20);
+      const attemptId = started.json.attemptId as string;
+      if (round === 1) {
+        const skipped = await call(a, "POST", `/v1/attempts/${attemptId}/skip`, s.cookie, { questionId });
+        expect(skipped.json).toMatchObject({ status: "skipped", correctAnswer: null });
+      } else {
+        const submitted = await call(a, "POST", `/v1/attempts/${attemptId}/submit`, s.cookie, { questionId, chosenAnswer: question.options[0] });
+        expect(submitted.json).toMatchObject({ status: "submitted" });
+        expect((submitted.json.solutionSteps as string[]).length).toBeGreaterThan(0);
+      }
+    }
+    // The real recommender, on real Prisma readers, walked through every published question before repeating.
+    expect(new Set(seen).size).toBe(total);
+    const attempts = await a.prisma.attempt.findMany({ where: { studentId: s.studentId }, orderBy: { startedAt: "asc" } });
+    expect(attempts.map((x) => x.status)).toEqual(total >= 2 ? ["submitted", "skipped", ...Array(total - 2).fill("submitted")] : ["submitted"]);
+  });
+
+  it("UNIT 8: recommendation continuity survives a restart -- a fresh instance recommends from persisted history, not from scratch", async () => {
+    const s = await newStudent(a, "continuity");
+    const first = (await call(a, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
+    const start1 = await call(a, "POST", "/v1/attempts", s.cookie, { questionId: first });
+    const att1 = start1.json.attemptId as string;
+    const firstOption = (start1.json.question as { options: string[] }).options[0]!; // a REAL option (an invalid one is refused and leaves the attempt open)
+    expect((await call(a, "POST", `/v1/attempts/${att1}/submit`, s.cookie, { questionId: first, chosenAnswer: firstOption })).status).toBe(200);
+    const second = (await call(a, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
+    expect(second).not.toBe(first);
+    const att2 = (await call(a, "POST", "/v1/attempts", s.cookie, { questionId: second })).json.attemptId as string;
+    await call(a, "POST", `/v1/attempts/${att2}/skip`, s.cookie, { questionId: second });
+
+    const restarted = await startInstance(); // brand-new client + services: nothing but the database carries over
+    try {
+      const third = (await call(restarted, "POST", "/v1/recommendation", s.cookie)).json.questionId as string;
+      expect([first, second]).not.toContain(third); // it knows both are already done
+      expect((await call(restarted, "GET", `/v1/attempts/${att1}/result`, s.cookie)).json).toMatchObject({ status: "submitted" });
+      expect((await call(restarted, "GET", `/v1/attempts/${att2}/result`, s.cookie)).json).toMatchObject({ status: "skipped" });
+    } finally {
+      await restarted.close();
     }
   });
 

@@ -8,6 +8,9 @@ import {
   percentagesReversePercentageExample
 } from "@ipmat/question-engine";
 import { errorTaxonomySeed } from "../seed-data/errorTaxonomy.js";
+import { PrismaQuestionImportRepository } from "../src/repositories/prismaQuestionImportRepository.js";
+import { PrismaQuestionPublicationRepository } from "../src/repositories/prismaQuestionPublicationRepository.js";
+import { buildValidatedPracticeCandidates, seedPracticeContent } from "./practiceContentSeed.js";
 
 // Prisma's Json input type wants a plain InputJsonObject; our domain
 // packages export strongly-typed interfaces instead. This is a type-level
@@ -351,6 +354,13 @@ async function main() {
     create: { studentId: testStudent.id, examId: exam.id, enrolledAt: new Date() }
   });
 
+  // --- Product Phase 2 Unit 8: a small persisted practice content set, through the SAME import + publication
+  // path any future content uses (never a raw insert of a `published` row). See practiceContentSeed.ts. ---
+  const practiceContent = await seedPracticeContent(
+    { importer: new PrismaQuestionImportRepository(prisma), publication: new PrismaQuestionPublicationRepository(prisma) },
+    await buildValidatedPracticeCandidates()
+  );
+
   console.log("Seed complete:");
   console.log(`  Exam: ${exam.name} (${exam.code})`);
   console.log(`  Chapters: ${QUANT_CHAPTERS.length}`);
@@ -362,6 +372,7 @@ async function main() {
   console.log(`  Question pattern families: ${patternFamiliesByName.size}`);
   console.log(`  Pattern taxonomy cells: ${cellRecords.length}`);
   console.log(`  Demonstration questions: 1`);
+  console.log(`  Practice questions published via import + publication (${practiceContent.length}): ${practiceContent.map((q) => q.outcome).join(", ")}`);
   console.log(`  Internal test student enrolled: ${testStudent.id}`);
 }
 
