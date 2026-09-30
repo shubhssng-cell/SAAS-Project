@@ -24,8 +24,11 @@ function stdDev(values: number[]): number | null {
 
 function sortByFinalizedAt(records: MasteryAttemptRecord[]): MasteryAttemptRecord[] {
   return [...records].sort((a, b) => {
-    const aMs = a.contribution.finalizedAt ? Date.parse(a.contribution.finalizedAt) : 0;
-    const bMs = b.contribution.finalizedAt ? Date.parse(b.contribution.finalizedAt) : 0;
+    const aParsed = a.contribution.finalizedAt ? Date.parse(a.contribution.finalizedAt) : 0;
+    const bParsed = b.contribution.finalizedAt ? Date.parse(b.contribution.finalizedAt) : 0;
+    // Phase 3 Unit 5: an unparseable timestamp is ordered exactly like a missing one (0); a NaN in a comparator made the order input-dependent.
+    const aMs = Number.isFinite(aParsed) ? aParsed : 0;
+    const bMs = Number.isFinite(bParsed) ? bParsed : 0;
     if (aMs !== bMs) return aMs - bMs;
     // Equal/missing timestamps: break the tie by attemptId so one persisted history has exactly one order (Phase 3.3; mirrors @ipmat/adaptive-selection's trend order).
     return a.contribution.attemptId < b.contribution.attemptId ? -1 : a.contribution.attemptId > b.contribution.attemptId ? 1 : 0;

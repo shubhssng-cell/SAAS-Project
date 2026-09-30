@@ -12,7 +12,7 @@ From the master roadmap: *the dashboard/practice entry actually surfaces the ada
 | 10 (Phase 3.2) | Accumulated adaptive evidence: repeated observable performance over multiple attempts | **COMPLETE** (below) |
 | Phase 3 Unit 3 (Phase 3.3) | Trend-aware adaptive evidence: how observed performance on a concept is changing (last 3 graded answers vs. the earlier ones) | **COMPLETE** (below) |
 | Phase 3 Unit 4 | Adaptive question selection across concept, pattern, difficulty, novelty, coverage and progression | **COMPLETE** (below) |
-| Phase 3 Unit 5 | Adaptive-system hardening / calibration / validation | **NOT STARTED** |
+| Phase 3 Unit 5 | Adaptive-system hardening / validation (technical + policy; calibration remains future work) | **COMPLETE** (below) — **PHASE 3 COMPLETE** |
 
 *Numbering note: Units 9 and 10 above carry the running Phase-2-continuing numbers they were committed under. From here on units are Phase-3-relative ("Phase 3 Unit 3" = Phase 3.3), as the roadmap now defines them: Unit 1 = latest attempt, Unit 2 = accumulated evidence, Unit 3 = trend/recency/streak, Unit 4 = selection across dimensions, Unit 5 = hardening.*
 
@@ -366,7 +366,7 @@ Every card and the pre-submission question page were checked: no internal reason
 2. **Need reasons** (unchanged evidence: repair, accumulated, trend, recent, coverage, novelty, pressure, progression).
 3. **Difficulty fit** (`selectionFit.ts`, new) — removes exactly two mismatches and adds nothing:
    - `too_aggressive_for_remediation`: a candidate **harder than the tier last answered on its concept** loses its *remediation* reasons (`repeated_error`, `recent_deterioration`, `accuracy_weakness`, `speed_weakness`, `prerequisite_weakness`), provided another eligible candidate on that concept is not harder.
-   - `below_progression_level` / `above_progression_level`: for a **progression-ready** concept, a candidate easier or harder than its progression target tier loses its *exploration* reasons (`coverage_gap`, `underexposure`, `pressure_gap`, `novelty_gap`, `recent_correct_on_pace`), provided an eligible candidate on that concept is **at** the target tier. The band is exactly one step up — a two-step jump is not an acceptable "exploration".
+   - `below_progression_level` / `above_progression_level`: for a **progression-ready** concept, a candidate easier or harder than its progression target tier loses its *exploration* reasons (`coverage_gap`, `underexposure`, `pressure_gap`, `novelty_gap`, `recent_correct_on_pace`), provided an eligible candidate on that concept is **at** the target tier. The band is one step up — a two-step jump is not an acceptable "exploration". *(Phase 3 Unit 5 refined this: when the pool has nothing at the target tier, the student's demonstrated tier is the band, so a basic question still cannot win exploration at the top of the pool.)*
    - *Progression-ready* = the existing `highestDemonstratedTier()` rule holds (≥ 3 graded attempts on a tier at ≥ 0.8) **and** nothing currently contradicts it: the trend is not `deteriorating`/`persistent_difficulty` and the latest attempt on the concept was not incorrect, skipped or slow.
    - Both rules are **guarded by "an alternative exists"**: with no suitable alternative the reasons stay (a thin pool still yields an answer). `repair_priority` and the `recent_incorrect`/`recent_skip`/`recent_slow` reasons are never touched. Every adjustment made is returned (`difficultyFitAdjustments`: question, rule, reasons removed) and is sorted, so it is reproducible.
 4. **Bucket** by each candidate's highest *remaining* reason, in the unchanged priority order; if nothing remains the existing labelled `difficulty_progression` fallback applies.
@@ -437,4 +437,204 @@ Every card and question page was checked: no internal reason code, no `undefined
 - Real-database verification is on a disposable container only and is opt-in; on this host the suite ran about twice as slowly as in the previous unit, so its per-test timeout was raised.
 - Correctness-only evidence (no speed trend), as in Unit 3.
 
-**Unit 11+ status: NOT STARTED.**
+## Phase 3 Unit 5 (Phase 3.5) — Hardening and validation — PHASE 3 COMPLETE
+
+> **This unit adds no intelligence.** No model, LLM, embedding, score, hidden state, prediction or psychological inference was added. It audits the Phase 3 policy against its documentation, fixes what the audit found, and builds a validation framework. **It proves the code follows its rules; it does not prove the rules help anyone learn.**
+
+### Validation levels (what is and is not claimed)
+
+| Level | Question | Status |
+|---|---|---|
+| **Technical validation** | Does the code do what its documented rules say? | **Available and done** — unit, property and real-database tests below. |
+| **Policy validation** | Do those rules behave consistently in controlled scenarios (conflicts, edge cases, thin pools, restarts)? | **Available and done** — scenario matrix, invariants over generated scenarios, real-Postgres scenarios on real plus clearly-labelled synthetic TEST DATA questions. |
+| **Calibration** | Do real outcomes show that the thresholds and stage order correspond to learning results? | **NOT DONE and not possible yet.** The published pool is 3 questions, 1 concept, 1 chapter, with no student outcome data. No metric was computed from it and none is claimed. See "Future calibration framework". |
+
+### Audit (24 questions; implementation, tests and docs treated as the source of truth)
+
+| # | Question | Finding |
+|---|---|---|
+| 1 | Identical inputs → different output? | No: pure functions; `now` only stamps mastery's `computedAt`, which no decision reads. Verified by repeated-run property tests. |
+| 2 | Candidate order changes the winner? | **Found (duplicate ids):** two *different* candidates sharing a `questionId` collapsed silently, the survivor depending on input order. **Fixed** (below). Otherwise no — 400 generated scenarios × 3 shuffles. |
+| 3 | Equal timestamps change the decision? | **Found:** `deriveRecentEvidence` resolved equal `finalizedAt` by input position. **Fixed.** Trend and mastery were already tie-broken by `attemptId` (Unit 3). |
+| 4 | Malformed candidate affects selection? | No; excluded before any stage. Contradictory duplicate ids now also count as malformed. |
+| 5 | Unpublished candidate influences selection? | No: excluded first; the fit stage, no-repeat and "alternative exists" guards only ever see published candidates. Repair and all five providers filter `published` themselves (verified in source). |
+| 6 | Another student's history leaks in? | No (selection and mastery), property-tested with generated foreign histories. |
+| 7 | Just-attempted question re-served? | Only in the documented sole-candidate fallback, now reported. Across every tier since Unit 4. Property-tested. |
+| 8 | Remediation → inappropriate jump up? | Not when a not-harder alternative exists (guarded, property-tested). With none, the harder one is served and nothing is hidden. |
+| 9 | Progression → inappropriate jump? | **Found (gap):** with a demonstrated `hard` tier and no `extreme` question in the pool, a basic unseen question still won through `coverage_gap`. **Fixed:** the exploration band falls back to the demonstrated tier. |
+| 10 | Novelty overrides a genuine need? | No: priority-consistency property test (winner's highest remaining reason is never lower than any other candidate's). |
+| 11 | Coverage defeats a higher need? | No (same property). |
+| 12 | Overuse pushes selection into a weaker need? | No: overuse avoidance runs inside the winning bucket only. |
+| 13 | Repair priority weakened? | No: a confirmed plan's matching candidate always wins with `repair_priority`, never adjusted by the fit stage (property-tested). |
+| 14 | Providers bypassed? | No: fixed provider order, repair first, adaptive last; orchestration determinism test exercises all three tiers. |
+| 15 | Recent erases accumulated? | No (Units 2–3 tests; matrix). |
+| 16 | Accumulated erases recent/trend? | No: all three are returned and only `accuracy_weakness` yields to an `improving` trend, with the counts kept visible. |
+| 17 | Trend claim with insufficient evidence? | No: boundary tests; `kind` is `null` below window/earlier minimums. |
+| 18 | Skipped/abandoned contaminate graded trend? | No: tested, including a generated noisy history. |
+| 19 | Missing/equal timestamps make order ambiguous? | **Found:** an *unparseable* timestamp put `NaN` into mastery's comparator (order became input-dependent). **Fixed:** treated exactly like a missing one. Missing/equal ties break by `attemptId` everywhere. |
+| 20 | Restart alters selection? | No (real Postgres, below). |
+| 21 | Two instances differ on the same DB? | No (real Postgres, below). |
+| 22 | Leak of reason codes / answer keys / internals? | No at the HTTP boundary (response keys asserted to be exactly `questionId`, `modeLabel`, `headline`, `explanation`). **Found (internal only):** three *internal* explanation strings still said "weak or unmeasured". Not student-facing (the copy layer re-authors), but **reworded** as observations. |
+| 23 | Empty/thin pool unsafe? | No: zero, one, all-unpublished, all-malformed and contradictory-duplicate pools tested. |
+| 24 | Fallbacks deterministic and explicit? | Yes; each is enumerated below. |
+
+Also found in the repair path: `selectPlanForOrchestration` had an input-order-dependent result when two confirmed plans tied on priority and time **and** concept (only the concept was a final tie-break) or when a confirmation time was unparseable (`NaN`). **Fixed** with a complete chain.
+
+### Bugs found and fixed
+
+1. **Recent evidence ordering** — equal `finalizedAt` depended on input order → now the same total order as trend and mastery (`finalizedAt`, then `attemptId`).
+2. **Repair-plan choice** — `NaN` timestamp and incomplete tie-break → NaN-safe time; chain `priority → recency → concept → family → cell → error code`.
+3. **Mastery comparator** — unparseable `finalizedAt` produced `NaN` → treated like missing.
+4. **Duplicate candidate ids** — contradictory duplicates now excluded (all copies, counted as malformed); exact duplicates collapse.
+5. **Progression band gap** — demonstrated tier as the band when nothing sits at the target.
+6. **Internal explanations** — "weak or unmeasured" wording replaced by observations.
+7. **Accidental quadratic work** (obvious cases only, smallest change): the fit stage re-filtered the whole pool per candidate (O(N × concept size)); trend derivation re-scanned all attempts per concept; the attempted-cell check scanned an array per candidate. Now per-concept summaries, one grouping pass, and a per-concept `Set`. A 20,000-candidate / 5,000-attempt smoke test runs in seconds and is identical in any order. Nothing else was optimised; see "Scale notes".
+
+Not fixed, observed once: the Phase 2 test "CONCURRENCY: 20 parallel starts…" failed once on this slow host (one of the 20 racing starts returned non-200; the one-open-attempt invariant is enforced by the database index and was not violated) and passed in every later run. It belongs to the Phase 2 start-attempt path, is untouched here, and is recorded as a known flake.
+
+### Determinism guarantees
+
+For the same persisted state and the same candidate pool, the recommendation is identical regardless of candidate order, attempt-record order, repair-plan order, equal or missing timestamps, process, or instance. Sources audited: every `sort` (candidate ranking: fit → family → cell → question exposure → easier → `questionId`; adjustments sorted; recent/trend preference sorts run on an already totally-ordered list; repair plans: complete chain; attempts: `finalizedAt` then `attemptId`), every `Map`/`Set` (used only for counting or membership; never iterated to *decide* something without a total order), provider order (a fixed constant array), object key order (never relied on; a canonical JSON form is used to compare duplicates). No clock, randomness or process-local counter is read by any decision.
+
+### Policy invariants (each has a test)
+
+| # | Invariant | Where tested |
+|---|---|---|
+| 1 | An unpublished question is never selected | `policyInvariants` (400 scenarios), `selectionPolicy`, real Postgres loop |
+| 2 | A malformed candidate is never selected | same |
+| 3 | One student's history never affects another's recommendation (or mastery) | `policyInvariants`, real Postgres |
+| 4 | Same state + pool → identical selection | `policyInvariants`, `determinism`, real Postgres (original / restarted / second instance) |
+| 5 | Candidate order does not affect selection | `policyInvariants`, `determinism` |
+| 6 | Equal timestamps order deterministically | `policyInvariants` (deliberate ties), `trendEvidence`, mastery/recent corner-case tests |
+| 7 | A higher need is never defeated by novelty, coverage or overuse | `policyInvariants` (priority-consistency over all candidates) |
+| 8 | Remediation is never harder than the reference when a not-harder alternative exists | `policyInvariants`, `selectionPolicy` |
+| 9 | Progression/exploration never leaves the band when a question exists there | `policyInvariants`, `reasonMatrix`, `selectionPolicy` |
+| 10 | No immediate repeat while another eligible candidate exists (every tier) | `policyInvariants`, `noImmediateRepeat`, real Postgres loop, browser loop |
+| 11 | Sole-candidate fallback is deterministic and reported | `policyInvariants`, real Postgres, browser |
+| 12 | No state outside persisted inputs | construction (no stored state); fresh/second-instance equality |
+| 13 | No answer-bearing field crosses the pre-submission boundary | `policyInvariants`, real Postgres key assertions, browser page-source checks |
+| 14 | No psychological inference in student-facing output | explanation scans in `policyInvariants`/`reasonMatrix`, copy tests, real Postgres, browser |
+| + | A confirmed plan's matching candidate always wins | `policyInvariants` |
+
+The generated-scenario tests use a fixed-seed PRNG (mulberry32): 400 selection scenarios (random histories with ties, skips, abandoned attempts, foreign students, unpublished/malformed/duplicate candidates, repair plans) and 400 orchestration scenarios (all three tiers reached). Any failure is reproducible from its seed. They found two of the bugs above.
+
+### Policy consistency matrix (evidence → need → adjustment → stage → explanation)
+
+Every reason has one constructive scenario in `reasonMatrix.test.ts` proving it can be the *deciding* reason (none is dead code) and that its explanation matches it.
+
+| Reason | Observable evidence | Adjustment by the fit stage | Decided at | Explanation states |
+|---|---|---|---|---|
+| `repair_priority` | confirmed RepairPlan on this concept + family | never adjusted | bucket 1 | a confirmed diagnosis is targeting the family |
+| `repeated_error` | current run of incorrect graded answers ≥ 2 | dropped from a candidate harder than the last answered tier (if a not-harder one exists) | bucket | the count of most recent incorrect answers |
+| `recent_deterioration` | earlier ≥ 0.8, recent window < 0.6 | tier rule built in (not harder than last tier) | bucket | last-3 vs earlier counts |
+| `prerequisite_weakness` | plan prerequisite + accuracy below threshold/unmeasured | as remediation | bucket | prerequisite flagged; accuracy below threshold or unmeasured |
+| `accuracy_weakness` | mean graded accuracy < 0.6, ≥ 3 graded; **suppressed while `improving`** | as remediation | bucket | incorrect of graded count |
+| `speed_weakness` | mean time/expected ≥ 1.3, ≥ 3 timed | as remediation | bucket | observed ratio and threshold |
+| `recent_improvement` | earlier < 0.6, last 3 all correct | (none needed: not easier than last tier) | bucket | last-3 all correct vs earlier |
+| `recent_incorrect` / `recent_skip` / `recent_slow` | latest attempt outcome | own tier rules; never adjusted | bucket | what was just observed |
+| `coverage_gap` | candidate's cell never attempted | dropped if off the concept's band (progression-ready) | bucket | never attempted this cell |
+| `underexposure` | family ≤ 2 attempts, history exists | same | bucket | few prior attempts in the family |
+| `pressure_gap` | time-pressured candidate, pressure performance unmeasured/below threshold | same | bucket | accuracy on time-pressured questions unmeasured/below threshold |
+| `novelty_gap` | non-standard novelty, novelty handling unmeasured/below threshold | same | bucket | accuracy on novel-representation content unmeasured/below threshold |
+| `difficulty_progression` | a tier with ≥ 3 graded at ≥ 0.8 → next tier | none (this *is* the band) | bucket / labelled fallback | tier is the appropriate next step |
+| `recent_correct_on_pace` | latest correct within expected time | same as exploration | lowest bucket | correct within expected time |
+
+Impossible combinations are handled safely and deterministically: a pool with nothing at the band leaves reasons untouched; a pool where every candidate is harder than the remediation reference is not emptied; all-ineligible pools return an explicit `no_selection`; `isFallback` marks the case where no candidate satisfied any reason.
+
+**Fallbacks (all deterministic, all reported):** sole eligible candidate is the just-attempted one → served, `repeatFallback`; no not-harder alternative for a remediation need → harder served, `difficultyFitAdjustments` empty; no question at the exploration band → reasons kept; no candidate satisfies any reason → `difficulty_progression` fallback with `isFallback: true`; a tier with no match falls through to the next tier; nothing eligible → `no_selection`.
+
+### Scale notes (prepared, not optimised)
+
+Per-selection cost is now linear in candidates + attempts (validation, dedupe, reasons, fit, bucketing) plus one `O(N log N)` sort. Left for later on purpose: repeated `find` over the (tiny) active repair-plan list, the `O(tiers)` progression lookup per candidate, and mastery recomputation per request from all attempts. A real bank will need measurement before any caching; no architecture was changed for hypothetical scale.
+
+### Future calibration framework (definitions only — no values computed)
+
+When a real bank and real student outcomes exist, these are the measures that would let the thresholds and stage order be evaluated. **None has been computed from the development pool and none may be reported from it.**
+
+| Measure | Definition (to be computed later) | Needs |
+|---|---|---|
+| Post-error improvement | accuracy on the same concept/pattern in the next N graded attempts after a graded error, versus a comparison cohort | many students, many items per pattern |
+| Repeated-error resolution | time/attempts until the current incorrect run ends, by recommended-question type | longitudinal attempts |
+| Speed improvement | change in mean time/expected after a `speed_weakness` recommendation | timed attempts, calibrated expected times |
+| Retention | accuracy on a pattern after a gap, with and without recommended repetition | time-spaced attempts |
+| Progression success | accuracy on the first questions after a `difficulty_progression` step; rate of immediate step-backs | tier-calibrated bank |
+| Unnecessary-repeat rate | share of recommendations repeating an already-mastered question/pattern | exposure logs at scale |
+| Overuse rate | share of recommendations at ≥ 2 prior attempts of the exact question | large pool |
+| Coverage efficiency | distinct taxonomy cells reached per N recommendations versus a random-order baseline | a bank with many cells |
+| Question-difficulty misfit | recommended-tier vs observed-accuracy residuals per question | enough attempts per question |
+| Skip/abandon behavior | skip and abandon rates after each recommendation type | production-scale usage |
+| Learning outcome | change in independent assessment score attributable to recommendation policy | a controlled comparison — the only real test of "does it help" |
+
+Calibration would revisit: the window of 3, the 0.6/0.8/1.3 thresholds, the observation minimum of 3, the tier order, the one-step-up band, "last answered tier" as the remediation reference, and overuse at 2 attempts.
+
+### Phase 3 exit criteria
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | Latest-attempt evidence works | Unit 1 tests; real Postgres; browser |
+| 2 | Accumulated evidence works | Unit 2 tests; real Postgres; browser |
+| 3 | Trend evidence works | Unit 3 tests; real Postgres; browser |
+| 4 | Selection resolves multi-dimensional conflicts | Unit 4 conflict tests; matrix; invariants |
+| 5 | Deterministic | 400 + 400 generated scenarios, shuffles, equal/missing timestamps |
+| 6 | Persistence/restart reconstruction | real Postgres: original / restarted / second instance; browser restarts |
+| 7 | Published-only safety | invariants 1; real Postgres; browser |
+| 8 | Student isolation | invariant 3; real Postgres |
+| 9 | No-repeat correct | invariant 10; real Postgres 14-step loop; browser 6-round loop |
+| 10 | Fallbacks explicit | enumerated above; tested; reported in the result |
+| 11 | Training-system priority intact | orchestration determinism test reaches all three tiers; Unit 4 boundary tests |
+| 12 | Repair priority intact | confirmed-plan invariant; fit stage never touches it |
+| 13 | No answer leakage | key assertions at HTTP, page-source checks in the browser |
+| 14 | No psychological inference | explanation/copy scans at every layer; no such field exists |
+| 15 | Docs match implementation | this unit corrected two stale statements (the band; a leftover "Unit 11+" line) and reconciled the policy text with the code |
+| 16 | Tests cover the policy | counts below |
+| 17 | Real PostgreSQL proof | counts below |
+| 18 | Real browser proof | counts below |
+| 19 | Limitations honest | below |
+| 20 | Calibration separated from technical validation | "Validation levels" and "Future calibration framework" |
+
+### Validation
+
+**Level reached: technical validation and policy validation. Calibration: not reached.**
+
+Default suite (no database): full repository **1974 passed + 46 skipped** across 191 files (was 1939 + 42); the 46 skipped are the opt-in real-database suite, run separately on real Postgres: **46/46 passed** (was 42). New tests: adaptive-selection +33 (`policyInvariants` 11, `reasonMatrix` 22), training-orchestration +2 (`determinism`), real-Postgres +4. Typecheck (all workspaces), build, lint and `git diff --check` clean. Existing tests needed no assertion changes (Unit 5 changed ordering only where input order or NaN previously mattered, and one band case).
+
+**Determinism evidence.** 400 fixed-seed selection scenarios × (repeat + 3 shuffles of candidates and attempt records, with deliberate equal timestamps, skipped/abandoned attempts, foreign students, unpublished/malformed/duplicate candidates, repair plans) and 400 orchestration scenarios × 3 shuffles including repair-plan order (all three tiers reached): every decision and diagnostic identical.
+
+**Real PostgreSQL** (the same disposable-container procedure as earlier units: `postgres:16-alpine` on `127.0.0.1:55432`, random throwaway password never written to the repo, database `ipmat_test`; the unrelated Postgres on 5432 was not touched), through the real HTTP server on the real Prisma repositories. The 3-question development pool cannot show selection trade-offs, so four tests add a **synthetic pool clearly labelled TEST DATA** (body prefixed `[TEST DATA phase-3-unit-5]`, provenance `phase-3-unit-5-TEST-DATA`, its own families/cells), which is unpublished again in `finally`:
+- progression beats a basic unseen question (three correct on the real standard question while unseen synthetic standard questions exist → an advanced question) and remediation stays not-harder (two failures on synthetic standard questions → a standard question, not the just-attempted one) — each identical after a restart and on a second instance;
+- a 14-step followed loop: never two identical consecutive questions, only published questions (an unpublished synthetic one is never served), the response has exactly the four student-safe keys and no internal vocabulary at any step, and every step is identical on a second instance (and on a freshly started one every fourth step);
+- the sole-candidate fallback on real data (every other question unpublished → the just-attempted question is served, identically on a fresh and a second instance; restoring the pool restores the no-repeat rule);
+- six different persisted histories (cold, one error, two errors, progression-ready, recovered, skip-then-correct): the original, a **restarted** and a **second** instance return the identical recommendation for each.
+This validates the policy and its persistence; it is **not calibration**.
+
+**Browser verification** (raw CDP / headless Edge; real `apps/web` + real `apps/api` in Prisma mode + the disposable Postgres + the synthetic TEST DATA pool, unpublished afterwards): **21/21 checks**, real UI loop login → dashboard card → Start Practice → card → Continue → question → answer → result → Continue → next card:
+1. **Progression:** three correct on the real standard question; a **hard API restart** before the selection reproduced the identical card, and the question opened was advanced (not one of the unseen synthetic standard questions); the page source had no answer key, solution or test-data marker.
+2. **Remediation:** two wrong answers on synthetic standard questions → "Repeated incorrect answers" card → a standard question, not the one just failed.
+3. **Six real browser rounds** (answers mixed correct/incorrect) with an **API restart after round 3**: the restart reproduced the exact card; every round's card was clean observation copy (including "After an incorrect answer … a related question that isn't harder") and every next question differed from the one just answered; the loop used several questions.
+4. **Documented fallback:** with every other question unpublished, the just-attempted question was served again and the page still rendered a clean card.
+Every card: no internal reason code, no `undefined`/`null`/`[object`, no psychological vocabulary, no answer key before submission.
+
+### Limitations (honest)
+
+- **Not calibrated.** Nothing here shows the rules, thresholds, tier order, window or stage order improve learning. The pool is 3 questions, 1 concept, 1 chapter; the synthetic pool used on real Postgres and in the browser is scaffolding for exercising the policy, clearly labelled TEST DATA and unpublished again afterwards. Difficulty tiers remain provisional (D-021).
+- **Generated scenarios check invariants, not optimality.** They cannot show a recommendation is *good*, only that it obeys its rules.
+- **Concept-level grain** for the fit guards; cross-concept trade-offs follow the reason priority order.
+- **Correctness-only evidence** (no speed trend, no pressure/novelty trend).
+- **Overuse is binary at 2 attempts inside the bucket**, plus a graded question-exposure stage.
+- **Scale is prepared, not measured** beyond a smoke test; mastery is recomputed from all attempts per request.
+- **Known flake:** the Phase 2 concurrency test (see above).
+- Real-database verification is opt-in (not part of `npm test`/CI) and on a disposable local container; on this host everything ran roughly twice as slowly as in the previous unit.
+
+### Phase 3 — final state
+
+| Unit | Scope | Status |
+|---|---|---|
+| Unit 1 | First adaptive recommendation layer (latest attempt) | ✅ |
+| Unit 2 | Accumulated adaptive evidence | ✅ |
+| Unit 3 | Trend-aware adaptive evidence | ✅ |
+| Unit 4 | Adaptive question selection | ✅ |
+| Unit 5 | Hardening and validation | ✅ |
+
+**PHASE 3 — ADAPTIVE PRACTICE: COMPLETE** at the validation level stated above (technical and policy validation; **real outcome calibration remains future work**).
+
+**Phase 4 is Question Autopsy / Repair and has NOT started.** Nothing in Phase 3 builds hypotheses, student confirmation, RepairPlan generation, LLM diagnosis, reasoning or voice analysis, or any confidence/motivation/ability model.

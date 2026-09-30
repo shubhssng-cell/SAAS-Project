@@ -28,6 +28,8 @@ export interface TrainingNeedContext {
   recentEvidence: RecentEvidence | null;
   /** Phase 3.3: per-concept trend (recent window vs earlier), for every concept this student has a graded attempt on. */
   trendByConcept: Map<string, TrendEvidence>;
+  /** Memo for `determineSatisfiedReasons()`: attempted taxonomy cells per concept, as a Set. Derived from `masteryByConcept`; never an independent source. */
+  attemptedCellsByConcept: Map<string, Set<string>>;
 }
 
 export function buildTrainingNeedContext(input: {
@@ -36,13 +38,22 @@ export function buildTrainingNeedContext(input: {
   attemptRecords: MasteryAttemptRecord[];
   activeRepairPlans: RepairPlan[];
 }): TrainingNeedContext {
+  // Group this student's attempts by concept ONCE (O(attempts)), then derive each concept's trend from its own group.
+  const recordsByConcept = new Map<string, MasteryAttemptRecord[]>();
+  for (const record of input.attemptRecords) {
+    if (record.contribution.studentId !== input.studentId) continue;
+    const group = recordsByConcept.get(record.question.conceptName) ?? [];
+    group.push(record);
+    recordsByConcept.set(record.question.conceptName, group);
+  }
   const trendByConcept = new Map<string, TrendEvidence>();
-  for (const conceptName of new Set(input.attemptRecords.filter((r) => r.contribution.studentId === input.studentId).map((r) => r.question.conceptName))) {
-    const trend = deriveTrendEvidence(input.studentId, conceptName, input.attemptRecords);
+  for (const [conceptName, group] of recordsByConcept) {
+    const trend = deriveTrendEvidence(input.studentId, conceptName, group);
     if (trend) trendByConcept.set(conceptName, trend);
   }
   return {
     trendByConcept,
+    attemptedCellsByConcept: new Map(),
     masteryByConcept: new Map(input.masteryByConcept.map((m) => [m.conceptName, m])),
     exposure: computeExposureCounts(input.studentId, input.attemptRecords),
     activeRepairPlans: input.activeRepairPlans,
@@ -88,6 +99,15 @@ export function computeProgressionTargetTier(mastery: MasteryStateResult | undef
  * indicate a gap there — "you have not been tested enough on this" is
  * itself true and actionable, unlike "you are bad at this."
  */
+/** The cells this student has attempted for a concept as a Set (built once per concept per selection), so each candidate's check is O(1). */
+function attemptedCellsFor(conceptName: string, mastery: MasteryStateResult | undefined, ctx: TrainingNeedContext): Set<string> {
+  const cached = ctx.attemptedCellsByConcept.get(conceptName);
+  if (cached) return cached;
+  const cells = new Set(mastery?.detail.coverage.taxonomyCellsEncountered ?? []);
+  ctx.attemptedCellsByConcept.set(conceptName, cells);
+  return cells;
+}
+
 export function determineSatisfiedReasons(candidate: AdaptiveCandidateQuestion, ctx: TrainingNeedContext): TrainingNeedReasonCode[] {
   const reasons: TrainingNeedReasonCode[] = [];
   const q = candidate.question;
@@ -130,8 +150,7 @@ export function determineSatisfiedReasons(candidate: AdaptiveCandidateQuestion, 
   const recentReason = recentEvidenceReasonFor(candidate, ctx.recentEvidence);
   if (recentReason !== null) reasons.push(recentReason);
 
-  const attemptedCells = mastery?.detail.coverage.taxonomyCellsEncountered ?? [];
-  if (!attemptedCells.includes(q.patternTaxonomyCellId)) {
+  if (!attemptedCellsFor(q.conceptName, mastery, ctx).has(q.patternTaxonomyCellId)) {
     reasons.push("coverage_gap");
   }
 

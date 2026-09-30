@@ -39,7 +39,7 @@ This table is intentionally high-level. Only Phases 0, 1, 2 and 3 have detailed 
 - [PHASE_0_PRODUCT_DEFINITION.md](PHASE_0_PRODUCT_DEFINITION.md)
 - [PHASE_1_PLATFORM_SHELL.md](PHASE_1_PLATFORM_SHELL.md)
 - [PHASE_2_REAL_PRACTICE_LOOP.md](PHASE_2_REAL_PRACTICE_LOOP.md) (Units 1-8 complete)
-- [PHASE_3_ADAPTIVE_PRACTICE.md](PHASE_3_ADAPTIVE_PRACTICE.md) (in progress -- Unit 1 (3.1), Unit 2 (3.2), Unit 3 (3.3) and Unit 4 (3.4) complete: latest-attempt reaction, accumulated evidence, trend-aware evidence, then the staged selection policy; Unit 5 not started)
+- [PHASE_3_ADAPTIVE_PRACTICE.md](PHASE_3_ADAPTIVE_PRACTICE.md) (COMPLETE -- Units 1-5 (3.1-3.5) done — PHASE 3 COMPLETE at technical + policy validation (latest-attempt reaction, accumulated evidence, trend-aware evidence, staged selection policy, hardening/validation); real outcome calibration remains future work; Phase 4 (Question Autopsy / Repair) not started)
 
 Future phase files (2 through 10) will be added as each one is actually about to start, not speculatively ahead of time — this mirrors the existing repo's vertical-slice discipline (see [../MASTER_PLAN.md](../MASTER_PLAN.md) §"What should explicitly NOT be built yet" and the CLAUDE.md working-style rules).
 

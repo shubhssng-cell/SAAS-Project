@@ -771,6 +771,183 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     expect(await card(a, x.cookie)).toEqual(before);
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 3 Unit 5 -- HARDENING on real Postgres. The development pool is three questions, which cannot show selection trade-offs, so these
+  // tests add a SYNTHETIC pool clearly labelled TEST DATA (body prefixed "[TEST DATA phase-3-unit-5]", provenance sourceRef
+  // "phase-3-unit-5-TEST-DATA"), run the policy against it, and UNPUBLISH it again in `finally`. It is scaffolding for validating the
+  // POLICY and its persistence -- not question content, and not calibration.
+  // ---------------------------------------------------------------------------------------------
+
+  interface SyntheticPool {
+    ids: Record<string, string>;
+    tier: Record<string, string>;
+    release: () => Promise<void>;
+    setPublished: (labels: string[], published: boolean) => Promise<void>;
+  }
+
+  async function publishSyntheticPool(spec: Array<{ label: string; tier: "standard" | "advanced" }>): Promise<SyntheticPool> {
+    const real = (await a.prisma.question.findMany({ where: { validationState: "published" } })).filter((q) => !q.body.startsWith("[TEST DATA"));
+    const template = real.find((q) => q.difficultyTier === "standard")!;
+    const templateCell = await a.prisma.patternTaxonomyCell.findUniqueOrThrow({ where: { id: template.patternTaxonomyCellId } });
+    const templateFamily = await a.prisma.questionPatternFamily.findUniqueOrThrow({ where: { id: templateCell.patternFamilyId } });
+    const usedTraps = new Set(real.map((q) => q.trapErrorTaxonomyId));
+    const traps = (await a.prisma.errorTaxonomy.findMany({ orderBy: { id: "asc" } })).filter((t) => !usedTraps.has(t.id));
+    if (traps.length < 2) throw new Error("not enough seeded error-taxonomy rows for the synthetic pool");
+    const provenance = await a.prisma.provenance.create({ data: { sourceType: "original", sourceRef: "phase-3-unit-5-TEST-DATA", attributedTo: "synthetic test data (not question content)" } });
+    const { id: _id, provenanceId: _p, createdAt: _c, ...rest } = template;
+    const { id: _fid, createdAt: _fc, ...familyRest } = templateFamily;
+    const { id: _cid, ...cellRest } = templateCell;
+    void _id; void _p; void _c; void _fid; void _fc; void _cid;
+    const ids: Record<string, string> = {};
+    const tier: Record<string, string> = {};
+    try {
+    for (const [i, item] of spec.entries()) {
+      const trap = traps[i % traps.length]!; // traps are reused only when the seed has fewer rows than synthetic questions
+      const id = randomUUID();
+      ids[item.label] = id;
+      tier[id] = item.tier;
+      // each synthetic question gets its OWN pattern family and taxonomy cell (also TEST DATA), so family/cell coverage is observable
+      const family = await a.prisma.questionPatternFamily.create({ data: { ...familyRest, name: `[TEST DATA phase-3-unit-5] family ${item.label} ${id.slice(0, 8)}`, status: "draft" } as never });
+      const cell = await a.prisma.patternTaxonomyCell.create({ data: { ...cellRest, patternFamilyId: family.id, trapErrorTaxonomyId: trap.id, difficultyTier: item.tier, coverageStatus: "uncovered" } as never });
+      await a.prisma.question.create({
+        data: { ...rest, id, body: `[TEST DATA phase-3-unit-5] ${item.label} -- ${template.body}`, patternTaxonomyCellId: cell.id, trapErrorTaxonomyId: trap.id, difficultyTier: item.tier, validationState: "published", provenanceId: provenance.id } as never
+      });
+    }
+    } catch (error) {
+      // never leave half a synthetic pool published
+      await a.prisma.question.updateMany({ where: { id: { in: Object.values(ids) } }, data: { validationState: "human_reviewed" } });
+      throw error;
+    }
+    const all = Object.values(ids);
+    return {
+      ids,
+      tier,
+      setPublished: async (labels, published) => {
+        await a.prisma.question.updateMany({ where: { id: { in: labels.map((l) => ids[l]!) } }, data: { validationState: published ? "published" : "human_reviewed" } });
+      },
+      release: async () => {
+        await a.prisma.question.updateMany({ where: { id: { in: all } }, data: { validationState: "human_reviewed" } });
+      }
+    };
+  }
+
+  async function practiceById(instance: Instance, cookie: string, questionId: string, outcome: "correct" | "wrong") {
+    await practiceOnce(instance, cookie, questionId, outcome);
+  }
+
+  it("PHASE 3 UNIT 5 (synthetic TEST DATA pool): progression beats a basic unseen question; remediation stays not-harder; every decision is identical across a restarted and a second instance", async () => {
+    const real = await familyIds();
+    let pool: SyntheticPool | undefined;
+    try {
+      pool = await publishSyntheticPool([
+        { label: "std-A", tier: "standard" },
+        { label: "std-B", tier: "standard" },
+        { label: "adv-A", tier: "advanced" },
+        { label: "adv-B", tier: "advanced" }
+      ]);
+      const tierOf = async (id: string) => (await a.prisma.question.findUniqueOrThrow({ where: { id } })).difficultyTier;
+
+      // CASE C on real data: three correct answers on the standard tier; the pool still holds UNSEEN standard questions (std-A, std-B).
+      const ready = await newStudent(a, "hard-prog");
+      await replay(a, ready.cookie, [[real.point, "correct"], [real.point, "correct"], [real.point, "correct"]]);
+      const up = await card(a, ready.cookie);
+      expect(await tierOf(up.questionId as string)).toBe("advanced"); // not a basic question merely because it is unseen
+      await sameAfterRestart(ready.cookie, up);
+
+      // remediation: two failures on synthetic STANDARD questions -> the recommendation stays at the standard tier, although advanced questions exist
+      const weak = await newStudent(a, "hard-remedy");
+      await practiceById(a, weak.cookie, pool!.ids["std-A"]!, "wrong");
+      await practiceById(a, weak.cookie, pool!.ids["std-B"]!, "wrong");
+      const steady = await card(a, weak.cookie);
+      expect(steady.modeLabel).toBe("Repeated incorrect answers");
+      expect(await tierOf(steady.questionId as string)).toBe("standard");
+      expect(steady.questionId).not.toBe(pool!.ids["std-B"]); // the just-attempted question
+      await sameAfterRestart(weak.cookie, steady);
+    } finally {
+      await pool?.release();
+    }
+  });
+
+  it("PHASE 3 UNIT 5 (synthetic TEST DATA pool): a 14-step followed loop never repeats consecutively, only ever serves published questions, and every step is identical on a fresh and a second instance", async () => {
+    // both pools are created INSIDE the try, so the finally below always unpublishes whatever was created
+    let pool: SyntheticPool | undefined;
+    let unpublished: SyntheticPool | undefined;
+    try {
+      pool = await publishSyntheticPool([
+        { label: "std-A", tier: "standard" },
+        { label: "adv-A", tier: "advanced" },
+        { label: "adv-B", tier: "advanced" }
+      ]);
+      unpublished = await publishSyntheticPool([{ label: "hidden", tier: "advanced" }]);
+      await unpublished.setPublished(["hidden"], false);
+      const s = await newStudent(a, "hard-loop");
+      const published = new Set((await a.prisma.question.findMany({ where: { validationState: "published" }, select: { id: true } })).map((r) => r.id));
+      let previous: string | null = null;
+      const served: string[] = [];
+      for (let i = 0; i < 14; i++) {
+        const rec = await card(a, s.cookie);
+        const id = rec.questionId as string;
+        expect(Object.keys(rec).sort()).toEqual(["explanation", "headline", "modeLabel", "questionId"]); // nothing else crosses the boundary
+        expect(JSON.stringify(rec)).not.toMatch(INTERNAL);
+        expect(JSON.stringify(rec)).not.toMatch(PSYCH);
+        expect(published.has(id)).toBe(true);
+        expect(id).not.toBe(unpublished.ids["hidden"]);
+        if (previous !== null) expect(id).not.toBe(previous);
+        if (i % 4 === 3) await sameAfterRestart(s.cookie, rec); // every 4th step: a fresh instance and the second instance decide identically
+        else expect(await card(b, s.cookie)).toEqual(rec);
+        served.push(id);
+        await practiceOnce(a, s.cookie, id, i % 5 === 4 ? "wrong" : "correct");
+        previous = id;
+      }
+      expect(new Set(served).size).toBeGreaterThan(2);
+    } finally {
+      await pool?.release();
+      await unpublished?.release();
+    }
+  });
+
+  it("PHASE 3 UNIT 5: documented sole-candidate fallback is deterministic on real data, and a thin pool (one published question) never errors", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hard-sole");
+    await practiceOnce(a, s.cookie, real.point, "correct");
+    const others = (await a.prisma.question.findMany({ where: { validationState: "published", id: { not: real.point } }, select: { id: true } })).map((r) => r.id);
+    await a.prisma.question.updateMany({ where: { id: { in: others } }, data: { validationState: "human_reviewed" } });
+    try {
+      const first = await card(a, s.cookie);
+      expect(first.questionId).toBe(real.point); // the only published question, although it was just attempted
+      await sameAfterRestart(s.cookie, first);
+      expect(await card(b, s.cookie)).toEqual(first);
+    } finally {
+      await a.prisma.question.updateMany({ where: { id: { in: others } }, data: { validationState: "published" } });
+    }
+    expect((await card(a, s.cookie)).questionId).not.toBe(real.point);
+  });
+
+  it("PHASE 3 UNIT 5: six different persisted histories each give the same recommendation on the original, a restarted and a second instance (same database -> same decision)", async () => {
+    const real = await familyIds();
+    const histories: Array<Array<[string, "correct" | "wrong" | "skip"]>> = [
+      [],
+      [[real.point, "wrong"]],
+      [[real.reverse, "wrong"], [real.successive, "wrong"]],
+      [[real.point, "correct"], [real.point, "correct"], [real.point, "correct"]],
+      [[real.successive, "wrong"], [real.reverse, "wrong"], [real.point, "correct"], [real.point, "correct"], [real.point, "correct"]],
+      [[real.point, "skip"], [real.successive, "correct"]]
+    ];
+    const restarted = await startInstance();
+    try {
+      for (const [i, steps] of histories.entries()) {
+        const s = await newStudent(a, `hard-matrix-${i}`);
+        await replay(a, s.cookie, steps);
+        const decided = await card(a, s.cookie);
+        expect(await card(b, s.cookie), `history ${i} second instance`).toEqual(decided);
+        expect(await card(restarted, s.cookie), `history ${i} restarted instance`).toEqual(decided);
+        expect(await card(a, s.cookie), `history ${i} repeat`).toEqual(decided);
+      }
+    } finally {
+      await restarted.close();
+    }
+  });
+
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
     const s = await newStudent(a, "repo");
     const enrollment = await a.prisma.enrollment.findFirstOrThrow({ where: { studentId: s.studentId } });

@@ -17,6 +17,12 @@ export function isConfirmedForOrchestration(context: ActiveRepairPlanContext): b
   return Boolean(context.plan.confirmationSource?.hypothesisConfirmedAt);
 }
 
+/** An unparseable confirmation time counts as 0 (oldest), never NaN: a NaN in a comparator makes the resulting order depend on the input order. */
+function confirmedMs(context: ActiveRepairPlanContext): number {
+  const ms = Date.parse(context.plan.confirmationSource.hypothesisConfirmedAt);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 const REPAIR_PRIORITY_RANK: Record<RepairPriority, number> = { high: 0, medium: 1, low: 2 };
 
 /**
@@ -53,10 +59,16 @@ export function selectPlanForOrchestration(contexts: ActiveRepairPlanContext[]):
     const rankDiff = REPAIR_PRIORITY_RANK[a.plan.priority] - REPAIR_PRIORITY_RANK[b.plan.priority];
     if (rankDiff !== 0) return rankDiff;
 
-    const dateDiff = Date.parse(b.plan.confirmationSource.hypothesisConfirmedAt) - Date.parse(a.plan.confirmationSource.hypothesisConfirmedAt);
+    const dateDiff = confirmedMs(b) - confirmedMs(a);
     if (dateDiff !== 0) return dateDiff;
 
-    return a.plan.targetConceptName.localeCompare(b.plan.targetConceptName);
+    // Phase 3 Unit 5: a COMPLETE chain, so two plans that agree on priority, time and concept can no longer be ordered by input position.
+    return (
+      a.plan.targetConceptName.localeCompare(b.plan.targetConceptName) ||
+      a.plan.targetPatternFamilyName.localeCompare(b.plan.targetPatternFamilyName) ||
+      a.plan.targetTaxonomyCellId.localeCompare(b.plan.targetTaxonomyCellId) ||
+      (a.plan.targetErrorTaxonomyCode ?? "").localeCompare(b.plan.targetErrorTaxonomyCode ?? "")
+    );
   });
 
   return { chosen: sorted[0] ?? null, excludedAsUnconfirmedCount };

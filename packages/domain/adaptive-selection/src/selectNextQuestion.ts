@@ -1,4 +1,4 @@
-import { validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
+import { dedupeCandidatesById, validateAdaptiveCandidateQuestion } from "./candidateValidation.js";
 import { deriveAccumulatedEvidence } from "./accumulatedEvidence.js";
 import { compareByRecentPreference, explainRecentEvidence, RECENT_EVIDENCE_REASON_BY_SIGNAL } from "./recentEvidence.js";
 import { compareByTrendPreference } from "./trendEvidence.js";
@@ -44,7 +44,7 @@ function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandid
         ? `The most recent ${accumulated.trailingIncorrectStreak} graded answers on "${q.conceptName}" were all incorrect — this question offers further practice on it.`
         : `Consecutive incorrect answers were observed on "${q.conceptName}" — this question offers further practice on it.`;
     case "prerequisite_weakness":
-      return `"${q.conceptName}" is a prerequisite flagged by a confirmed diagnosis elsewhere, and this student's mastery of it is weak or unmeasured.`;
+      return `"${q.conceptName}" is a prerequisite flagged by a confirmed diagnosis elsewhere, and measured accuracy on it is below the training threshold or not yet measured.`;
     case "accuracy_weakness":
       return accumulated
         ? `${accumulated.incorrectCount} of ${accumulated.gradedAttempts} graded answers on "${q.conceptName}" were incorrect (accuracy below the training threshold).`
@@ -58,9 +58,9 @@ function explainReason(reason: TrainingNeedReasonCode, candidate: AdaptiveCandid
     case "underexposure":
       return `The pattern family "${q.patternFamilyName}" has very few prior attempts by this student overall.`;
     case "pressure_gap":
-      return `This student's performance under time pressure on "${q.conceptName}" is weak or unmeasured, and this question is time-pressured.`;
+      return `Accuracy on time-pressured questions for "${q.conceptName}" is below the training threshold or not yet measured, and this question is time-pressured.`;
     case "novelty_gap":
-      return `This student's performance on novel-representation content for "${q.conceptName}" is weak or unmeasured, and this question is non-standard novelty.`;
+      return `Accuracy on novel-representation content for "${q.conceptName}" is below the training threshold or not yet measured, and this question is non-standard novelty.`;
     case "difficulty_progression":
       return `This question's difficulty tier ("${q.difficultyTier}") is the appropriate next step for "${q.conceptName}" given current evidence.`;
   }
@@ -114,8 +114,9 @@ export function selectNextQuestion(input: AdaptiveSelectionInput): AdaptiveSelec
   }
 
   const structurallyValid: AdaptiveCandidateQuestion[] = [];
-  let excludedMalformedCount = 0;
-  for (const candidate of candidates) {
+  const deduped = dedupeCandidatesById(candidates);
+  let excludedMalformedCount = deduped.conflictingCount;
+  for (const candidate of deduped.unique) {
     if (validateAdaptiveCandidateQuestion(candidate).valid) {
       structurallyValid.push(candidate);
     } else {

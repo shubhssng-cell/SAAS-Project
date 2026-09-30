@@ -1,3 +1,4 @@
+import { compareAttemptsChronologically } from "./trendEvidence.js";
 import {
   ADAPTIVE_SELECTION_CONSTANTS,
   DIFFICULTY_TIER_ORDER,
@@ -54,15 +55,11 @@ export const RECENT_EVIDENCE_REASON_BY_SIGNAL: Record<RecentEvidenceSignal, Trai
 
 const tierRank = (tier: AutopsyQuestionContext["difficultyTier"]): number => DIFFICULTY_TIER_ORDER.indexOf(tier);
 
-function finalizedMs(record: MasteryAttemptRecord): number {
-  const ms = record.contribution.finalizedAt ? Date.parse(record.contribution.finalizedAt) : Number.NaN;
-  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
-}
-
 /**
  * The signal from this student's latest submitted-or-skipped attempt, or `null` when there is none (a cold
  * start, or only abandoned attempts) -- in which case adaptive selection behaves exactly as it did before.
- * "Latest" is by `finalizedAt`; ties keep the later position in the (already `finalizedAt ASC`) input.
+ * "Latest" is the last attempt in the total order `compareAttemptsChronologically` (`finalizedAt`, then `attemptId`) -- the SAME order the trend
+ * and mastery sequences use, so equal or missing timestamps can never make the answer depend on the order the records were supplied in.
  * "Slow" reuses the existing per-attempt ratio (`SPEED_WEAKNESS_RATIO`, itself equal to autopsy's
  * `SLOW_SPEED_RATIO`) -- no new threshold is introduced.
  */
@@ -71,7 +68,7 @@ export function deriveRecentEvidence(studentId: string, attemptRecords: MasteryA
   for (const record of attemptRecords) {
     if (record.contribution.studentId !== studentId) continue;
     if (record.contribution.status !== "submitted" && record.contribution.status !== "skipped") continue;
-    if (latest === null || finalizedMs(record) >= finalizedMs(latest)) latest = record;
+    if (latest === null || compareAttemptsChronologically(record, latest) > 0) latest = record;
   }
   if (latest === null) return null;
 
