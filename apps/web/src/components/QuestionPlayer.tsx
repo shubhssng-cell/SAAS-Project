@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { QuestionViewModel } from "../adapter/index.js";
-import { Button, ErrorNotice, Screen } from "../design/index.js";
+import { Button, ErrorNotice, FormField, Screen } from "../design/index.js";
 import { Timer } from "./Timer.js";
 
 /**
@@ -35,9 +35,13 @@ export function QuestionPlayer({
     return () => window.clearInterval(interval);
   }, [question.questionId]);
 
+  // A question with no options is a typed-answer (numeric_entry) question -- the student
+  // types the answer; grading is still entirely server-side.
+  const hasOptions = (question.options?.length ?? 0) > 0;
+
   function handleSubmit() {
     if (!selected || submitting) return;
-    onSubmit(selected, elapsedRef.current);
+    onSubmit(selected.trim(), elapsedRef.current);
   }
 
   return (
@@ -51,20 +55,38 @@ export function QuestionPlayer({
         {question.prompt}
       </p>
 
-      <div className="options-grid" role="group" aria-labelledby="question-prompt">
-        {question.options?.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={`option${selected === option ? " selected" : ""}`}
-            aria-pressed={selected === option}
+      {hasOptions ? (
+        <div className="options-grid" role="group" aria-labelledby="question-prompt">
+          {question.options?.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={`option${selected === option ? " selected" : ""}`}
+              aria-pressed={selected === option}
+              disabled={submitting}
+              onClick={() => setSelected(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <FormField label="Your answer" htmlFor="numeric-answer">
+          <input
+            id="numeric-answer"
+            className="form-input"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={selected ?? ""}
             disabled={submitting}
-            onClick={() => setSelected(option)}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
+            onChange={(event) => setSelected(event.target.value.trim() === "" ? null : event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") handleSubmit();
+            }}
+          />
+        </FormField>
+      )}
 
       {submitError && <ErrorNotice>{submitError}</ErrorNotice>}
 

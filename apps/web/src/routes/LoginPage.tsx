@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
+import { useRedirectIfSignedIn } from "../auth/useRedirectIfSignedIn.js";
 import { Button, Card, ErrorNotice, FormField, Screen } from "../design/index.js";
 import { Link, useNavigate } from "../router/router.js";
 
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const markSubmitted = useRedirectIfSignedIn();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -14,6 +16,7 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (submitting) return;
+    markSubmitted();
     setFormError(null);
     setSubmitting(true);
 

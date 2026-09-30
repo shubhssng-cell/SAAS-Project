@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
 import { firstInvalidFieldId, SIGNUP_FIELD_IDS, validateSignup, type SignupFieldErrors } from "../auth/signupForm.js";
+import { useRedirectIfSignedIn } from "../auth/useRedirectIfSignedIn.js";
 import { Button, Card, ErrorNotice, FormField, fieldErrorId, Screen } from "../design/index.js";
 import { Link, useNavigate } from "../router/router.js";
 
@@ -12,6 +13,7 @@ function fieldAria(id: string, error: string | undefined) {
 export function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
+  const markSubmitted = useRedirectIfSignedIn();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -22,6 +24,7 @@ export function SignupPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (submitting) return;
+    markSubmitted();
     setFormError(null);
 
     const errors = validateSignup(email, password, confirmPassword);

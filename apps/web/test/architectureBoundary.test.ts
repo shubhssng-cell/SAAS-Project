@@ -422,3 +422,27 @@ describe("Shell hardening: loading/error/empty/accessibility structure (Product 
     expect(fetchCallers).toEqual([]);
   });
 });
+
+describe("Final QA hardening (Product Phase 1 Unit 12)", () => {
+  const src = (path: string) => readFileSync(join(webRoot, "src", path), "utf-8");
+
+  it("a question with no options is answerable: QuestionPlayer renders a labelled typed-answer input, and grading stays server-side (no answer comparison in the component)", () => {
+    const player = src("components/QuestionPlayer.tsx");
+    expect(player).toContain('htmlFor="numeric-answer"');
+    expect(player).toContain('id="numeric-answer"');
+    expect(player).toMatch(/inputMode="decimal"/);
+    expect(player).toMatch(/hasOptions/);
+    expect(player).not.toMatch(/correctAnswer|isCorrect/);
+  });
+
+  it("Log in / Sign up send an already-signed-in student on to /dashboard, without racing their own submit navigation", () => {
+    const hook = src("auth/useRedirectIfSignedIn.ts");
+    expect(hook).toContain('navigate("/dashboard")');
+    expect(hook).toMatch(/!submittedRef\.current/);
+    for (const page of ["routes/LoginPage.tsx", "routes/SignupPage.tsx"]) {
+      const source = src(page);
+      expect(source).toContain("useRedirectIfSignedIn()");
+      expect(source).toMatch(/markSubmitted\(\);/);
+    }
+  });
+});
