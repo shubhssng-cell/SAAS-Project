@@ -135,6 +135,16 @@ export interface RepairPlanRepository {
   findConfirmedActiveByStudentId(studentId: string): Promise<StoredRepairPlan[]>;
 }
 
+/**
+ * Phase 4 Unit 4 -- advances a RepairPlan's stored `status`, FORWARD ONLY (`pending -> in_progress -> completed`, `pending -> completed`),
+ * idempotently. The value is derived from persisted attempts by `evaluateRepairLifecycle()` (the derived value is what decisions use; this
+ * only keeps the stored column from lying). A plan that is already at or beyond `to`, belongs to another student, or does not exist is left
+ * untouched (`false`); concurrent identical calls are safe.
+ */
+export interface RepairPlanStatusWriter {
+  advanceStatus(input: { planId: string; studentId: string; to: "in_progress" | "completed" }): Promise<boolean>;
+}
+
 export interface StoredMasteryState extends MasteryStatePersistenceRecord {
   id: string;
 }

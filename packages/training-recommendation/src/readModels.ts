@@ -2,6 +2,7 @@ import { toMasteryContribution, type AttemptQuestionContext, type AttemptState }
 import { fromRepairPlanPersistenceRecord } from "@ipmat/autopsy";
 import type { CanonicalQuestion, ConceptRecord, StoredRepairPlan, TrainingQuestionRecord } from "@ipmat/db";
 import { computeMasteryState } from "@ipmat/mastery";
+import { evaluateRepairLifecycle, type RepairLifecycleAttempt, type RepairLifecycleResult } from "@ipmat/autopsy";
 import {
   deriveBlockActiveSolvingTimeSeconds,
   deriveBlockWallClockDurationSeconds,
@@ -58,6 +59,41 @@ export function toActiveRepairPlanContexts(storedPlans: StoredRepairPlan[]): Act
     if (plan !== null) contexts.push({ plan });
   }
   return contexts;
+}
+
+/**
+ * Phase 4 Unit 4 -- each stored plan, its lifecycle derived from the student's persisted finalized attempts (`evaluateRepairLifecycle()`),
+ * and -- for the plans still ACTIVE -- the orchestration context, enriched with the DIAGNOSED question's own difficulty tier (looked up from
+ * the plan's own attempt; `undefined` when that attempt/question is not in the published pool, never guessed). The tier is only the
+ * selector's difficulty tie-break ("start at the level the mistake happened at"); nothing escalates difficulty.
+ * A plan whose derived lifecycle is `completed` is NOT active, whatever its stored status says (the stored column is a synced copy).
+ */
+export function resolveRepairPlanLifecycles(
+  storedPlans: StoredRepairPlan[],
+  attemptRecords: MasteryAttemptRecord[]
+): { contexts: ActiveRepairPlanContext[]; lifecycles: Array<{ stored: StoredRepairPlan; lifecycle: RepairLifecycleResult }> } {
+  const lifecycleAttempts: RepairLifecycleAttempt[] = attemptRecords.map((record) => ({
+    attemptId: record.contribution.attemptId,
+    questionId: record.contribution.questionId,
+    conceptName: record.question.conceptName,
+    patternFamilyName: record.question.patternFamilyName,
+    trapErrorTaxonomyCode: record.question.trapErrorTaxonomyCode,
+    status: record.contribution.status,
+    isCorrect: record.contribution.isCorrect,
+    finalizedAt: record.contribution.finalizedAt
+  }));
+  const contexts: ActiveRepairPlanContext[] = [];
+  const lifecycles: Array<{ stored: StoredRepairPlan; lifecycle: RepairLifecycleResult }> = [];
+  for (const stored of storedPlans) {
+    const plan = fromRepairPlanPersistenceRecord(stored);
+    if (plan === null) continue;
+    const lifecycle = evaluateRepairLifecycle(plan, lifecycleAttempts);
+    lifecycles.push({ stored, lifecycle });
+    if (lifecycle.status === "completed") continue;
+    const diagnosed = attemptRecords.find((record) => record.contribution.attemptId === plan.confirmationSource.attemptId);
+    contexts.push(diagnosed ? { plan, targetDifficultyTier: diagnosed.question.difficultyTier } : { plan });
+  }
+  return { contexts, lifecycles };
 }
 
 /** The ONE place a `CanonicalQuestion` becomes an `AttemptQuestionContext` here — same `answerFormat` derivation as `@ipmat/practice-loop` (options present => multiple_choice). Used only as `toMasteryContribution()`'s input. */

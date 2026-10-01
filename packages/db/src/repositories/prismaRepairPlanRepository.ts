@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { toRepairPlanPersistenceRecord, type RepairPlan } from "@ipmat/autopsy";
-import type { RepairPlanRepository, StoredRepairPlan } from "./types.js";
+import type { RepairPlanRepository, RepairPlanStatusWriter, StoredRepairPlan } from "./types.js";
 import { assertConceptResolved, assertErrorTaxonomyResolved, assertRepairPlanConfirmed, assertRepairPlanIdentifiers } from "./validation.js";
 
 /**
@@ -21,8 +21,15 @@ import { assertConceptResolved, assertErrorTaxonomyResolved, assertRepairPlanCon
  * multi-step write sequence that could leave a partially written row; no
  * transaction is needed here.
  */
-export class PrismaRepairPlanRepository implements RepairPlanRepository {
+export class PrismaRepairPlanRepository implements RepairPlanRepository, RepairPlanStatusWriter {
   constructor(private readonly prisma: PrismaClient) {}
+
+  /** Forward-only and idempotent: the WHERE clause itself names the statuses it may move FROM, so a stale or concurrent caller can never move a plan backwards. */
+  async advanceStatus(input: { planId: string; studentId: string; to: "in_progress" | "completed" }): Promise<boolean> {
+    const from = input.to === "in_progress" ? ["pending" as const] : ["pending" as const, "in_progress" as const];
+    const result = await this.prisma.repairPlan.updateMany({ where: { id: input.planId, studentId: input.studentId, status: { in: from } }, data: { status: input.to } });
+    return result.count === 1;
+  }
 
   async save(input: { plan: RepairPlan; autopsyId: string; studentId: string }): Promise<StoredRepairPlan> {
     const { plan, autopsyId, studentId } = input;

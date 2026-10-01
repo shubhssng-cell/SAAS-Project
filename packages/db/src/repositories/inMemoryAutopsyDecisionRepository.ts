@@ -1,6 +1,6 @@
 import { toAutopsyPersistenceRecord, toRepairPlanPersistenceRecord, type AutopsyHypothesis, type AutopsyOutput, type RepairPlan } from "@ipmat/autopsy";
 import { PersistenceError } from "./errors.js";
-import type { AutopsyDecisionRepository, StoredAutopsy, StoredDiagnosis, StoredRepairPlan } from "./types.js";
+import type { AutopsyDecisionRepository, RepairPlanStatusWriter, StoredAutopsy, StoredDiagnosis, StoredRepairPlan } from "./types.js";
 import { assertAutopsyLinkage, assertRepairPlanConfirmed } from "./validation.js";
 
 interface Row {
@@ -17,7 +17,7 @@ interface Row {
  * Also acts as the `findConfirmedActiveByStudentId` reader the recommendation composition needs, so the in-memory wiring reads the plans it
  * writes (a plan counts only when its autopsy is confirmed, mirroring `PrismaRepairPlanRepository`).
  */
-export class InMemoryAutopsyDecisionRepository implements AutopsyDecisionRepository {
+export class InMemoryAutopsyDecisionRepository implements AutopsyDecisionRepository, RepairPlanStatusWriter {
   private readonly rows = new Map<string, Row>();
   private nextId = 1;
 
@@ -82,6 +82,17 @@ export class InMemoryAutopsyDecisionRepository implements AutopsyDecisionReposit
       };
     }
     return { stored: snapshot(row), applied: true };
+  }
+
+  async advanceStatus(input: { planId: string; studentId: string; to: "in_progress" | "completed" }): Promise<boolean> {
+    for (const row of this.rows.values()) {
+      if (row.plan?.id !== input.planId || row.studentId !== input.studentId) continue;
+      const allowed = input.to === "in_progress" ? row.plan.status === "pending" : row.plan.status !== "completed";
+      if (!allowed) return false;
+      row.plan = { ...row.plan, status: input.to };
+      return true;
+    }
+    return false;
   }
 
   /** The `RepairPlanRepository` read the recommendation composition uses: this student's plans whose autopsy is confirmed and not completed, newest first. */

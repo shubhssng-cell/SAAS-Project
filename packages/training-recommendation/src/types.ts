@@ -6,7 +6,7 @@ import type {
   PracticeSessionRepository,
   QuestionReader,
   RepairPlanRepository,
-  TrainingQuestionReader, ErrorTaxonomyReader } from "@ipmat/db";
+  TrainingQuestionReader, ErrorTaxonomyReader, RepairPlanStatusWriter } from "@ipmat/db";
 
 /**
  * Training Recommendation Composition (docs/project-memory/37_TRAINING_RECOMMENDATION.md).
@@ -34,6 +34,8 @@ export interface TrainingRecommendationDependencies {
   practiceBlockReader: Pick<PracticeBlockRepository, "findBySessionId">;
   /** Phase 4 Unit 3 (optional): the existing error taxonomy, used only to resolve a question's designed trap to its category for the Autopsy output. Absent -> an empty taxonomy (no category is invented). */
   errorTaxonomyReader?: ErrorTaxonomyReader;
+  /** Phase 4 Unit 4 (optional): keeps the stored RepairPlan status in step with the status derived from attempts (forward-only, idempotent). Decisions never depend on it succeeding. */
+  repairPlanStatusWriter?: RepairPlanStatusWriter;
   /** Supplies `computeMasteryState()`'s `now` (pure mastery functions never read the clock themselves). Defaults to the system clock. */
   now?: () => string;
 }

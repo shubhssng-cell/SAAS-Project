@@ -41,7 +41,7 @@ This table is intentionally high-level. Only Phases 0, 1, 2, 3 and 4 have detail
 - [PHASE_2_REAL_PRACTICE_LOOP.md](PHASE_2_REAL_PRACTICE_LOOP.md) (Units 1-8 complete)
 - [PHASE_3_ADAPTIVE_PRACTICE.md](PHASE_3_ADAPTIVE_PRACTICE.md) (COMPLETE -- Units 1-5 (3.1-3.5) done — PHASE 3 COMPLETE at technical + policy validation (latest-attempt reaction, accumulated evidence, trend-aware evidence, staged selection policy, hardening/validation); real outcome calibration remains future work; Phase 4 (Question Autopsy / Repair) not started)
 
-- [PHASE_4_AUTOPSY_REPAIR.md](PHASE_4_AUTOPSY_REPAIR.md) (IN PROGRESS -- Unit 1 (autopsy evidence surfaced, observation only) and Unit 2 (hypothesis + student confirmation/correction) and Unit 3 (offer + response persisted once; a confirmed explanation becomes a diagnosis and exactly one RepairPlan; reject/correct create neither) complete; Units 4-5 not started)
+- [PHASE_4_AUTOPSY_REPAIR.md](PHASE_4_AUTOPSY_REPAIR.md) (IN PROGRESS -- Unit 1 (autopsy evidence surfaced, observation only) and Unit 2 (hypothesis + student confirmation/correction) and Unit 3 (offer + response persisted once; a confirmed explanation becomes a diagnosis and exactly one RepairPlan; reject/correct create neither) complete; Unit 4 (targeted repair practice: confirmed plans drive the next question through the existing repair tier, with a derived, conservative pending/in_progress/completed lifecycle) complete; Unit 5 not started)
 
 Future phase files (2 through 10) will be added as each one is actually about to start, not speculatively ahead of time — this mirrors the existing repo's vertical-slice discipline (see [../MASTER_PLAN.md](../MASTER_PLAN.md) §"What should explicitly NOT be built yet" and the CLAUDE.md working-style rules).
 

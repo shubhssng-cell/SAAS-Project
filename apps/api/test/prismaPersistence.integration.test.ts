@@ -1290,6 +1290,132 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     }
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Phase 4 Unit 4 -- TARGETED REPAIR PRACTICE on real Postgres: a stored confirmed RepairPlan drives the next question, answering it is an
+  // ordinary persisted attempt, the plan's lifecycle (pending -> in_progress -> completed) is derived from persisted attempts and synced to
+  // the stored status, and the decision is identical after a restart, on a second instance, and under concurrent requests.
+  // ---------------------------------------------------------------------------------------------
+
+  const recommendationOf = (instance: Instance, cookie: string) => call(instance, "POST", "/v1/recommendation", cookie);
+  const REPAIR_LABEL = "Confirmed pattern";
+  async function confirmedPlanFor(s: { cookie: string; studentId: string }, questionId: string, decision: "confirmed" | "rejected" | "corrected" = "confirmed") {
+    const attemptId = await startAndSubmit(a, s.cookie, questionId, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+    const body = decision === "corrected" ? { token: offer.token, response: "corrected", correctedExplanation: "my own words" } : { token: offer.token, response: decision };
+    expect((await respondOf(a, s.cookie, attemptId, body)).status).toBe(200);
+    return attemptId;
+  }
+  const planRow = (attemptId: string) => a.prisma.repairPlan.findFirst({ where: { autopsy: { attemptId } } });
+
+  it("PHASE 4 UNIT 4: confirm -> the next question is a targeted repair question (not the one just answered) with an honest, metadata-free explanation; answering it is an ordinary persisted attempt", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "rep-flow");
+    const diagnosed = await confirmedPlanFor(s, real.reverse);
+    const rec = await recommendationOf(a, s.cookie);
+    expect(rec.status).toBe(200);
+    expect(rec.json.modeLabel).toBe(REPAIR_LABEL);
+    expect(rec.json.questionId).not.toBe(real.reverse); // no immediate repeat
+    expect([real.point, real.successive]).toContain(rec.json.questionId);
+    expect(Object.keys(rec.json).sort()).toEqual(["explanation", "headline", "modeLabel", "questionId"]);
+    const text = JSON.stringify({ ...rec.json, questionId: undefined }); // the question id itself is a legitimate identifier
+    expect(text).toContain("Reverse Percentage");
+    expect(text).not.toMatch(/base_confusion|taxonomy|autopsy|misconception|modelConfidence|dev-scripted|concept_fallback|trap_only|[0-9a-f]{8}-[0-9a-f]{4}-/i);
+    expect(text).not.toMatch(/confiden|motivat|careless|anxi|lazy|intelligen|you (felt|knew|thought)|weak|fixed|mastered/i);
+    expect((await planRow(diagnosed))!.status).toBe("pending");
+
+    const repairAttemptId = await startAndSubmit(a, s.cookie, rec.json.questionId as string, "correct");
+    const row = await a.prisma.attempt.findUniqueOrThrow({ where: { id: repairAttemptId } });
+    expect(row).toMatchObject({ status: "submitted", isCorrect: true, studentId: s.studentId, questionId: rec.json.questionId });
+    expect((await call(a, "GET", `/v1/attempts/${repairAttemptId}/evidence`, s.cookie)).status).toBe(200);
+
+    const after = await recommendationOf(a, s.cookie); // the lifecycle is recomputed and synced
+    expect((await planRow(diagnosed))!.status).toBe("in_progress");
+    expect(after.json.modeLabel).toBe(REPAIR_LABEL); // one correct answer does not end repair
+    expect(after.json.questionId).not.toBe(rec.json.questionId);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1); // still exactly one plan: no second flow
+  });
+
+  it("PHASE 4 UNIT 4: restart, a second instance and 16 concurrent requests all make the identical repair decision; the plan state is reconstructed from Postgres", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "rep-restart");
+    const diagnosed = await confirmedPlanFor(s, real.successive);
+    const first = await recommendationOf(a, s.cookie);
+    await startAndSubmit(a, s.cookie, first.json.questionId as string, "wrong");
+    const before = await recommendationOf(a, s.cookie);
+    expect(before.json.modeLabel).toBe(REPAIR_LABEL);
+
+    const restarted = await startInstance();
+    try {
+      expect((await recommendationOf(restarted, s.cookie)).json).toEqual(before.json);
+      expect((await recommendationOf(b, s.cookie)).json).toEqual(before.json);
+      const burst = await Promise.all(Array.from({ length: 16 }, (_, i) => recommendationOf([a, b, restarted][i % 3]!, s.cookie)));
+      for (const r of burst) expect(r.json).toEqual(before.json);
+    } finally {
+      await restarted.close();
+    }
+    expect((await planRow(diagnosed))!.status).toBe("in_progress");
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+  });
+
+  it("PHASE 4 UNIT 4: with the seeded content (one question per family, distinct traps) every repair question is a broad concept fallback, so completion comes from the ROUND LIMIT -- correct or not, never claimed as fixed; ordinary practice then resumes", async () => {
+    const real = await familyIds();
+    const done = await newStudent(a, "rep-complete");
+    const diagnosed = await confirmedPlanFor(done, real.reverse);
+    for (let round = 0; round < 2; round++) {
+      await startAndSubmit(a, done.cookie, (await recommendationOf(a, done.cookie)).json.questionId as string, "correct");
+      expect((await recommendationOf(a, done.cookie)).json.modeLabel).toBe(REPAIR_LABEL); // two correct broad answers are NOT a demonstration
+    }
+    await startAndSubmit(a, done.cookie, (await recommendationOf(a, done.cookie)).json.questionId as string, "correct");
+    const resumed = await recommendationOf(a, done.cookie);
+    expect(resumed.json.modeLabel).not.toBe(REPAIR_LABEL);
+    expect((await planRow(diagnosed))!.status).toBe("completed");
+    expect((await recommendationOf(b, done.cookie)).json).toEqual(resumed.json); // and another instance agrees
+
+    const failing = await newStudent(a, "rep-limit");
+    const failingDiagnosed = await confirmedPlanFor(failing, real.reverse);
+    for (let round = 0; round < 3; round++) {
+      const rec = await recommendationOf(a, failing.cookie);
+      expect(rec.json.modeLabel).toBe(REPAIR_LABEL);
+      await startAndSubmit(a, failing.cookie, rec.json.questionId as string, "wrong");
+    }
+    expect((await recommendationOf(a, failing.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL);
+    expect((await planRow(failingDiagnosed))!.status).toBe("completed");
+  });
+
+  it("PHASE 4 UNIT 4: a rejected or corrected explanation never creates repair; another student's confirmed plan never affects this student", async () => {
+    const real = await familyIds();
+    const owner = await newStudent(a, "rep-owner");
+    await confirmedPlanFor(owner, real.reverse);
+    for (const decision of ["rejected", "corrected"] as const) {
+      const s = await newStudent(a, `rep-${decision}`);
+      const attemptId = await confirmedPlanFor(s, real.reverse, decision);
+      expect(await planRow(attemptId)).toBeNull();
+      expect((await recommendationOf(a, s.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL);
+      expect((await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId } })).confirmed).toBe(false);
+    }
+    const stranger = await newStudent(a, "rep-stranger");
+    expect((await recommendationOf(a, stranger.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: stranger.studentId } })).toBe(0);
+  });
+
+  it("PHASE 4 UNIT 4: when NO repair candidate exists (every published question unavailable) the plan does not break practice -- a deterministic 'nothing to recommend' answer, and repair resumes once content returns", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "rep-nocandidate");
+    await confirmedPlanFor(s, real.reverse);
+    const published = await a.prisma.question.findMany({ where: { validationState: "published" }, select: { id: true } });
+    const ids = published.map((q) => q.id);
+    try {
+      await a.prisma.question.updateMany({ where: { id: { in: ids } }, data: { validationState: "draft" } });
+      const none = await recommendationOf(a, s.cookie);
+      expect(none.status).toBe(200);
+      expect(none.json.questionId).toBeNull();
+      expect((await recommendationOf(b, s.cookie)).json).toEqual(none.json);
+    } finally {
+      await a.prisma.question.updateMany({ where: { id: { in: ids } }, data: { validationState: "published" } });
+    }
+    expect((await recommendationOf(a, s.cookie)).json.modeLabel).toBe(REPAIR_LABEL); // the plan itself was never lost or completed by the gap
+  });
+
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
     const s = await newStudent(a, "repo");
     const enrollment = await a.prisma.enrollment.findFirstOrThrow({ where: { studentId: s.studentId } });

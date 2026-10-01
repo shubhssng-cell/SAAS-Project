@@ -8,7 +8,7 @@ import {
   assertSessionBelongsToEnrollment,
   assertValidRequest
 } from "./ownership.js";
-import { buildMasteryAttemptRecords, buildPracticeBlockContext, computeMasteryByConcept, toActiveRepairPlanContexts, toTrainingCandidates } from "./readModels.js";
+import { buildMasteryAttemptRecords, buildPracticeBlockContext, computeMasteryByConcept, resolveRepairPlanLifecycles, toTrainingCandidates } from "./readModels.js";
 import type { TrainingRecommendationDependencies, TrainingRecommendationRequest } from "./types.js";
 
 /**
@@ -16,8 +16,8 @@ import type { TrainingRecommendationDependencies, TrainingRecommendationRequest 
  * per docs/project-memory/37_TRAINING_RECOMMENDATION.md §5. Pure data
  * assembly — every decision (repair, training systems, adaptive) stays in
  * `@ipmat/training-orchestration`. Reads are issued sequentially (§5: no
- * parallelism for its own sake), none inside a transaction (§11), and no
- * write happens anywhere. Repository errors propagate unchanged.
+ * parallelism for its own sake), none inside a transaction (§11), and the
+ * ONLY write is Phase 4 Unit 4's forward-only RepairPlan status sync. Repository errors propagate unchanged.
  *
  * V1 exclusions (§7, §16): `prepPhase` is always `null` (no exam-date
  * resolution / CatchUpPlan "active" semantics exist yet), and
@@ -76,10 +76,20 @@ export async function composeTrainingOrchestrationInput(
     }
   }
 
+  // Phase 4 Unit 4: each confirmed plan's lifecycle is derived from the persisted attempts (pending / in_progress / completed). A completed plan is
+  // no longer active; the stored status is then brought forward (forward-only, idempotent, best effort -- the derived value is what decides).
+  const { contexts: activeRepairPlans, lifecycles } = resolveRepairPlanLifecycles(storedRepairPlans, attemptRecords);
+  if (deps.repairPlanStatusWriter) {
+    for (const { stored, lifecycle } of lifecycles) {
+      if (lifecycle.status === "pending" || lifecycle.status === stored.status) continue;
+      await deps.repairPlanStatusWriter.advanceStatus({ planId: stored.id, studentId, to: lifecycle.status }).catch(() => false);
+    }
+  }
+
   // 12-14. Assemble — the orchestration contract, reused as-is.
   return {
     studentId,
-    activeRepairPlans: toActiveRepairPlanContexts(storedRepairPlans),
+    activeRepairPlans,
     masteryByConcept,
     attemptRecords,
     candidates,

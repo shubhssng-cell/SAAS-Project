@@ -176,6 +176,28 @@ function trendEvidenceCopy(reason: string, trend: TrendFacts | null | undefined)
   }
 }
 
+/**
+ * Phase 4 Unit 4 -- why a repair question is shown, in fixed copy built ONLY from the match tier and the plan's own concept / pattern names
+ * (content labels, never ids or taxonomy codes). It says what the student confirmed and how directly this question relates -- including,
+ * plainly, when no question for the exact pattern was available -- and makes no claim about the student or about the mistake being fixed.
+ */
+function repairExplanation(repair: { matchTier: string; targetConceptName: string; targetPatternFamilyName: string }): string {
+  const concept = repair.targetConceptName;
+  const pattern = repair.targetPatternFamilyName;
+  const lead = `You confirmed an explanation for a mistake on ${pattern} (${concept}).`;
+  switch (repair.matchTier) {
+    case "direct_cell_and_trap":
+    case "direct_cell":
+    case "pattern_family_and_trap":
+    case "pattern_family":
+      return `${lead} This question practises the same pattern, so you can see whether it still comes up.`;
+    case "trap_only":
+      return `${lead} This question sets the same kind of wrong-answer trap in a different pattern within ${concept}.`;
+    default:
+      return `${lead} No question for that exact pattern is available right now, so this is a broader ${concept} question.`;
+  }
+}
+
 export function toRecommendationView(result: TrainingOrchestrationResult): RecommendationView {
   if (result.status === "no_action") {
     return { questionId: null, modeLabel: "Up to date", headline: "You're all caught up", explanation: "Nothing urgent right now. Keep practicing to build up more evidence." };
@@ -186,7 +208,7 @@ export function toRecommendationView(result: TrainingOrchestrationResult): Recom
       questionId: result.question.questionId,
       modeLabel: "Confirmed pattern",
       headline: "Fix a confirmed mistake pattern",
-      explanation: "You confirmed a specific mistake last time — here's a question to test whether you've corrected it."
+      explanation: repairExplanation(result.providerResult)
     };
   }
 

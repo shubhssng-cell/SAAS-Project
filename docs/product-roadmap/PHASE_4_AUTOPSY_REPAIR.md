@@ -13,8 +13,8 @@ Numbering is **Phase-4-relative** (Unit 1 … Unit 5); there is no relation to t
 | Unit 1 | Autopsy **evidence** (observation only) surfaced in the real student flow | **COMPLETE** (below) |
 | Unit 2 | Hypothesis generation + student confirmation / correction | **COMPLETE** (below) |
 | Unit 3 | Persist confirmed diagnosis + RepairPlan | **COMPLETE** (below) |
-| Unit 4 | Targeted repair-question selection + adaptive integration | NOT STARTED (not begun) |
-| Unit 5 | Full end-to-end Autopsy → Repair → improved-practice hardening | NOT STARTED |
+| Unit 4 | Targeted repair selection + repair lifecycle | **COMPLETE** (below) |
+| Unit 5 | Full end-to-end Autopsy → Repair → improved-practice hardening | NOT STARTED (not begun) |
 
 *(This is a working plan; later units may be adjusted when they start.)*
 
@@ -309,6 +309,77 @@ Domain/service (`packages/practice-api`, in-memory store with the Prisma contrac
 - Plan `status` never leaves `pending` (nothing advances it yet).
 - The in-memory development store mirrors the contract but with stand-in ids; the database path is the verified one.
 
-### What Unit 4 will build (and Unit 3 did NOT)
+## Unit 4 — Targeted repair practice + repair lifecycle
 
-Unit 4 — **targeted repair-question selection and adaptive integration**: choose, rank and explain follow-up questions for a stored confirmed RepairPlan; define how a plan advances (`pending → in_progress → completed`); decide how plan-driven selection interacts with the existing adaptive tiers (and whether the repair tier's current behavior should be kept, changed or gated); consume the stored correction text only via a future diagnosis pass. **Unit 4 has NOT been started.**
+> **Unit 4 owns the last transition: confirmed RepairPlan → targeted repair question — and what happens to the plan afterwards.** Most of the *selection* machinery already existed (Phase 5C/5D); Unit 4's job was to feed it real stored plans, give the plan a lifecycle so it cannot hold the student forever, and explain the choice honestly. The adaptive engine was not rewritten.
+
+### What already existed and was reused unchanged (inspected, not rebuilt)
+
+- `@ipmat/repair-selection` `selectRepairQuestion()` — explicit, ordered, **non-scored** tiers: `direct_cell_and_trap` → `direct_cell` → `pattern_family_and_trap` → `trap_only` → `pattern_family` → `concept_fallback`. Hard gates before tiering: structural validity (malformed candidates excluded), `published`, target concept, and the plan's training-mode constraint. Within the winning tier: overuse avoidance, speed-problem preference, difficulty closeness to the diagnosed tier, then `questionId`. No composite score anywhere.
+- `@ipmat/training-orchestration`: `REPAIR_PRECEDES_ADAPTIVE` — an active, confirmed plan is attempted before training systems and adaptive practice; `no_match` falls through to training systems, then adaptive (`shouldAttemptTrainingSystems`, `shouldAttemptAdaptivePracticeAfterTrainingSystems`). Plan choice among several: priority → most recent confirmation → full tie-break chain (`selectPlanForOrchestration`).
+- No immediate repeat: the orchestrator withholds the question just answered from the repair and training-system tiers whenever another candidate exists (Phase 3 Unit 4); adaptive owns the documented sole-candidate fallback.
+
+### Repair priority
+
+A valid, active, confirmed plan is the highest-level reason: it beats coverage, novelty, progression and every ordinary adaptive reason (`REPAIR_PRECEDES_ADAPTIVE`, asserted by tests). Repair stays safe: unpublished and malformed questions are never selected. If the repair tier finds nothing (e.g. no question exists for the target concept) the existing deterministic chain continues to training systems and adaptive practice, so a broken plan never blocks practice; the plan itself is not discarded by a content gap.
+
+### Difficulty policy (what changed, and what did not)
+
+- A confirmed error does **not** mean "serve something harder". Nothing escalates difficulty.
+- Unit 4 now supplies the selector's `targetDifficultyTier` (previously never populated by composition): the **diagnosed question's own tier**, looked up from the plan's own attempt (absent when that question is not in the published pool — never guessed). It is only the within-tier tie-break ("closest to the level the mistake happened at"). Difficulty dimensions remain provisional (D-021).
+- The plan's `behaviorSignals` are still not persisted on `RepairPlan`, so the speed tie-break is still inert in the live path (pre-existing; unchanged).
+
+### RepairPlan lifecycle (`evaluateRepairLifecycle()` in `@ipmat/autopsy`)
+
+Existing status vocabulary only: `pending → in_progress → completed`. The status is **derived on every recommendation from the student's persisted finalized attempts**; the stored column is brought forward by a forward-only, idempotent write (`RepairPlanStatusWriter.advanceStatus`, `WHERE status IN (allowed-from)`), best-effort, never required for a decision.
+
+Counted: attempts finalized **strictly after** the student's confirmation, on the target concept, that are `submitted` or `skipped` (abandoned = no evidence; the diagnosed attempt is never counted). *Direct-match* = same pattern family, or the same targeted error category.
+
+| State | Condition |
+|---|---|
+| `pending` | no counted attempt yet |
+| `in_progress` | ≥ 1 counted attempt, no completion condition |
+| `completed` — `demonstrated` | the last **2** direct-match attempts are all correct (a wrong answer or a skip resets the run) |
+| `completed` — `round_limit` | **3** counted attempts since the confirmation, whatever their outcome |
+
+- **One correct follow-up is not completion** (it is evidence of improvement, not proof). A correct answer on a *broad* question never demonstrates anything.
+- **`completed` does not mean "fixed" or "mastered".** `round_limit` explicitly makes no claim about the mistake; the ordinary adaptive evidence tiers keep reacting to a continuing weakness. The reason is derivable (recompute), not stored — there is no completion-reason column, and no status was invented.
+- **Eligible again:** a *new* incorrect answer that the student confirms creates a *new* plan (one plan per autopsy); a completed plan is never reopened.
+- **Never two repair flows:** the orchestrator attempts exactly one plan per call; stored plans are one-per-autopsy.
+- Both constants (`DEMONSTRATED_MIN_CONSECUTIVE_CORRECT = 2`, `MAX_REPAIR_ROUNDS = 3`) are **PROVISIONAL** authored policy, not calibrated against outcomes.
+
+### Repair outcome
+
+Answering a repair question is an ordinary persisted attempt (same lifecycle, result, evidence, Autopsy offer). Its effect on the plan is only through the lifecycle above; nothing marks a plan repaired on its own authority, and mastery is untouched (it already derives from attempts).
+
+### Student-facing explanation
+
+Fixed copy, built only from the match tier and the plan's own concept / pattern **names** (content labels): "You confirmed an explanation for a mistake on *Pattern* (*Concept*)." then, by tier — same pattern: "This question practises the same pattern, so you can see whether it still comes up."; same error category in another pattern: "…sets the same kind of wrong-answer trap in a different pattern within *Concept*."; otherwise, plainly: "No question for that exact pattern is available right now, so this is a broader *Concept* question." No ids, taxonomy codes, tiers, confidence, provider/prompt, psychological claims, or "fixed/mastered" language (asserted).
+
+### Correction → additional diagnosis boundary (investigated; deliberately NOT built)
+
+Unit 3 stores a correction as `awaiting_diagnosis`. The intended chain (reject + correction → new evidence → diagnosis pass → possible new hypothesis → student confirmation → RepairPlan) cannot be completed safely with the existing pieces:
+- `autopsies.attempt_id` is **unique**: a second hypothesis for the same attempt needs a schema decision (drop the uniqueness, or add a supersedes link and keep the original) — not a patch.
+- The hypothesis generator and its validator are built for *observed facts only*; a student's free text is a different class of input (student-asserted, unverified) and needs its own prompt, its own grounding/safety rules and a token/confirmation path for the second offer.
+- `buildRepairPlan()` correctly refuses anything but `confirmed` (D-039).
+Unit 4 therefore adds **no** correction subsystem. What is guaranteed and tested: a corrected (or rejected) explanation creates no plan, no repair flow and changes no recommendation; the words are preserved exactly for a future diagnosis pass. That pass is the smallest coherent piece of **Unit 5 (or a dedicated unit)** and needs a design decision first.
+
+### Persistence
+
+No schema change. Stored plan status is advanced forward-only; derived status decides. Restart/second instance reconstruct everything from Postgres.
+
+### Tests
+
+Domain: 14 lifecycle tests (`packages/domain/autopsy/test/repairLifecycle.test.ts`: states, run reset, skip, round limit, direct vs broad, ignored evidence, fixed-seed shuffle order-independence, monotonicity). Service level: 20 tests (`packages/practice-api/test/repairPractice.test.ts`: match-tier order, order invariance + 12 concurrent calls, unpublished excluded, diagnosed-tier difficulty, no-repeat + sole-candidate, no-candidate fallback, priority over adaptive, reject/corrected create no repair, one flow with two plans, lifecycle transitions + backwards-refusal, restart reconstruction, recurrence → new plan, isolation, provenance, no metadata/psychology/answer leakage). Existing repair-selection / orchestration suites (selection tiers, malformed exclusion, deterministic tie-breaks) are unchanged and still pass. Real Postgres: 5 repair tests (flow, restart + second instance + 16 concurrent, round-limit completion, reject/correct/isolation, no-candidate fallback).
+
+### Limitations (honest)
+
+- **Seeded content cannot demonstrate a repair.** There is one question per pattern family and each has a different trap, so in the seeded database a repair question is always a broad concept fallback and `demonstrated` is unreachable there; completion is by round limit. Tier behaviour is proven with richer pools in service-level tests, not on seed data.
+- The originally diagnosed question can be served again as a repair question after at least one intervening question (it is a direct-match, and overuse avoidance only starts at 2 attempts). It is not an *immediate* repeat; whether to prefer unseen questions is an open policy question.
+- Lifecycle constants and the "direct match" definition are provisional; speed (`behaviorSignals`) is not persisted so the speed tie-break is inert.
+- Repair-question *quality* depends on content that does not yet exist; no real model has run in this phase (dev-scripted offers).
+- `completed` carries no stored reason.
+
+### What Unit 5 will build (and Unit 4 did NOT)
+
+Unit 5 — **end-to-end Autopsy → Repair hardening**: failure-mode and abuse review of the whole chain; the correction → diagnosis-pass design decision (schema + safe prompt + confirmation); content/pool sufficiency for demonstrable repair; calibration questions on the provisional lifecycle policy; a real-model run when a key exists. **Unit 5 has NOT been started.**

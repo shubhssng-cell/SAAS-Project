@@ -126,6 +126,7 @@ export function createInMemoryDependencies(
     enrollmentReader,
     attemptHistoryReader: attempts,
     repairPlanReader: autopsyStore,
+    repairPlanStatusWriter: autopsyStore,
     errorTaxonomyReader: new InMemoryErrorTaxonomyReader(),
     trainingQuestionReader: new InMemoryTrainingQuestionReader(seed.trainingQuestions),
     questionReader: questions,
@@ -169,6 +170,7 @@ export function createInMemoryDependencies(
  * here identically, never a second, competing construction.
  */
 export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies {
+  const repairPlans = new PrismaRepairPlanRepository(prisma);
   const attempts = new PrismaAttemptRepository(prisma);
   const enrollmentReader = new PrismaEnrollmentReader(prisma);
   const questionReader = new PrismaQuestionReader(prisma);
@@ -176,7 +178,8 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
   const trainingRecommendationDeps: TrainingRecommendationDependencies = {
     enrollmentReader,
     attemptHistoryReader: attempts,
-    repairPlanReader: new PrismaRepairPlanRepository(prisma),
+    repairPlanReader: repairPlans,
+    repairPlanStatusWriter: repairPlans,
     errorTaxonomyReader: new PrismaErrorTaxonomyReader(prisma),
     trainingQuestionReader: new PrismaTrainingQuestionReader(prisma),
     questionReader,
