@@ -14,12 +14,13 @@
   "dependencies": {
     "@ipmat/ai": "*",
     "@ipmat/auth-api": "*",
+    "@ipmat/autopsy": "*",
     "@ipmat/concept-graph": "*",
     "@ipmat/db": "*",
     "@ipmat/enrollment-api": "*",
-    "@ipmat/prep-phase": "*",
     "@ipmat/practice-api": "*",
     "@ipmat/practice-loop": "*",
+    "@ipmat/prep-phase": "*",
     "@ipmat/question-engine": "*"
   },
   "devDependencies": {

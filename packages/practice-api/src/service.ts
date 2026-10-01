@@ -1,11 +1,14 @@
 import { AttemptLifecycleError, type AttemptOwnershipClaim, type AttemptState } from "@ipmat/attempt";
 import { PersistenceError, SerializationFailureError } from "@ipmat/db";
-import { assertEnrollmentOwnership } from "@ipmat/training-recommendation";
+import { applyConfirmationResponse, assertEnrollmentOwnership, type AutopsyHypothesis, type ConfirmationResponse } from "@ipmat/training-recommendation";
 import { toPracticeApiError } from "./errors.js";
 import { toAttemptEvidenceView, toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
 import type {
   AttemptEvidenceView,
   AttemptResultView,
+  HypothesisOfferView,
+  HypothesisResponseInput,
+  HypothesisResponseView,
   PendingAutopsyView,
   PracticeApiDependencies,
   RecommendationView,
@@ -33,6 +36,26 @@ import { assertNonEmptyString, assertValidClaim } from "./validation.js";
  * startedAt`) — exactly the "duration as a trusted fact" this boundary
  * must never allow (C).
  */
+/** How long an issued explanation can be answered. After that (or after anything else invalidates the token) the student is simply offered a fresh one. */
+export const HYPOTHESIS_TOKEN_TTL_MS = 6 * 60 * 60 * 1000;
+export const MAX_CORRECTION_CHARS = 500;
+const MAX_TOKEN_CHARS = 20_000;
+
+interface HypothesisTokenPayload {
+  v: 1;
+  studentId: string;
+  attemptId: string;
+  expiresAtMs: number;
+  hypothesis: AutopsyHypothesis;
+}
+
+function isTokenPayload(value: unknown): value is HypothesisTokenPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  const h = v.hypothesis as Record<string, unknown> | undefined;
+  return v.v === 1 && typeof v.studentId === "string" && typeof v.attemptId === "string" && typeof v.expiresAtMs === "number" && typeof h === "object" && h !== null && typeof h.proposedExplanation === "string" && h.confirmationStatus === "awaiting_confirmation";
+}
+
 export class PracticeApiService {
   constructor(private readonly deps: PracticeApiDependencies) {}
 
@@ -264,6 +287,105 @@ export class PracticeApiService {
         throw new AttemptLifecycleError("attempt_not_found", `No evidence is available for attempt "${input.attemptId}".`);
       }
       return toAttemptEvidenceView(evidence);
+    } catch (error) {
+      if (error instanceof PracticeApiError) throw error;
+      throw toPracticeApiError(error);
+    }
+  }
+
+  /** Shared by the Unit 2 methods: the attempt must exist, belong to this student, and be finalized (nothing before submission). */
+  private async loadFinalizedOwnedAttempt(claim: StudentRequestClaim, attemptId: string): Promise<AttemptState> {
+    const attempt = await this.deps.practiceLoopService.getAttempt(attemptId);
+    if (!attempt) throw new AttemptLifecycleError("attempt_not_found", `No attempt found with id "${attemptId}".`);
+    if (attempt.studentId !== claim.studentId) throw new AttemptLifecycleError("ownership_mismatch", "This attempt does not belong to the requesting student.");
+    if (attempt.status === "in_progress") throw new PracticeApiError("invalid_state", "This attempt has not been finalized yet.", 409);
+    return attempt;
+  }
+
+  /**
+   * Phase 4 Unit 2 -- offers ONE possible explanation for an incorrect, submitted attempt, built from its observation evidence. Never
+   * before submission (409), never for another student's attempt (403). Every failure to produce a safe hypothesis -- no model configured,
+   * a provider error or timeout, malformed/unsafe/ungrounded output -- yields `unavailable` and nothing else: no fabricated text, no raw
+   * model output, no error detail. Stores nothing.
+   */
+  async generateHypothesis(claim: StudentRequestClaim, input: { attemptId: string; now?: string }): Promise<HypothesisOfferView> {
+    assertValidClaim(claim);
+    assertNonEmptyString(input.attemptId, "attemptId");
+    const now = input.now ?? new Date().toISOString();
+
+    try {
+      const attempt = await this.loadFinalizedOwnedAttempt(claim, input.attemptId);
+      if (attempt.status !== "submitted" || attempt.isCorrect !== false) return { status: "not_applicable", attemptId: attempt.id };
+
+      const evidence = await this.deps.trainingRecommendationService.getAttemptObservationEvidence({ studentId: claim.studentId, enrollmentId: claim.enrollmentId, attemptId: attempt.id });
+      if (evidence === null) throw new AttemptLifecycleError("attempt_not_found", `No evidence is available for attempt "${attempt.id}".`);
+
+      const { hypothesisGenerator: generate, hypothesisSealer: sealer } = this.deps;
+      if (!generate || !sealer) return { status: "unavailable", attemptId: attempt.id };
+
+      let hypothesis: AutopsyHypothesis;
+      try {
+        hypothesis = await generate(evidence);
+      } catch {
+        return { status: "unavailable", attemptId: attempt.id }; // provider failure, timeout, schema failure or a rejected proposal
+      }
+      if (hypothesis.attemptId !== attempt.id || hypothesis.confirmationStatus !== "awaiting_confirmation" || hypothesis.supportingEvidence.length === 0) {
+        return { status: "unavailable", attemptId: attempt.id };
+      }
+
+      const payload: HypothesisTokenPayload = { v: 1, studentId: claim.studentId, attemptId: attempt.id, expiresAtMs: Date.parse(now) + HYPOTHESIS_TOKEN_TTL_MS, hypothesis };
+      return {
+        status: "ready",
+        attemptId: attempt.id,
+        hypothesis: { summary: hypothesis.proposedExplanation, supportingEvidence: [...hypothesis.supportingEvidence] },
+        token: sealer.seal(payload)
+      };
+    } catch (error) {
+      if (error instanceof PracticeApiError) throw error;
+      throw toPracticeApiError(error);
+    }
+  }
+
+  /**
+   * Phase 4 Unit 2 -- applies the student's response to EXACTLY the hypothesis that was offered (carried in the sealed token), through the
+   * domain's `applyConfirmationResponse()`. `confirmed` = the student said it matches; `rejected` = it does not; `corrected` = the student's
+   * own words, preserved exactly. Nothing is stored (`persisted: false`): no diagnosis, no RepairPlan. A token that is not authentic,
+   * expired, or issued to a different student/attempt is refused.
+   */
+  async respondToHypothesis(claim: StudentRequestClaim, input: { attemptId: string; token: string; response: HypothesisResponseInput; now?: string }): Promise<HypothesisResponseView> {
+    assertValidClaim(claim);
+    assertNonEmptyString(input.attemptId, "attemptId");
+    assertNonEmptyString(input.token, "token");
+    if (input.token.length > MAX_TOKEN_CHARS) throw new PracticeApiError("invalid_request", "The request was malformed.", 400);
+    const type = (input.response as { type?: unknown } | null)?.type;
+    if (type !== "confirmed" && type !== "rejected" && type !== "corrected") throw new PracticeApiError("invalid_request", "The response must be confirmed, rejected or corrected.", 400);
+    if (type === "corrected") {
+      const text = (input.response as { correctedExplanation?: unknown }).correctedExplanation;
+      if (typeof text !== "string" || text.trim().length === 0 || text.length > MAX_CORRECTION_CHARS) {
+        throw new PracticeApiError("invalid_request", `A correction must be between 1 and ${MAX_CORRECTION_CHARS} characters.`, 400);
+      }
+    }
+    const now = input.now ?? new Date().toISOString();
+
+    try {
+      await this.loadFinalizedOwnedAttempt(claim, input.attemptId);
+      const opened = this.deps.hypothesisSealer?.open(input.token) ?? null;
+      const stale = new PracticeApiError("invalid_state", "This explanation is no longer valid. Please request a new one.", 409);
+      if (!isTokenPayload(opened)) throw stale;
+      if (opened.studentId !== claim.studentId || opened.attemptId !== input.attemptId) {
+        throw new AttemptLifecycleError("ownership_mismatch", "This explanation was not issued for this student and attempt.");
+      }
+      if (Date.parse(now) > opened.expiresAtMs) throw stale;
+
+      const response: ConfirmationResponse = type === "corrected" ? { type: "corrected", correctedExplanation: (input.response as { correctedExplanation: string }).correctedExplanation } : type === "confirmed" ? { type: "confirmed" } : { type: "rejected" };
+      const decided = applyConfirmationResponse(opened.hypothesis, response, { now });
+      return {
+        attemptId: input.attemptId,
+        status: decided.confirmationStatus as "confirmed" | "rejected" | "corrected",
+        studentCorrectionText: decided.studentCorrectionText,
+        hypothesisSummary: decided.proposedExplanation,
+        persisted: false
+      };
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);

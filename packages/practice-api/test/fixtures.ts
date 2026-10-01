@@ -112,6 +112,9 @@ export class World {
   /** Injected so a test can prove `recommendNextTrainingAction()` failures/results propagate through this boundary unchanged, without needing a full published-question pool for every test. */
   trainingRecommendationOverrides: Partial<TrainingRecommendationDependencies> = {};
 
+  /** Phase 4 Unit 2: optional hypothesis generator / sealer injected into the service under test (absent by default). */
+  hypothesis: Pick<PracticeApiDependencies, "hypothesisGenerator" | "hypothesisSealer"> = {};
+
   service(): PracticeApiService {
     const questionReader = new InMemoryQuestionReader(this.questions);
     const enrollmentReader = new InMemoryEnrollmentReader(this.enrollments);
@@ -137,7 +140,8 @@ export class World {
       enrollmentReader,
       questionReader,
       questionContentReader: new InMemoryQuestionContentReader(this.questionContent),
-      autopsyReader: this.autopsy
+      autopsyReader: this.autopsy,
+      ...this.hypothesis
     };
 
     return new PracticeApiService(deps);

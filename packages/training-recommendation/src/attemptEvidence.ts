@@ -73,3 +73,5 @@ export async function composeAttemptObservationEvidence(
 }
 
 export type { ObservationEvidence } from "@ipmat/autopsy";
+export { applyConfirmationResponse, describeObservationEvidence } from "@ipmat/autopsy";
+export type { AutopsyHypothesis, ConfirmationResponse } from "@ipmat/autopsy";

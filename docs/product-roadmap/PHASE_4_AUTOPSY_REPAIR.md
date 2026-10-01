@@ -11,7 +11,7 @@ Numbering is **Phase-4-relative** (Unit 1 … Unit 5); there is no relation to t
 | Unit | Scope | Status |
 |---|---|---|
 | Unit 1 | Autopsy **evidence** (observation only) surfaced in the real student flow | **COMPLETE** (below) |
-| Unit 2 | Hypothesis generation + student confirmation / correction | NOT STARTED |
+| Unit 2 | Hypothesis generation + student confirmation / correction | **COMPLETE** (below) |
 | Unit 3 | Persist confirmed diagnosis + RepairPlan | NOT STARTED |
 | Unit 4 | Targeted repair-question selection + adaptive integration | NOT STARTED |
 | Unit 5 | Full end-to-end Autopsy → Repair → improved-practice hardening | NOT STARTED |
@@ -120,6 +120,108 @@ Default suite (no database): full repository **2012 passed + 50 skipped** across
 - The evidence is not shown on the separate "what the system noticed" (autopsy) screen, which is unchanged and still has no hypothesis source.
 - Real-database and browser verification are opt-in, on a disposable local container.
 
-### What Unit 2 will build (and Unit 1 did NOT)
+### What Unit 2 built (Unit 1 did NOT)
 
-Unit 2 — **hypothesis generation + student confirmation / correction**: produce a real, always-`awaiting_confirmation` hypothesis (the existing `generateHypothesis()` / `autopsy-hypothesis` AI task, behind `@ipmat/ai`'s schema-validated `generateStructured()`, fed by exactly this evidence), present it as a hypothesis — never as a fact — and let the student confirm, reject or correct it through the existing `applyConfirmationResponse()`. Persisting a confirmed diagnosis and creating a RepairPlan are Unit 3. **None of this was started in Unit 1.**
+See Unit 2 below: the hypothesis and the student's confirmation, correction or rejection — still nothing persisted.
+
+## Unit 2 — Hypothesis generation + student confirmation / correction
+
+> **Unit 2 introduces interpretation — but only as a hypothesis.** A model proposes ONE possible explanation from the Unit 1 observation evidence; the application decides whether it may reach a student; the student confirms, rejects or corrects it. The system never converts an inferred explanation into a confirmed diagnosis, and **nothing is persisted**: no diagnosis, no RepairPlan (Unit 3).
+
+### The three layers (and where each lives)
+
+```
+OBSERVATION        what was recorded?                  Unit 1  buildObservationEvidence()      "What was recorded" card
+   ▼
+HYPOTHESIS         what might explain the pattern?     Unit 2  generateObservationHypothesis()  "A possible explanation" card (a guess, labelled as one)
+   ▼
+CONFIRMATION       what does the STUDENT say?          Unit 2  applyConfirmationResponse()      confirm / reject / correct — returned, not stored
+   ▼  (not built)
+CONFIRMED DIAGNOSIS + RepairPlan persisted             Unit 3
+```
+
+`confirmed` means **"the student said this matches"** — not that a model proved a cause. A student's correction is the student's evidence, preserved exactly, and is not forced into any taxonomy.
+
+### What already existed (inspected and reused)
+
+`generateStructured()` and the `autopsy-hypothesis` task + schema (`@ipmat/ai`), `AutopsyHypothesis` / `ConfirmationResponse` / `applyConfirmationResponse()` (the confirmation state machine: `awaiting_confirmation` is the only status a generator can produce; once answered it is terminal), `FixtureProvider`, `AnthropicProvider`, and the Unit 1 evidence. The older `generateHypothesis()` takes the full `AutopsyOutput` (candidate error category from the taxonomy); Unit 2 instead feeds the **Unit 1 observation evidence**, so it is a sibling entry point (`generateObservationHypothesis()`), not a rewrite.
+
+### Responsibilities
+
+| Layer | Owns |
+|---|---|
+| **Model** | proposes one possibility from numbered observed facts; nothing else. It is given no correct answer, no question text, no psychological field; unknowns are listed as unknown. |
+| **Application** (`@ipmat/autopsy` `validateHypothesisCandidate()`, deterministic) | the safety contract: the explanation must be phrased as a possibility; must not state a cause or certainty ("definitely", "because you", "you misunderstood"); must contain no private-thought or psychological claim ("you thought/knew/felt…", unsure, confused, careless, guessed, confidence, effort, "understand…"); **every supporting-evidence entry must be one of the numbered observed facts, quoted verbatim** — an unsupported claim rejects the whole proposal, and what reaches the student is the verbatim fact, never the model's paraphrase. |
+| **`@ipmat/practice-api`** | ownership; nothing before submission; fallbacks (below); the stateless confirmation token; applying the student's response through `applyConfirmationResponse()`; the student-safe view (no `modelConfidence`, no metadata, no error category). |
+| **`apps/api`** | the model + sealing configuration (fail-closed), the HTTP routes. |
+
+### Evidence inputs
+
+The numbered facts are the same sentences as the "What was recorded" card (`describeObservationEvidence()` is now the single source of that wording), plus one generic sentence — "This question was designed around a common wrong-answer pattern." — when the question has a designed trap. The trap's **name stays internal**: it goes to the model in a separate section marked *do not quote this label*, because taxonomy names such as "…_confusion" or "careless_…" describe a question's design, not the student, and must not be put in front of a student. Unknown stays unknown: e.g. answer changes are unrecorded in this flow, so the model is told so and a hypothesis that cites "you changed your answer" is rejected as unsupported. The hypothesis is generated only for a **submitted, incorrect** attempt (correct/skipped/abandoned: `not_applicable`, and the model is never called).
+
+### API
+
+- `POST /v1/attempts/:id/hypothesis` → `{status: "ready", attemptId, hypothesis: {summary, supportingEvidence[]}, token}` | `{status: "not_applicable" | "unavailable", attemptId}`.
+- `POST /v1/attempts/:id/hypothesis/response` with `{token, response: "confirmed" | "rejected" | "corrected", correctedExplanation?}` → `{attemptId, status, studentCorrectionText, hypothesisSummary, persisted: false}`.
+- Both: auth required (401), another student's attempt is refused (403), an attempt still in progress is refused (409 — nothing before submission), an unknown attempt is 404. A correction must be 1–500 characters; bad input is 400.
+
+### Confirmation and correction semantics
+
+- **Confirm** → `confirmed`. **Reject** (no words) → `rejected`, never confirmed. **Correct** (the student's own words) → `corrected`, returned **exactly as typed** (spacing, line breaks, unicode); the proposal is never overwritten. In the UI, "No, something else happened" reveals an optional free-text box; sending it empty is a plain rejection.
+- **The token (no stored state).** Because nothing may be persisted, the exact hypothesis that was shown rides in an opaque, server-sealed token (AES-256-GCM: unreadable and unforgeable by the client) bound to the student and attempt with a 6-hour expiry. The response is applied to precisely what the student saw; a garbage, altered, foreign-secret, expired, or other-student/other-attempt token is refused; a pre-confirmed hypothesis can never be smuggled in (`isTokenPayload` requires `awaiting_confirmation`). Every instance that may answer a response must share `IPMAT_HYPOTHESIS_SECRET`; with it unset a random per-process secret is used (safe: a token from another process is refused and the student is offered a new explanation).
+- Because nothing is stored, **a response is not consumed**: answering twice returns the same result, and "confirm then reject" with one token is possible. Enforcing once-only is part of Unit 3's persistence. If the student never answers, nothing is recorded — the hypothesis simply remains unanswered.
+
+### AI failure behavior
+
+Every failure to produce a safe hypothesis — no model configured, a provider error or timeout, malformed / schema-invalid output, an unsafe or ungrounded proposal, a mismatched attempt id — answers `unavailable` and **nothing else**: no fabricated text, no raw model output, no error detail. The UI then shows "We couldn't suggest an explanation this time. You can carry on." The result, the recorded evidence and Continue are unaffected.
+
+### Model configuration (explicit, fail-closed)
+
+`IPMAT_AI_PROVIDER`: unset/`none` → no model (offers are `unavailable`); `anthropic` → the real provider, **requires `ANTHROPIC_API_KEY` and an explicit `IPMAT_AI_MODEL`** or the server refuses to start; `dev-scripted` → a development scaffold that quotes the observed facts — **it is not AI**, is refused when `NODE_ENV=production`, and exists only so the confirmation flow can be exercised end to end without a paid key. Anything else is a startup error.
+
+### Persistence boundary — what Unit 2 does NOT persist
+
+No `autopsies` row, no confirmed diagnosis, no RepairPlan, no mastery row, no attempt change (verified in tests, on real Postgres, and in the browser). `GET /v1/attempts/:id/autopsy` still reports nothing pending. The existing "see what the system noticed" screen and its un-wired respond path are unchanged.
+
+### Student-facing flow
+
+Result screen, after submission only: **What was recorded** → **A possible explanation** (for an incorrect answer): the label *"This is a guess based on what was recorded — not a fact"*, the proposal, *"What it is based on"* (verbatim recorded facts), *"Is that what happened?"* with **Yes, that's what happened** / **No, something else happened** (→ optional *"What happened instead?"* + **Send my answer**). After answering, a neutral acknowledgement ("Thanks. You said this matches what happened." / "…isn't what happened." / "Here is what you told us:" + the exact words) and "Your answer is only used on this page for now." Continue is always available.
+
+### Psychological-inference and leakage guards
+
+The system prompt forbids the claims; the validator enforces it on the output; the verbatim-fact rule bounds what can be cited; the student sees no `modelConfidence`, model, provider, prompt, error category or metadata; the pre-submission question page has no explanation and the API refuses it; the explanation text is the model's only free text and is scanned before it can be shown. Tests cover each rejection class (certainty, cause, non-possibility, private thought, emotion/state, confidence, carelessness, ability, effort, too short, unsupported evidence, malformed JSON, empty, wrong shape, provider error, timeout).
+
+### Tests
+
+- `@ipmat/autopsy` `observationHypothesis.test.ts` (**27**, fixture provider, no live model): valid proposal; verbatim grounding; prompt contents (facts, unknowns, no key, no psychology); missing evidence not invented; 11 unsafe-explanation classes; unsupported/empty evidence; malformed outputs; provider error and timeout; sanitising of internal notes; every rejection reason; no AI call for correct/skipped/abandoned; confirm / reject / correct (exact, unmutated, single-use) semantics.
+- `@ipmat/practice-api` `hypothesis.test.ts` (**16**, through the real attempt lifecycle): the offer is built from the Unit 1 evidence and is student-safe; not_applicable without a model call; 409 before submission; ownership; every AI-failure path → `unavailable`; the result is unaffected; confirm / reject / correct exactly; idempotence; forged / altered / foreign-secret / expired / replayed-by-another-student / moved-to-another-attempt tokens refused; no response before submission; malformed responses 400; nothing written; no RepairPlan/diagnosis dependency exists.
+- `apps/api` `hypothesis.test.ts` (**11**): fail-closed configuration; the sealed token (round-trip, confidential, tamper-proof, shared-secret across instances); the real HTTP path (409 before, ready after, confirm/reject/correct, 400s, 401/403/404, second instance with the shared secret honors a token, another secret refuses it, no model → unavailable while result and evidence still work).
+- `apps/web` `possibleExplanation.test.ts` (**12**): the adapter's strict mapping (ready / unavailable / not_applicable / malformed / refused; a correction sent exactly; identity never in the body); the component's loading state, guess framing, wording, and slot in the result screen; only an incorrect submitted result gets the card.
+- Real Postgres (**+4**, opt-in): see Validation.
+- Changed existing tests: the Unit 1 evidence guards (the new `designedTrapCode` metadata field).
+
+### Validation
+
+Default suite (no database): full repository **2078 passed + 54 skipped** across 197 files (was 2012 + 50); the 54 skipped are the opt-in real-database suite, run separately on real Postgres: **54/54 passed** (was 50). New tests: autopsy +27, practice-api +16, api +11, web +12, real-Postgres +4. Typecheck (all workspaces), build, lint and `git diff --check` clean. No model was called by any test.
+
+**Real PostgreSQL** (same disposable-container procedure as before: `postgres:16-alpine` on `127.0.0.1:55432`, random throwaway password never written to the repo, database `ipmat_test`; the unrelated Postgres on 5432 was not touched), through the real HTTP server on the real Prisma repositories, with the dev-scripted scaffold as the model: a hypothesis is built from the persisted attempt's evidence and the **original, a restarted and a second instance offer the same one**; a token issued by one instance is honored by the restarted and the second instance (shared secret, no stored state); confirm / reject / correct return the right status and the correction exactly; offering and answering leave `autopsies`, `repair_plans`, `mastery_states` and the attempt row (and its events) unchanged, and `/autopsy` still reports nothing pending; 409 before submission, 403 for another student (offer and response), 401 without a session, 409 for garbage/altered tokens and for a token moved to another attempt; `not_applicable` for correct and skipped attempts; an instance with no model answers `unavailable` while result, evidence and recommendation still work.
+
+**Browser verification** (raw CDP / headless Edge; real `apps/web` + real `apps/api` in Prisma mode + the disposable Postgres; the model is the dev-scripted scaffold, **not AI**; no fixture adapter): **22/22 checks.**
+1. **Incorrect → confirm, with an API restart in between:** before submission there is no explanation card; after submitting, "What was recorded" shows first, then "A possible explanation", labelled *"This is a guess based on what was recorded — not a fact"*, possibility-phrased, citing only recorded facts (verbatim) and the generic design sentence, with "Yes, that's what happened" / "No, something else happened"; no model internals, `undefined`/object leakage, answer-key field or psychological wording in the page. The API process was **killed and restarted**, and confirming still worked (the sealed token is honored by the new process); the acknowledgement states only what the student said, and no autopsy, RepairPlan or mastery row exists; Continue works.
+2. **Reject / correct:** "No" reveals an optional free-text box with no preset categories; the student's correction (including a line break, "—" and "✓") is shown back **exactly as typed**; sending it empty is a plain rejection (not shown as a confirmation); nothing persisted.
+3. **Correct and skipped attempts** show recorded evidence but no explanation; **a refresh** offers the explanation again (nothing was stored), unconfirmed, identical for the same evidence.
+4. **AI unavailable** (API restarted with no model configured): "We couldn't suggest an explanation this time. You can carry on." instead of any explanation; the result, the recorded evidence and Continue are intact; nothing created in the database.
+
+### Limitations
+
+- **No real model was exercised.** No `ANTHROPIC_API_KEY` exists in this environment. Everything above ran with fixture providers and the dev-scripted scaffold (which is not AI); the real-provider path (`AnthropicProvider` through `generateObservationHypothesis()`) is typechecked and reached by configuration but **unverified against a live model**, including how often a real model's output passes the strict validator (it is deliberately strict — failures fall back to "unavailable"). An opt-in smoke test against a real key is the missing step.
+- **Hypothesis quality is limited by its inputs.** The model sees only observed facts and the (internal) designed-trap label; it does not see the question text, the options or the correct answer, so proposals will be generic.
+- **Nothing is stored, so a refresh regenerates** the explanation (a new model call each time the result of an incorrect attempt is opened) and an answered response is not remembered. Persistence, caching and once-only enforcement are Unit 3.
+- **A response is not consumed** (stateless token): see above.
+- The validator is lexical (patterns and verbatim matching); it cannot judge whether a well-formed, grounded proposal is *correct*, only that it is safe in form. The student's confirmation is what makes it meaningful.
+- Answer changes, hints and solution opening remain effectively unobserved in the current flow (Unit 1 limitation).
+- Real-database and browser verification are opt-in, on a disposable local container.
+
+### What Unit 3 will build (and Unit 2 did NOT)
+
+Unit 3 — **persist the confirmed diagnosis + create the RepairPlan**: store the hypothesis and the student's response (confirmed / rejected / corrected, with the exact correction text) using the existing `Autopsy` persistence, enforce once-only responses and cache the offered hypothesis (ending regeneration on refresh), and — **only for a student-confirmed hypothesis** — build a `RepairPlan` through the existing `buildRepairPlan()` (a "corrected" hypothesis is not accepted by it without a further diagnosis pass, D-039). Targeted repair-question selection and adaptive integration are Unit 4. **None of this was started in Unit 2.**

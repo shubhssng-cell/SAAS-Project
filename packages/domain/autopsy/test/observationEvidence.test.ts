@@ -181,11 +181,14 @@ describe("field sources, unknowns, determinism and purity", () => {
   it("NO diagnosis, hypothesis, repair, answer key or psychological field exists anywhere in the object", () => {
     const e = buildObservationEvidence({ evidence: buildEvidence({ isCorrect: false, finalAnswer: "420", hintsUsed: 1 }), question: q, priorAttempts: [prior({ isCorrect: false }), prior({ isCorrect: false })] });
     const text = JSON.stringify(e);
-    expect(text).not.toMatch(/correctAnswer|expectedAnswer|groundTruth|solutionSteps|candidateError|errorCategory|hypothesis|diagnos|repair|trap/i);
+    // `questionContext.designedTrapCode` is the question author's own metadata (observed), not an error category for this student.
+    expect(text).not.toMatch(/correctAnswer|expectedAnswer|groundTruth|solutionSteps|candidateError|errorCategory|hypothesis|diagnos|repair/i);
     // The explicit `unknown` list names confidence/intent ONLY to state they are never collected; everything else must be free of them.
     const { unknown: _unknown, ...observed } = e;
     void _unknown;
-    expect(JSON.stringify(observed)).not.toMatch(/confiden|motivat|anxi|lazy|careless|intelligen|ability|emotion|personality|intent|afraid|feel|understand|confus|unsure|guess/i);
+    // the question author's own trap label (e.g. "..._confusion") is question metadata, not a claim about the student: scan around it
+    const scanned = { ...observed, questionContext: observed.questionContext && { ...observed.questionContext, designedTrapCode: null } };
+    expect(JSON.stringify(scanned)).not.toMatch(/confiden|motivat|anxi|lazy|careless|intelligen|ability|emotion|personality|intent|afraid|feel|understand|confus|unsure|guess/i);
     const keys = collectPaths(e).join(" ").toLowerCase();
     for (const banned of ["confidence", "motivation", "emotion", "intelligence", "ability", "personality", "hypothesis", "diagnosis", "correctanswer"]) {
       expect(keys.includes(banned)).toBe(false);

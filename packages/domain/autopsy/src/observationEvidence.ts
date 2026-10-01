@@ -81,6 +81,8 @@ export interface ObservationEvidence {
     noveltyLevel: string;
     testingModes: string[];
     combinesWithConcepts: string[];
+    /** The error-taxonomy code the question's AUTHOR designed it around (question metadata), or `null`. Not a claim about what this student did. */
+    designedTrapCode: string | null;
   } | null;
   /** `null` when there were no prior attempts to describe (unknown/absent, not a zero-filled summary). */
   history: ObservationHistory | null;
@@ -117,6 +119,7 @@ export const OBSERVATION_FIELD_SOURCES: Record<string, EvidenceSource> = {
   "questionContext.noveltyLevel": "observed",
   "questionContext.testingModes": "observed",
   "questionContext.combinesWithConcepts": "observed",
+  "questionContext.designedTrapCode": "observed",
   "history.priorAttempts": "derived",
   "history.onSameConcept": "derived",
   "history.onSamePatternFamily": "derived",
@@ -221,10 +224,55 @@ export function buildObservationEvidence(input: { evidence: AttemptAutopsyEviden
             difficultyTier: question.difficultyTier,
             noveltyLevel: question.noveltyLevel,
             testingModes: [...question.testingModes],
-            combinesWithConcepts: [...question.combinesWithConcepts]
+            combinesWithConcepts: [...question.combinesWithConcepts],
+            designedTrapCode: question.trapErrorTaxonomyCode
           },
     history,
     fieldSources: { ...OBSERVATION_FIELD_SOURCES },
     unknown
   };
+}
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/**
+ * The ONE place observation evidence becomes plain sentences -- used for the student-facing "What was recorded" card (Unit 1) AND as the
+ * numbered, verbatim facts a hypothesis must cite (Unit 2), so what a hypothesis can claim to rest on is exactly what the student was shown.
+ * Every sentence restates a recorded or derived number; none gives a cause, a label or a judgment beyond the graded verdict. Unknown
+ * values are left out, never defaulted.
+ */
+export function describeObservationEvidence(evidence: ObservationEvidence): string[] {
+  const { outcome, timing, interaction, questionContext, history } = evidence;
+  const observations: string[] = [];
+
+  if (outcome.status === "submitted") {
+    if (outcome.selectedAnswer !== null) observations.push(`Your selected answer was ${outcome.selectedAnswer}.`);
+    if (outcome.verdict === "correct") observations.push("Your answer was correct.");
+    if (outcome.verdict === "incorrect") observations.push("Your answer was incorrect.");
+  } else if (outcome.status === "skipped") {
+    observations.push("You skipped this question.");
+  } else {
+    observations.push("This attempt ended without a submitted answer.");
+  }
+
+  if (timing.elapsedSeconds !== null) observations.push(`You took ${timing.elapsedSeconds} ${plural(timing.elapsedSeconds, "second", "seconds")}.`);
+  if (timing.expectedSeconds !== null) observations.push(`The expected time was ${timing.expectedSeconds} ${plural(timing.expectedSeconds, "second", "seconds")}.`);
+  if (timing.timeRatio !== null) observations.push(`That is about ${timing.timeRatio.toFixed(1)} times the expected time.`);
+
+  if (interaction.answerChangeCount !== null && interaction.answerChangeCount >= 1) {
+    observations.push(`You changed your answer ${interaction.answerChangeCount === 1 ? "once" : `${interaction.answerChangeCount} times`} before submitting.`);
+  }
+  if (interaction.hintEventsRecorded > 0) observations.push(`You opened ${interaction.hintEventsRecorded} ${plural(interaction.hintEventsRecorded, "hint", "hints")}.`);
+  if (interaction.solutionOpenedRecorded) observations.push("You opened the solution during this attempt.");
+
+  if (questionContext !== null) {
+    observations.push(`This question was in ${questionContext.conceptName}, pattern "${questionContext.patternFamilyName}", at the ${questionContext.difficultyTier} level.`);
+  }
+  const onConcept = history?.onSameConcept;
+  if (questionContext !== null && onConcept !== undefined && onConcept.attempts > 0) {
+    const parts = [`${onConcept.correct} correct`, `${onConcept.incorrect} incorrect`];
+    if (onConcept.skipped > 0) parts.push(`${onConcept.skipped} skipped`);
+    observations.push(`Before this attempt you had ${onConcept.attempts} earlier ${plural(onConcept.attempts, "attempt", "attempts")} on ${questionContext.conceptName}: ${parts.join(", ")}.`);
+  }
+  return observations;
 }

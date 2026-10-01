@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { AttemptEvidenceViewModel, AttemptResultViewModel } from "../adapter/index.js";
 import { Button, Card, Screen } from "../design/index.js";
 
@@ -30,11 +30,14 @@ function EvidenceCard({ evidence }: { evidence: AttemptEvidenceViewModel | null 
 export function ResultScreen({
   result,
   evidence,
+  explanation,
   onSeeWhatHappened,
   onContinue
 }: {
   result: AttemptResultViewModel;
   evidence?: AttemptEvidenceViewModel | null;
+  /** Phase 4 Unit 2: the optional "possible explanation" card (an incorrect, submitted attempt only). Rendered after the recorded evidence. */
+  explanation?: ReactNode;
   onSeeWhatHappened: () => void;
   onContinue: () => void;
 }) {
@@ -124,6 +127,8 @@ export function ResultScreen({
       </Card>
 
       <EvidenceCard evidence={evidence} />
+
+      {explanation}
 
       <div className="btn-row">
         {result.hasAutopsy ? (

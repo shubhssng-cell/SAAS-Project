@@ -131,6 +131,20 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: async (service, claim, body, query, params) => service.getAttemptResult(claim, { attemptId: params.attemptId })
   },
   {
+    method: "POST",
+    pattern: /^\/v1\/attempts\/([^/]+)\/hypothesis$/,
+    handler: async (service, claim, body, query, params) => service.generateHypothesis(claim, { attemptId: params.attemptId })
+  },
+  {
+    method: "POST",
+    pattern: /^\/v1\/attempts\/([^/]+)\/hypothesis\/response$/,
+    handler: async (service, claim, body, query, params) => {
+      const type = stringField(body, query, "response");
+      const response = type === "corrected" ? { type: "corrected" as const, correctedExplanation: stringField(body, query, "correctedExplanation") } : { type: type as "confirmed" | "rejected" };
+      return service.respondToHypothesis(claim, { attemptId: params.attemptId, token: stringField(body, query, "token"), response });
+    }
+  },
+  {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/evidence$/,
     handler: async (service, claim, body, query, params) => service.getAttemptEvidence(claim, { attemptId: params.attemptId })

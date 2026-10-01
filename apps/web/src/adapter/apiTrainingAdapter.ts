@@ -4,6 +4,9 @@ import { createSingleFlight } from "../practice/singleFlight.js";
 import type {
   AttemptEvidenceViewModel,
   AttemptResultViewModel,
+  HypothesisOfferViewModel,
+  HypothesisResponseInput,
+  HypothesisResultViewModel,
   AutopsyResponse,
   AutopsyViewModel,
   DashboardViewModel,
@@ -167,6 +170,25 @@ function readAttemptEvidence(body: unknown): AttemptEvidenceViewModel {
   return { attemptId: value.attemptId, observations, notRecorded };
 }
 
+function readHypothesisOffer(body: unknown): HypothesisOfferViewModel {
+  const value = asObject(body);
+  if (value.status === "not_applicable" || value.status === "unavailable") return { status: value.status };
+  const h = asObject(value.hypothesis);
+  const evidence = h.supportingEvidence;
+  if (value.status !== "ready" || typeof h.summary !== "string" || h.summary.length === 0 || typeof value.token !== "string" || !Array.isArray(evidence) || !evidence.every((e) => typeof e === "string")) {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: "The explanation response was malformed." });
+  }
+  return { status: "ready", summary: h.summary, supportingEvidence: evidence as string[], token: value.token };
+}
+
+function readHypothesisResult(body: unknown): HypothesisResultViewModel {
+  const value = asObject(body);
+  if (value.status !== "confirmed" && value.status !== "rejected" && value.status !== "corrected") {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: "The confirmation response was malformed." });
+  }
+  return { status: value.status, studentCorrectionText: typeof value.studentCorrectionText === "string" ? value.studentCorrectionText : null };
+}
+
 function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { summary: string; supportingEvidence: string[] } | null } {
   const value = asObject(body);
   const pending = value.pending === true;
@@ -273,6 +295,16 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
 
     async getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel> {
       return readAttemptEvidence(await get(`/v1/attempts/${encodeURIComponent(attemptId)}/evidence`));
+    },
+
+    async requestHypothesis(attemptId: string): Promise<HypothesisOfferViewModel> {
+      return readHypothesisOffer(await post(`/v1/attempts/${encodeURIComponent(attemptId)}/hypothesis`));
+    },
+
+    async respondToHypothesis(input: { attemptId: string; token: string; response: HypothesisResponseInput }): Promise<HypothesisResultViewModel> {
+      const body: Record<string, unknown> = { token: input.token, response: input.response.type };
+      if (input.response.type === "corrected") body.correctedExplanation = input.response.correctedExplanation;
+      return readHypothesisResult(await post(`/v1/attempts/${encodeURIComponent(input.attemptId)}/hypothesis/response`, body));
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

@@ -308,7 +308,8 @@ export const HYPOTHESIS_ERROR_CODES = [
   "malformed_correction",
   "not_confirmed",
   "mismatched_attempt",
-  "no_error_category"
+  "no_error_category",
+  "unsafe_hypothesis_output"
 ] as const;
 
 export type HypothesisErrorCode = (typeof HYPOTHESIS_ERROR_CODES)[number];

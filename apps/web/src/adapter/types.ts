@@ -73,6 +73,22 @@ export interface AttemptEvidenceViewModel {
   notRecorded: string[];
 }
 
+/**
+ * Phase 4 Unit 2 -- a POSSIBLE explanation (a hypothesis, never a fact) for an incorrect attempt. `token` is opaque and only echoed back with the
+ * student's response. `not_applicable` = nothing to explain; `unavailable` = none could be offered (the result and Continue are unaffected).
+ */
+export type HypothesisOfferViewModel =
+  | { status: "ready"; summary: string; supportingEvidence: string[]; token: string }
+  | { status: "not_applicable" | "unavailable" };
+
+export type HypothesisResponseInput = { type: "confirmed" } | { type: "rejected" } | { type: "corrected"; correctedExplanation: string };
+
+/** What the student's response produced. `corrected` carries their own words exactly. Nothing is stored in Unit 2. */
+export interface HypothesisResultViewModel {
+  status: "confirmed" | "rejected" | "corrected";
+  studentCorrectionText: string | null;
+}
+
 export interface AutopsyViewModel {
   attemptId: string;
   /** Plain-language OBSERVED facts only — never a claim about why. */
@@ -93,6 +109,10 @@ export interface TrainingRecommendationAdapter {
   getAttemptResult(attemptId: string): Promise<AttemptResultViewModel>;
   /** Phase 4 Unit 1: the observation-only evidence for a FINALIZED attempt. Rejects (never guesses) when it is unavailable, e.g. before submission. */
   getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel>;
+  /** Phase 4 Unit 2: asks for ONE possible explanation for a finalized, incorrect attempt. Never invents one: it resolves `unavailable` instead. */
+  requestHypothesis(attemptId: string): Promise<HypothesisOfferViewModel>;
+  /** Phase 4 Unit 2: answers the offered explanation (confirm / reject / correct in the student's own words). Rejects when it could not be recorded. */
+  respondToHypothesis(input: { attemptId: string; token: string; response: HypothesisResponseInput }): Promise<HypothesisResultViewModel>;
   getAutopsy(attemptId: string): Promise<AutopsyViewModel>;
   /** Applies the student's response to the pending hypothesis and returns the resulting recommendation — a confirmed hypothesis may (transparently, via the real domain layer) become a targeted repair recommendation. */
   respondToAutopsy(input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel>;

@@ -1,6 +1,7 @@
 import { createPrismaClient } from "@ipmat/db";
 import { buildDevContentSeed } from "./devContent.js";
 import { resolvePersistenceMode } from "./persistence.js";
+import { createHypothesisDependencies } from "./hypothesisWiring.js";
 import { createServer } from "./server.js";
 import { createInMemoryDependencies, createPrismaDependencies } from "./wiring.js";
 
@@ -18,7 +19,7 @@ const mode = resolvePersistenceMode(process.env);
 if (mode.kind === "prisma") {
   const prisma = createPrismaClient(mode.databaseUrl);
   await prisma.$connect(); // fail fast if the database is unreachable or the credentials are wrong
-  const server = createServer(createPrismaDependencies(prisma));
+  const server = createServer({ ...createPrismaDependencies(prisma), ...createHypothesisDependencies(process.env) });
   server.listen(PORT, () => {
     console.log(`@ipmat/api listening on http://localhost:${PORT} (Prisma repositories; database connected)`);
   });
@@ -32,7 +33,7 @@ if (mode.kind === "prisma") {
 } else {
   /** Phase 2 Unit 1: development-only published practice content (see `devContent.ts`) -- never production data. */
   const devContent = await buildDevContentSeed();
-  const server = createServer(createInMemoryDependencies(devContent));
+  const server = createServer({ ...createInMemoryDependencies(devContent), ...createHypothesisDependencies(process.env) });
   server.listen(PORT, () => {
     console.log(
       `@ipmat/api listening on http://localhost:${PORT} (in-memory dependencies, no database; ${devContent.questionContent.length} development-only published questions)`

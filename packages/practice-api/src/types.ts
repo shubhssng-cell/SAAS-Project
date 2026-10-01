@@ -1,4 +1,5 @@
 import type { AutopsyRepository, EnrollmentReader, InProgressAttemptReader, QuestionContentReader, QuestionReader } from "@ipmat/db";
+import type { AutopsyHypothesis, ObservationEvidence } from "@ipmat/training-recommendation";
 import type { PracticeLoopService } from "@ipmat/practice-loop";
 import type { TrainingRecommendationService } from "@ipmat/training-recommendation";
 
@@ -16,6 +17,23 @@ import type { TrainingRecommendationService } from "@ipmat/training-recommendati
  * transport (e.g. `apps/api`) wires this once, from either in-memory or
  * Prisma-backed repositories; this package itself never chooses which.
  */
+/**
+ * Phase 4 Unit 2 -- injected, optional, and ABSENT by default: with no generator a hypothesis is reported as unavailable, never fabricated.
+ * The generator owns the model call and the safety validation (`@ipmat/autopsy`'s `generateObservationHypothesis()`, wired in `apps/api`);
+ * this package never imports an AI SDK.
+ */
+export type HypothesisGenerator = (observation: ObservationEvidence) => Promise<AutopsyHypothesis>;
+
+/**
+ * Seals/opens the confirmation token (authenticated encryption, wired in `apps/api`). Unit 2 stores NOTHING: the exact hypothesis that was
+ * shown rides in this opaque token so the student's response is applied to precisely what they saw, and can be neither forged nor altered.
+ * `open()` returns `null` for any token that is not authentic.
+ */
+export interface HypothesisSealer {
+  seal(payload: unknown): string;
+  open(token: string): unknown | null;
+}
+
 export interface PracticeApiDependencies {
   trainingRecommendationService: TrainingRecommendationService;
   practiceLoopService: PracticeLoopService;
@@ -27,6 +45,9 @@ export interface PracticeApiDependencies {
   /** Server-side DISPLAY content — never carries an answer key. */
   questionContentReader: QuestionContentReader;
   autopsyReader: Pick<AutopsyRepository, "findByAttemptId">;
+  /** Phase 4 Unit 2 (optional). Both must be present for a hypothesis to be offered. */
+  hypothesisGenerator?: HypothesisGenerator | null;
+  hypothesisSealer?: HypothesisSealer | null;
 }
 
 /** The identity claim every operation requires — the same "caller supplies studentId/enrollmentId, this layer verifies the relationship" trust boundary `@ipmat/training-recommendation`/`@ipmat/practice-loop` already have. Resolving this FROM a real authenticated session is explicitly future work (D-004, still open) — this boundary adds no new trust assumption beyond what those two services already require of their own callers. */
@@ -117,6 +138,32 @@ export interface AttemptEvidenceView {
   context: { conceptName: string; patternFamilyName: string; difficultyTier: string } | null;
   history: { priorAttempts: number; onConcept: { attempts: number; correct: number; incorrect: number; skipped: number } } | null;
   notRecorded: string[];
+}
+
+/**
+ * Phase 4 Unit 2 -- a POSSIBLE explanation for an incorrect attempt, offered for the student to confirm, reject or correct. It is a
+ * hypothesis, never a diagnosis: `ready` carries only the explanation text, the verbatim observed facts it cites, and the opaque token
+ * needed to answer it. It never carries `modelConfidence`, the model/provider, prompts, an error category, or an answer key.
+ * `not_applicable` = nothing to explain (not an incorrect submitted attempt); `unavailable` = no explanation could be offered right now
+ * (no model configured, a provider failure, or an unsafe/ungrounded proposal) -- the result and Continue are unaffected.
+ */
+export type HypothesisOfferView =
+  | { status: "ready"; attemptId: string; hypothesis: { summary: string; supportingEvidence: string[] }; token: string }
+  | { status: "not_applicable" | "unavailable"; attemptId: string };
+
+export type HypothesisResponseInput = { type: "confirmed" } | { type: "rejected" } | { type: "corrected"; correctedExplanation: string };
+
+/**
+ * What the student's response produced. `confirmed` means ONLY "the student said this matches"; it is not proof of a cause. `persisted`
+ * is always `false` in Unit 2: nothing is stored and no RepairPlan exists (Unit 3 persists the confirmed diagnosis).
+ */
+export interface HypothesisResponseView {
+  attemptId: string;
+  status: "confirmed" | "rejected" | "corrected";
+  /** The student's own words, exactly as submitted -- only when `status === "corrected"`. */
+  studentCorrectionText: string | null;
+  hypothesisSummary: string;
+  persisted: false;
 }
 
 /**

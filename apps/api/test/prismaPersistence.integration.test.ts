@@ -5,6 +5,7 @@ import { PersistenceError, PrismaAttemptRepository, createPrismaClient } from "@
 import { startAttempt } from "@ipmat/attempt";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHypothesisDependencies } from "../src/hypothesisWiring.js";
 import { createServer } from "../src/server.js";
 import { createPrismaDependencies } from "../src/wiring.js";
 
@@ -44,10 +45,13 @@ interface Instance {
   close: () => Promise<void>;
 }
 
-async function startInstance(): Promise<Instance> {
+/** Every instance shares the hypothesis secret (as every real instance that may answer a student's response must). `noModel` simulates a deployment with no AI configured. */
+const HYPOTHESIS_ENV = { IPMAT_AI_PROVIDER: "dev-scripted", IPMAT_HYPOTHESIS_SECRET: "integration-test-secret-0123456789" };
+
+async function startInstance(options: { noModel?: boolean } = {}): Promise<Instance> {
   const prisma = createPrismaClient(DATABASE_URL!);
   await prisma.$connect();
-  const server = createServer(createPrismaDependencies(prisma));
+  const server = createServer({ ...createPrismaDependencies(prisma), ...createHypothesisDependencies(options.noModel ? { IPMAT_HYPOTHESIS_SECRET: HYPOTHESIS_ENV.IPMAT_HYPOTHESIS_SECRET } : HYPOTHESIS_ENV) });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
@@ -1053,6 +1057,113 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     expect(await count()).toEqual({ autopsies: 0, repairPlans: 0, mastery: 0 });
     const autopsy = await call(a, "GET", `/v1/attempts/${attemptId}/autopsy`, s.cookie);
     expect(autopsy.json).toMatchObject({ pending: false, hypothesis: null }); // no hypothesis exists: evidence is not one
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Phase 4 Unit 2 -- HYPOTHESIS + CONFIRMATION on real Postgres. The hypothesis input is the Unit 1 observation evidence, rebuilt from the
+  // persisted attempt on every request; the offer/response endpoints WRITE NOTHING (no autopsy, no RepairPlan, no mastery row, no attempt
+  // change). The model is the "dev-scripted" scaffold (it is not AI): this proves the pipeline, the boundaries and the persistence
+  // behavior -- not the quality of a real model's proposals.
+  // ---------------------------------------------------------------------------------------------
+
+  const hypothesisOf = (instance: Instance, cookie: string, attemptId: string) => call(instance, "POST", `/v1/attempts/${attemptId}/hypothesis`, cookie, {});
+  const respondOf = (instance: Instance, cookie: string, attemptId: string, body: Record<string, unknown>) => call(instance, "POST", `/v1/attempts/${attemptId}/hypothesis/response`, cookie, body);
+  const GENERIC_PATTERN = "This question was designed around a common wrong-answer pattern.";
+  const writesFor = async (studentId: string) => ({
+    autopsies: await a.prisma.autopsy.count({ where: { attempt: { studentId } } }),
+    repairPlans: await a.prisma.repairPlan.count({ where: { studentId } }),
+    mastery: await a.prisma.masteryState.count({ where: { studentId } })
+  });
+
+  it("PHASE 4 UNIT 2: a hypothesis is built from the persisted attempt's evidence; a restarted and a second instance offer the same one, and a token from one is honored by the others", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-persist");
+    const attemptId = await startAndSubmit(a, s.cookie, real.successive, "wrong");
+    const evidence = await evidenceOf(a, s.cookie, attemptId);
+    const row = await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId } });
+
+    const offer = await hypothesisOf(a, s.cookie, attemptId);
+    expect(offer.status).toBe(200);
+    expect(offer.json.status).toBe("ready");
+    expect(Object.keys(offer.json).sort()).toEqual(["attemptId", "hypothesis", "status", "token"]);
+    const hypothesis = offer.json.hypothesis as { summary: string; supportingEvidence: string[] };
+    expect(hypothesis.summary).toMatch(/\bmay\b/);
+    expect(hypothesis.supportingEvidence).toContain(`Your selected answer was ${row.chosenAnswer}.`);
+    // grounded: every cited fact is something the student was shown (or the generic designed-pattern sentence) -- never invented
+    for (const line of hypothesis.supportingEvidence) expect((evidence.json.observations as string[]).includes(line) || line === GENERIC_PATTERN).toBe(true);
+    expect(JSON.stringify(offer.json)).not.toMatch(/modelConfidence|generationMetadata|promptVersion|dev-scripted|proposedErrorCategory|correctAnswer|solutionSteps/i);
+
+    const restarted = await startInstance(); // nothing but the database carries over
+    try {
+      const again = await hypothesisOf(restarted, s.cookie, attemptId);
+      expect((again.json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
+      const second = await hypothesisOf(b, s.cookie, attemptId);
+      expect((second.json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
+      // a token issued by instance A is answered by the restarted instance and by the second instance (shared secret, no stored state)
+      expect((await respondOf(restarted, s.cookie, attemptId, { token: offer.json.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", persisted: false });
+      expect((await respondOf(b, s.cookie, attemptId, { token: offer.json.token, response: "rejected" })).json).toMatchObject({ status: "rejected", studentCorrectionText: null });
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("PHASE 4 UNIT 2: confirm / reject / correct -- the correction is returned exactly; nothing is written (no autopsy, RepairPlan, mastery row, or attempt change)", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-nowrite");
+    const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    const before = { writes: await writesFor(s.studentId), attempt: JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } })) };
+    expect(before.writes).toEqual({ autopsies: 0, repairPlans: 0, mastery: 0 });
+
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+    const words = "  I used the new value — not the original.\nSecond line ✓ ";
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", persisted: false });
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "rejected" })).json).toMatchObject({ status: "rejected" });
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: words })).json).toMatchObject({ status: "corrected", studentCorrectionText: words });
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: "  " })).status).toBe(400);
+
+    expect(await writesFor(s.studentId)).toEqual(before.writes);
+    expect(JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } }))).toBe(before.attempt);
+    expect((await call(a, "GET", `/v1/attempts/${attemptId}/autopsy`, s.cookie)).json).toMatchObject({ pending: false, hypothesis: null });
+  });
+
+  it("PHASE 4 UNIT 2: nothing before submission (409), nothing for another student (403), no session (401), forged/garbage tokens refused (409), not_applicable for correct and skipped attempts", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-bounds");
+    const open = await call(a, "POST", "/v1/attempts", s.cookie, { questionId: real.point });
+    const openId = open.json.attemptId as string;
+    expect((await hypothesisOf(a, s.cookie, openId)).status).toBe(409);
+    expect((await respondOf(a, s.cookie, openId, { token: "x", response: "confirmed" })).status).toBe(409);
+    await call(a, "POST", `/v1/attempts/${openId}/skip`, s.cookie, { questionId: real.point });
+    expect((await hypothesisOf(a, s.cookie, openId)).json).toMatchObject({ status: "not_applicable" });
+    const correctId = await startAndSubmit(a, s.cookie, real.successive, "correct");
+    expect((await hypothesisOf(a, s.cookie, correctId)).json).toMatchObject({ status: "not_applicable" });
+
+    const wrongId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, wrongId)).json as { token: string };
+    const other = await newStudent(a, "hyp-bounds-other");
+    expect((await hypothesisOf(a, other.cookie, wrongId)).status).toBe(403);
+    expect((await respondOf(a, other.cookie, wrongId, { token: offer.token, response: "confirmed" })).status).toBe(403);
+    expect((await call(a, "POST", `/v1/attempts/${wrongId}/hypothesis`, undefined, {})).status).toBe(401);
+    expect((await respondOf(a, s.cookie, wrongId, { token: "garbage", response: "confirmed" })).status).toBe(409);
+    expect((await respondOf(a, s.cookie, wrongId, { token: offer.token.slice(0, -3) + "AAA", response: "confirmed" })).status).toBe(409);
+    // the token also cannot be moved onto another of this student's attempts
+    const otherAttempt = await startAndSubmit(a, s.cookie, real.successive, "wrong");
+    expect((await respondOf(a, s.cookie, otherAttempt, { token: offer.token, response: "confirmed" })).status).toBe(403);
+  });
+
+  it("PHASE 4 UNIT 2: with no model configured the offer is 'unavailable' (nothing fabricated) and the result, evidence and Continue path still work", async () => {
+    const real = await familyIds();
+    const noModel = await startInstance({ noModel: true });
+    try {
+      const s = await newStudent(noModel, "hyp-nomodel");
+      const attemptId = await startAndSubmit(noModel, s.cookie, real.reverse, "wrong");
+      expect((await hypothesisOf(noModel, s.cookie, attemptId)).json).toEqual({ status: "unavailable", attemptId });
+      expect((await call(noModel, "GET", `/v1/attempts/${attemptId}/result`, s.cookie)).status).toBe(200);
+      expect((await evidenceOf(noModel, s.cookie, attemptId)).status).toBe(200);
+      expect((await call(noModel, "POST", "/v1/recommendation", s.cookie)).status).toBe(200);
+    } finally {
+      await noModel.close();
+    }
   });
 
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {

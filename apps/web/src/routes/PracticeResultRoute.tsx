@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isSessionExpiredError, type AttemptEvidenceViewModel, type AttemptResultViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
+import { PossibleExplanation } from "../components/PossibleExplanation.js";
 import { ResultScreen } from "../components/ResultScreen.js";
 import { Button, LoadingState, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
@@ -105,5 +106,9 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
     );
   }
 
-  return <ResultScreen result={state.result} evidence={evidence} onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
+  return <ResultScreen
+      result={state.result}
+      evidence={evidence}
+      explanation={state.result.status === "submitted" && !state.result.isCorrect ? <PossibleExplanation adapter={adapter} attemptId={state.result.attemptId} /> : null}
+      onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
 }

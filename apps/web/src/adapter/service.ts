@@ -22,7 +22,7 @@ import { computeMasteryState, type MasteryAttemptRecord } from "@ipmat/mastery";
 import { orchestrateNextTrainingAction, type ActiveRepairPlanContext, type TrainingCandidateQuestion } from "@ipmat/training-orchestration";
 import { CONCEPT_ID, CONCEPT_NAME, ENROLLMENT_ID, ERROR_TAXONOMY, getQuestion, QUESTION_ORDER, STUDENT_ID } from "./fixtures.js";
 import { describeObservations, toRecommendationViewModel } from "./presentation.js";
-import type { AttemptEvidenceViewModel, AttemptResultViewModel, AutopsyResponse, AutopsyViewModel, DashboardViewModel, QuestionViewModel, RecommendationViewModel, TrainingRecommendationAdapter } from "./types.js";
+import type { AttemptEvidenceViewModel, AttemptResultViewModel, HypothesisOfferViewModel, HypothesisResultViewModel, AutopsyResponse, AutopsyViewModel, DashboardViewModel, QuestionViewModel, RecommendationViewModel, TrainingRecommendationAdapter } from "./types.js";
 
 /**
  * Fixture-backed implementation of `TrainingRecommendationAdapter`. Every
@@ -188,6 +188,15 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
     async getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel> {
       // The fixture adapter has no persisted history to observe; it never invents evidence.
       throw new Error(`Attempt evidence is not available from the fixture adapter (attempt "${attemptId}").`);
+    },
+
+    async requestHypothesis(): Promise<HypothesisOfferViewModel> {
+      // The fixture adapter has no model and never invents an explanation.
+      return { status: "unavailable" };
+    },
+
+    async respondToHypothesis(): Promise<HypothesisResultViewModel> {
+      throw new Error("The fixture adapter has no explanation to respond to.");
     },
 
     async getAutopsy(attemptId: string): Promise<AutopsyViewModel> {

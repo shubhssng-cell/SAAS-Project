@@ -9,3 +9,4 @@ export * from "./hypothesis.js";
 export * from "./repairPlan.js";
 export * from "./persistence.js";
 export * from "./observationEvidence.js";
+export * from "./observationHypothesis.js";
