@@ -25,6 +25,17 @@ export interface CalculationGymRequirement extends TrainingRequirement {
   minComputationalLoad: number;
   requireMultiStep: boolean;
   requireTimePressured: boolean;
+  /**
+   * Phase 5 Unit 2 (docs/DECISIONS.md D-076) -- the stage's SHAPE, restated from `progression.ts`'s own evidence definitions so that
+   * what a stage SERVES is exactly what counts as that stage's progression evidence. Without these, a "foundational" session could be
+   * served a heavy question (the exposure tie-break ranks before load proximity) and a "mixed" session a time-pressured one -- neither
+   * counts toward the stage it was served at, so progression could stall. All optional: absent means no such constraint (the original
+   * D-054 behavior), so a requirement built without them still selects exactly as before.
+   */
+  /** Exclusive ceiling: a qualifying question's `computationalLoad` must be strictly below this. */
+  maxComputationalLoad?: number;
+  excludeMultiStep?: boolean;
+  excludeTimePressured?: boolean;
 }
 
 export interface ComputationalLoadSlice {

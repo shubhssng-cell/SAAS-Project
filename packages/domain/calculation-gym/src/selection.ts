@@ -18,6 +18,9 @@ function qualifies(candidate: TrainingCandidateQuestion, requirement: Calculatio
   if (candidate.validationState !== "published") return false;
   if (candidate.question.conceptName !== requirement.targetConceptName) return false;
   if (candidate.question.difficultyDimensions.computationalLoad < requirement.minComputationalLoad) return false;
+  if (requirement.maxComputationalLoad !== undefined && candidate.question.difficultyDimensions.computationalLoad >= requirement.maxComputationalLoad) return false;
+  if (requirement.excludeMultiStep && candidate.question.testingModes.includes("multi_step")) return false;
+  if (requirement.excludeTimePressured && candidate.question.testingModes.includes("time_pressured")) return false;
   if (requirement.requireMultiStep && !candidate.question.testingModes.includes("multi_step")) return false;
   if (requirement.requireTimePressured && !candidate.question.testingModes.includes("time_pressured")) return false;
   return true;

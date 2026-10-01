@@ -126,10 +126,37 @@ export interface TrainingSystemCardViewModel {
 
 export type TrainingCompletionViewModel = { kind: "fixed_question_count"; questionCount: number } | { kind: "fixed_duration"; durationSeconds: number };
 
+export interface TrainingStageViewModel {
+  key: string;
+  label: string;
+  summary: string;
+  position: number;
+  total: number;
+}
+
+export interface TrainingStageChangeViewModel {
+  from: TrainingStageViewModel;
+  to: TrainingStageViewModel;
+  direction: "forward" | "back";
+  note: string;
+}
+
+/** Observable counts and server-measured times only -- never a score or a claim of improvement. */
+export interface TrainingSessionSummaryViewModel {
+  submittedCount: number;
+  skippedCount: number;
+  correctCount: number;
+  incorrectCount: number;
+  totalTimeSeconds: number;
+  expectedTimeSeconds: number;
+}
+
 export interface TrainingSessionViewModel {
   sessionId: string;
   systemId: string;
   systemLabel: string;
+  /** "Calculation Gym" for Calculation; otherwise "<label> training". */
+  systemTitle: string;
   objective: { statement: string; targetConceptName: string | null };
   status: "active" | "completed" | "abandoned";
   completion: TrainingCompletionViewModel;
@@ -143,6 +170,9 @@ export interface TrainingSessionViewModel {
     completionReached: boolean;
     hasOpenQuestion: boolean;
   };
+  /** The system's current stage, if it has stages and the server could determine one. */
+  stage: TrainingStageViewModel | null;
+  summary: TrainingSessionSummaryViewModel;
 }
 
 export interface TrainingHubViewModel {
@@ -151,7 +181,7 @@ export interface TrainingHubViewModel {
 }
 
 export type TrainingNextViewModel =
-  | { status: "question"; session: TrainingSessionViewModel; question: QuestionViewModel }
+  | { status: "question"; session: TrainingSessionViewModel; question: QuestionViewModel; stageTransition: TrainingStageChangeViewModel | null }
   | { status: "completed"; session: TrainingSessionViewModel }
   | { status: "no_question"; session: TrainingSessionViewModel; message: string };
 

@@ -38,14 +38,21 @@ export class TrainingRecommendationService {
   async runTrainingSystems(
     request: TrainingRecommendationRequest,
     systemIds: readonly string[],
-    options: { excludeQuestionIds?: readonly string[] } = {}
+    options: { excludeQuestionIds?: readonly string[]; excludeAttemptIds?: readonly string[] } = {}
   ): Promise<TrainingSystemRun[]> {
     const input = await composeTrainingOrchestrationInput(this.deps, request);
     const context = toTrainingSystemContext(input);
     // `excludeQuestionIds` only narrows the already-published candidate POOL (e.g. "not a question this session already used");
     // it adds no ranking and every provider still decides applicability and selection itself.
     const excluded = new Set(options.excludeQuestionIds ?? []);
-    const scoped = excluded.size === 0 ? context : { ...context, candidates: context.candidates.filter((candidate) => !excluded.has(candidate.question.questionId)) };
+    // `excludeAttemptIds` re-runs a system "as of before these attempts" (Phase 5 Unit 2, D-076): it lets the caller reconstruct the
+    // stage a question was SERVED at from persisted history, without storing any stage. Nothing is written or cached.
+    const excludedAttempts = new Set(options.excludeAttemptIds ?? []);
+    const scoped = {
+      ...context,
+      candidates: excluded.size === 0 ? context.candidates : context.candidates.filter((candidate) => !excluded.has(candidate.question.questionId)),
+      attemptRecords: excludedAttempts.size === 0 ? context.attemptRecords : context.attemptRecords.filter((record) => !excludedAttempts.has(record.contribution.attemptId))
+    };
     return systemIds.map((systemId) => runTrainingSystem(systemId, scoped));
   }
 

@@ -17,7 +17,9 @@ import type {
   TrainingHubViewModel,
   TrainingNextViewModel,
   TrainingRecommendationAdapter,
-  TrainingSessionViewModel
+  TrainingSessionViewModel,
+  TrainingStageChangeViewModel,
+  TrainingStageViewModel
 } from "./types.js";
 
 /**
@@ -224,6 +226,24 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function readTrainingStage(value: unknown): TrainingStageViewModel | null {
+  if (value === null || value === undefined) return null;
+  const v = asObject(value);
+  const position = numberOrNull(v.position);
+  const total = numberOrNull(v.total);
+  if (typeof v.key !== "string" || typeof v.label !== "string" || typeof v.summary !== "string" || position === null || total === null) throw malformedTraining();
+  return { key: v.key, label: v.label, summary: v.summary, position, total };
+}
+
+function readStageChange(value: unknown): TrainingStageChangeViewModel | null {
+  if (value === null || value === undefined) return null;
+  const v = asObject(value);
+  const from = readTrainingStage(v.from);
+  const to = readTrainingStage(v.to);
+  if (!from || !to || (v.direction !== "forward" && v.direction !== "back") || typeof v.note !== "string") throw malformedTraining();
+  return { from, to, direction: v.direction, note: v.note };
+}
+
 /** A training session the server describes. Anything that is not a complete session is malformed -- an error, never a guessed screen. */
 export function readTrainingSession(body: unknown): TrainingSessionViewModel {
   const v = asObject(body);
@@ -234,6 +254,14 @@ export function readTrainingSession(body: unknown): TrainingSessionViewModel {
   if (typeof v.sessionId !== "string" || v.sessionId === "" || typeof v.systemId !== "string" || typeof v.systemLabel !== "string") throw malformedTraining();
   if (status !== "active" && status !== "completed" && status !== "abandoned") throw malformedTraining();
   if (typeof objective.statement !== "string") throw malformedTraining();
+  const summary = asObject(v.summary);
+  const submittedCount = numberOrNull(summary.submittedCount);
+  const skippedCount = numberOrNull(summary.skippedCount);
+  const correctCount = numberOrNull(summary.correctCount);
+  const incorrectCount = numberOrNull(summary.incorrectCount);
+  const totalTimeSeconds = numberOrNull(summary.totalTimeSeconds);
+  const expectedTimeSeconds = numberOrNull(summary.expectedTimeSeconds);
+  if (submittedCount === null || skippedCount === null || correctCount === null || incorrectCount === null || totalTimeSeconds === null || expectedTimeSeconds === null) throw malformedTraining();
   let parsedCompletion: TrainingCompletionViewModel;
   if (completion.kind === "fixed_question_count" && typeof completion.questionCount === "number") parsedCompletion = { kind: "fixed_question_count", questionCount: completion.questionCount };
   else if (completion.kind === "fixed_duration" && typeof completion.durationSeconds === "number") parsedCompletion = { kind: "fixed_duration", durationSeconds: completion.durationSeconds };
@@ -247,6 +275,7 @@ export function readTrainingSession(body: unknown): TrainingSessionViewModel {
     sessionId: v.sessionId,
     systemId: v.systemId,
     systemLabel: v.systemLabel,
+    systemTitle: typeof v.systemTitle === "string" && v.systemTitle !== "" ? v.systemTitle : `${v.systemLabel} training`,
     objective: { statement: objective.statement, targetConceptName: typeof objective.targetConceptName === "string" ? objective.targetConceptName : null },
     status,
     completion: parsedCompletion,
@@ -259,7 +288,9 @@ export function readTrainingSession(body: unknown): TrainingSessionViewModel {
       remainingSeconds: numberOrNull(progress.remainingSeconds),
       completionReached: progress.completionReached,
       hasOpenQuestion: progress.hasOpenQuestion
-    }
+    },
+    stage: readTrainingStage(v.stage),
+    summary: { submittedCount, skippedCount, correctCount, incorrectCount, totalTimeSeconds, expectedTimeSeconds }
   };
 }
 
@@ -410,7 +441,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
         const question = readQuestion(body.question, body.elapsedSeconds);
         // The server started (or resumed) this attempt inside the session: remember it, so `submitAnswer()`/`skipQuestion()` act on it.
         attemptIdByQuestion.set(question.questionId, body.attemptId);
-        return { status: "question", session, question };
+        return { status: "question", session, question, stageTransition: readStageChange(body.stageTransition) };
       });
     },
 

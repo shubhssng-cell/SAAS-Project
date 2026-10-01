@@ -11,8 +11,8 @@ Numbering is **Phase-5-relative** (Unit 1 … Unit 7). It has no relation to the
 | Unit | Scope | Status |
 |---|---|---|
 | Unit 1 | Training System Foundation (common session framework + student entry point) | **COMPLETE** (below) |
-| Unit 2 | Calculation Gym (student-facing) | **NOT STARTED** |
-| Unit 3 | Speed Lab | not started |
+| Unit 2 | Calculation Gym (student-facing) | **COMPLETE** (below; review: [../PHASE_5_UNIT_2_REVIEW.md](../PHASE_5_UNIT_2_REVIEW.md)) |
+| Unit 3 | Speed Lab | not started (next) |
 | Unit 4 | Trap + Novelty Training | not started |
 | Unit 5 | Revision Engine | not started |
 | Unit 6 | Pressure + Overtraining | not started |
@@ -108,9 +108,9 @@ See the Unit 1 validation record at the end of this file (test counts, real Post
 - The in-memory API wiring (development) does not enforce the one-open-attempt index unless asked; the real database does.
 - A question with an open attempt *outside* the session (ordinary practice) that a training selection happens to pick yields a clear 409 rather than adopting that attempt.
 
-### Unit 2 scope (NOT started)
+### Unit 2 scope
 
-**Calculation Gym, student-facing**, on this framework: show *why* Calculation applies in the student's own observable terms (the accuracy-by-load comparison the provider already computes, never a score or a trait), surface and drive the provider's existing stage (foundational → mixed → time-pressured) inside a session, and make the session objective/completion stage-aware. No new engine: it reuses `@ipmat/calculation-gym` and this session framework, and decides which presentation and completion data the provider must expose (a deliberate design question for Unit 2, not assumed here).
+Delivered in Unit 2 below (it was the planned scope here: Calculation Gym, student-facing, on this framework, with no new engine).
 
 ## Unit 1 validation record
 
@@ -123,3 +123,23 @@ See the Unit 1 validation record at the end of this file (test counts, real Post
 **Security / leakage.** No view carries an answer key, provider id, requirement, diagnostics or a score (asserted on JSON and on rendered HTML); identity, enrollment, clock and block are never read from a request (smuggled fields change nothing; naming a block on `POST /v1/attempts` places nothing in it); the answer key appears only after submission through the existing result view; no confidence/emotion/motivation vocabulary in any view, helper or objective (asserted).
 
 **Not claimed.** Outcome calibration; behavior of any provider's provisional thresholds on real students; live-model quality (no training path calls a model); Revision/Overtraining (no engine exists).
+
+## Unit 2 — Calculation Gym
+
+> **Unit 2 makes the EXISTING Calculation provider student-facing inside the Unit 1 session framework. It adds no Calculation algorithm, no score and no second state machine.** Full detail, the exact provider behavior and the limitations: [../PHASE_5_UNIT_2_REVIEW.md](../PHASE_5_UNIT_2_REVIEW.md); decision: D-076.
+
+- **Defect fixed.** The provider's selection did not serve what its progression counts as stage evidence (foundational could serve an unseen heavy/multi-step question; mixed a timed one), so progression could stall. Three optional requirement fields restating progression's own stage shapes (`maxComputationalLoad`, `excludeMultiStep`, `excludeTimePressured`) fix it; no threshold, applicability rule, progression rule or tie-break changed.
+- **Stages** (`foundational` / `mixed` / `time_pressured`, shown as "Stage 1 · Foundations", "Stage 2 · Heavier arithmetic", "Stage 3 · Under time pressure") are declared with authored, threshold-free copy in the catalog, read generically from the provider's requirement, and **derived from history on every read — never stored**.
+- **Stage change** is derived by re-running the system as of before the session's last finalized attempt; shown once as "Next stage" / "Stage changed" with authored copy; identical after a restart / on a second instance.
+- **Observable summary** on every session view (answered / skipped / correct / incorrect counts, time vs expected) and a completion screen that states it is a record of the session, not lasting progress. No percentage, rating or score anywhere.
+- **UI:** a "Calculation Gym" session screen (stage, objective, "Question N of M", timer), a training context line above the ordinary result, a stage-transition notice, and an honest hub card (own explanation when not applicable; "No published question fits…" when applicable but short of content).
+
+### Unit 2 validation record
+
+**Tests.** After Unit 1: 2323. After Unit 2: **2375 tests -- 2375/2375 with Postgres** (216 files) and **2292 passed + 83 skipped without Postgres**. Typecheck, lint, `npm run build` and `git diff --check` clean. New/changed coverage: stage-shape alignment incl. a 300-pool x 3-stage property test (in-shape, order-independent, repeatable; no `Math.random`/clock in the provider), catalog/stage/parity tests, 22 Calculation session tests over the real provider, web adapter/helper tests, and 7 real-Postgres tests.
+
+**Real PostgreSQL** (`postgres:16-alpine` on `127.0.0.1:55432`; the unrelated Postgres on 5432 untouched). The suite builds its OWN throwaway database (migrate + seed) and publishes a labelled synthetic TEST DATA pool (`[TEST DATA phase-5-unit-2] ...`, 19 questions) only there, then drops it: it asserts the real seeded published set is what the seed made and that the shared test database holds no synthetic row. Through the real HTTP server on the real Prisma repositories with two independent instances: no evidence => Calculation unavailable with its own explanation and a start is 409; stage-2 session => stage-2 question only (never light, multi-step or timed) => correct answer => next question is a stage-3 (timed) question with a forward "mixed -> time_pressured" transition => the other instance resumes the same open question and reconstructs the identical transition => completion summary (counts, expected time 180 s, stage 3); the persisted session row holds NO stage; stage-1 session serves only light single-step questions without repeats; 12 parallel starts => one session; 10 parallel `next` across two instances => one open attempt; ownership 403; training writes no autopsy/repair/mastery row and evidence for a training attempt is the ordinary evidence; when the catalogue leaves no qualifying question the card says `no_eligible_question` and a start is 409 (nothing substituted). Answer-key / provider-internal / psychological-wording scans clean.
+
+**Browser** (real web on Vite + real API in Prisma mode + a second throwaway Postgres database with the synthetic pool, headless Edge over raw CDP): **43/43** on the main flow and **7/7** on error/loading states. Main flow: a fresh student sees Calculation disabled with its explanation; with evidence it is the one startable card (Revision/Overtraining "Not built yet."); session shows "Calculation Gym", "Stage 2 · Heavier arithmetic", the objective, "Question 1 of 3" and a timer; a reload and a full API process restart resume the same question and stage with no second attempt row; the correct answer shows the ordinary result with the Calculation context line; Continue shows the "Next stage" notice (Stage 3, authored note, no threshold/score/reason) and a timed question; a reload keeps it; a skip is a skip; no repeat inside the session; an incorrect answer is reported as such; completion shows completed/answered/skipped, "answered correctly 1 of 2", time vs expected, current stage, "Completed normally" and the record-of-this-session note with no mastery/improvement claim; DB: block completed, attempts 1..3, no stage persisted, no autopsy/repair/mastery rows; a finished session stays finished; with the catalogue short of content the card says "No published question fits this training right now." and nothing else is startable; another student opening the session URL is refused; the real seeded published set is unchanged; no console errors. States: with the API stopped the hub and the session each show a student-safe error with Try again / a way back, and Try again recovers (resuming the same open question). (One check was initially too broad -- it scanned the whole page, whose objective sentence legitimately contains the word "accuracy" -- and was narrowed to the notice card itself; no product change.)
+
+**Not claimed.** Outcome calibration; real-student validation; behavior of the provisional thresholds on real content; live-model quality (none is involved).

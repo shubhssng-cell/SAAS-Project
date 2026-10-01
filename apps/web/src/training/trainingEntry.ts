@@ -53,3 +53,26 @@ export function trainingResultPath(sessionId: string, questionId: string, attemp
 export function isStartable(availability: string): boolean {
   return availability === "available";
 }
+
+/** "Question 3 of 10" for a fixed-count session while a question is open; otherwise the plain progress line. Observable counts only. */
+export function describeQuestionPosition(session: TrainingSessionViewModel): string {
+  if (session.completion.kind === "fixed_question_count") {
+    const number = Math.min(session.progress.completedQuestionCount + 1, session.completion.questionCount);
+    return `Question ${number} of ${session.completion.questionCount}`;
+  }
+  return describeProgress(session);
+}
+
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** "2 of 3 correct" -- a count, never a percentage or a rating. `null` when nothing was answered (so nothing is claimed). */
+export function describeAnswered(session: TrainingSessionViewModel): string | null {
+  const { submittedCount, correctCount } = session.summary;
+  return submittedCount === 0 ? null : `${correctCount} of ${submittedCount} correct`;
+}
+
+/** The standing caveat shown with a finished session: a session is a record of what happened, not a measure of anything permanent. */
+export const SESSION_RECORD_NOTE = "This is a record of this session only. It is evidence of what you did here, not a measure of lasting progress.";

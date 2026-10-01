@@ -8,11 +8,15 @@ import {
   deriveTrainingSessionProgress,
   findTrainingSystem,
   parseTrainingObjective,
+  describeStage,
+  describeStageChange,
+  stageKeyOfRun,
   toAvailability,
   toBlockSettings,
   validateTrainingSessionConfig,
   type TrainingSessionConfig,
   type TrainingSessionProgress,
+  type TrainingStageChange,
   type TrainingSystemAvailability
 } from "@ipmat/training-session";
 import { toPracticeApiError } from "./errors.js";
@@ -21,6 +25,7 @@ import type {
   TrainingApiDependencies,
   TrainingHubView,
   TrainingNextView,
+  TrainingSessionSummaryView,
   TrainingSessionView,
   TrainingSystemCardView
 } from "./trainingTypes.js";
@@ -57,10 +62,11 @@ export class TrainingApiService {
       const runs = await this.deps.trainingRecommendationService.runTrainingSystems(claim, TRAINING_SYSTEM_CATALOG.map((definition) => definition.systemId));
       const systems: TrainingSystemCardView[] = runs.map((run) => {
         const availability = toAvailability(run);
-        return { systemId: run.definition.systemId, dimension: run.definition.dimension, label: run.definition.label, trains: run.definition.trains, availability, note: AVAILABILITY_NOTES[availability] };
+        const note = availability === "not_applicable" && run.definition.notApplicableNote ? run.definition.notApplicableNote : AVAILABILITY_NOTES[availability];
+        return { systemId: run.definition.systemId, dimension: run.definition.dimension, label: run.definition.label, trains: run.definition.trains, availability, note };
       });
       const active = await this.deps.trainingSessionRepository.findActiveByEnrollmentId(claim.enrollmentId);
-      return { systems, activeSession: active ? await this.toView(this.assertOwned(active, claim), now) : null };
+      return { systems, activeSession: active ? await this.toView(this.assertOwned(active, claim), now, { stageKey: null }) : null };
     } catch (error) {
       throw this.rethrow(error);
     }
@@ -108,7 +114,7 @@ export class TrainingApiService {
             blockSettings: toBlockSettings(config),
             now
           });
-          return { session: await this.toView(this.assertOwned(stored, claim), now), resumed: false };
+          return { session: await this.toView(this.assertOwned(stored, claim), now, { stageKey: stageKeyOfRun(run) }), resumed: false };
         } catch (error) {
           // Another instance created a session first (the database guarantees at most one active): resume the winner when it is the same system.
           if ((error instanceof PersistenceError && error.code === "conflict") || error instanceof SerializationFailureError) {
@@ -156,7 +162,7 @@ export class TrainingApiService {
 
         if (progress.openAttemptId !== null) {
           const open = attempts.find((attempt) => attempt.id === progress.openAttemptId)!;
-          return this.questionView(stored, claim, open.questionId, now);
+          return this.questionView(stored, claim, open.questionId, now, attempts);
         }
 
         if (progress.completionReached) {
@@ -166,9 +172,9 @@ export class TrainingApiService {
 
         const [run] = await this.deps.trainingRecommendationService.runTrainingSystems(claim, [stored.systemId], { excludeQuestionIds: attempts.map((attempt) => attempt.questionId) });
         if (!run || run.status === "not_built" || run.outcome.status !== "selected") {
-          return { status: "no_question", session: await this.toView(stored, now), message: NO_FURTHER_QUESTION_MESSAGE };
+          return { status: "no_question", session: await this.toView(stored, now, { stageKey: run ? stageKeyOfRun(run) : null }), message: NO_FURTHER_QUESTION_MESSAGE };
         }
-        return this.questionView(stored, claim, run.outcome.question.questionId, now);
+        return this.questionView(stored, claim, run.outcome.question.questionId, now, attempts, stageKeyOfRun(run));
       });
     } catch (error) {
       throw this.rethrow(error);
@@ -200,9 +206,42 @@ export class TrainingApiService {
 
   // ---------------------------------------------------------------------------------------------
 
-  private async questionView(stored: StoredTrainingSession, claim: StudentRequestClaim, questionId: string, now: string): Promise<TrainingNextView> {
+  private async questionView(
+    stored: StoredTrainingSession,
+    claim: StudentRequestClaim,
+    questionId: string,
+    now: string,
+    attempts: Array<{ id: string; status: string }>,
+    knownStageKey?: string | null
+  ): Promise<TrainingNextView> {
     const started = await this.deps.practiceApi.startAttempt(claim, { questionId, practiceBlockId: stored.block.id, now });
-    return { status: "question", session: await this.toView(stored, now), attemptId: started.attemptId, question: started.question, elapsedSeconds: started.elapsedSeconds };
+    const stageKey = knownStageKey !== undefined ? knownStageKey : await this.currentStageKey(stored);
+    const stageTransition = await this.stageTransition(stored, attempts, stageKey);
+    return { status: "question", session: await this.toView(stored, now, { stageKey }), attemptId: started.attemptId, question: started.question, elapsedSeconds: started.elapsedSeconds, stageTransition };
+  }
+
+  /** The stage the system reports for this student right now (derived from persisted history), or `null` for an unstaged system / no stage. */
+  private async currentStageKey(stored: StoredTrainingSession, options: { excludeAttemptIds?: readonly string[] } = {}): Promise<string | null> {
+    const definition = findTrainingSystem(stored.systemId);
+    if (!definition?.stages) return null;
+    const claim: StudentRequestClaim = { studentId: stored.studentId, enrollmentId: stored.enrollmentId };
+    const [run] = await this.deps.trainingRecommendationService.runTrainingSystems(claim, [stored.systemId], options);
+    return run ? stageKeyOfRun(run) : null;
+  }
+
+  /**
+   * A stage change is DERIVED, never stored: the stage this question is served at, compared with the stage the system reported when the
+   * PREVIOUS question was served -- i.e. the same system re-run over history excluding the last finalized attempt in this session. After a
+   * restart the same persisted rows give the same answer. No change (or an unknown stage on either side) is `null`.
+   */
+  private async stageTransition(stored: StoredTrainingSession, attempts: Array<{ id: string; status: string }>, currentKey: string | null): Promise<TrainingStageChange | null> {
+    const definition = findTrainingSystem(stored.systemId);
+    if (!definition?.stages || currentKey === null) return null;
+    const finalized = attempts.filter((attempt) => attempt.status === "submitted" || attempt.status === "skipped");
+    const last = finalized[finalized.length - 1];
+    if (!last) return null;
+    const previousKey = await this.currentStageKey(stored, { excludeAttemptIds: [last.id] });
+    return describeStageChange(definition, previousKey, currentKey);
   }
 
   /** Completes the session's block; if another caller already ended it (a race), returns the session as it now stands. */
@@ -231,7 +270,7 @@ export class TrainingApiService {
   }
 
   /** Stored JSON is untrusted on the way out: it is re-validated, and a row that no longer parses is an infrastructure failure, never guessed at. */
-  private async toView(stored: StoredTrainingSession, now: string): Promise<TrainingSessionView> {
+  private async toView(stored: StoredTrainingSession, now: string, options: { stageKey?: string | null } = {}): Promise<TrainingSessionView> {
     const definition = findTrainingSystem(stored.systemId);
     const objective = parseTrainingObjective(stored.objective);
     let config: TrainingSessionConfig;
@@ -245,10 +284,12 @@ export class TrainingApiService {
     }
     const attempts = await this.deps.attemptHistoryReader.findByPracticeBlockId(stored.block.id);
     const progress: TrainingSessionProgress = deriveTrainingSessionProgress({ block: stored.block, attempts, now });
+    const stageKey = options.stageKey !== undefined ? options.stageKey : await this.currentStageKey(stored);
     return {
       sessionId: stored.id,
       systemId: definition.systemId,
       systemLabel: definition.label,
+      systemTitle: definition.sessionTitle ?? `${definition.label} training`,
       dimension: definition.dimension,
       objective: { statement: objective.statement, targetConceptName: objective.targetConceptName },
       status: stored.block.status,
@@ -263,8 +304,28 @@ export class TrainingApiService {
         completionReached: progress.completionReached,
         hasOpenQuestion: progress.openAttemptId !== null
       },
+      stage: describeStage(definition, stageKey),
+      summary: await this.summarize(attempts),
       startedAt: stored.block.startedAt,
       endedAt: stored.block.endedAt
+    };
+  }
+
+  /** Observable counts and server-measured times from the session's own attempts -- derived on every read, never stored. */
+  private async summarize(attempts: Awaited<ReturnType<TrainingApiDependencies["attemptHistoryReader"]["findByPracticeBlockId"]>>): Promise<TrainingSessionSummaryView> {
+    const submitted = attempts.filter((attempt) => attempt.status === "submitted");
+    let expectedTimeSeconds = 0;
+    for (const attempt of submitted) {
+      const content = await this.deps.questionContentReader.findPublishedById(attempt.questionId);
+      if (content) expectedTimeSeconds += content.expectedTimeSeconds;
+    }
+    return {
+      submittedCount: submitted.length,
+      skippedCount: attempts.filter((attempt) => attempt.status === "skipped").length,
+      correctCount: submitted.filter((attempt) => attempt.isCorrect === true).length,
+      incorrectCount: submitted.filter((attempt) => attempt.isCorrect === false).length,
+      totalTimeSeconds: submitted.reduce((sum, attempt) => sum + (attempt.timeSpentSeconds ?? 0), 0),
+      expectedTimeSeconds
     };
   }
 

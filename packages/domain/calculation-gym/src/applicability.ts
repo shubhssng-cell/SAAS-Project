@@ -32,14 +32,26 @@ function buildRequirement(evidence: CalculationFrictionEvidence, stage: Calculat
 
   switch (stage) {
     case "foundational":
-      return { targetConceptName, stage, minComputationalLoad: 0, requireMultiStep: false, requireTimePressured: false, notes: [note] };
+      // The stage's own evidence shape (progression.ts): below the high-load threshold, not multi-step.
+      return {
+        targetConceptName,
+        stage,
+        minComputationalLoad: 0,
+        maxComputationalLoad: CALCULATION_GYM_CONSTANTS.HIGH_COMPUTATIONAL_LOAD_THRESHOLD,
+        requireMultiStep: false,
+        excludeMultiStep: true,
+        requireTimePressured: false,
+        notes: [note]
+      };
     case "mixed":
+      // The stage's own evidence shape (progression.ts): at/above the high-load threshold, not time-pressured.
       return {
         targetConceptName,
         stage,
         minComputationalLoad: CALCULATION_GYM_CONSTANTS.HIGH_COMPUTATIONAL_LOAD_THRESHOLD,
         requireMultiStep: false,
         requireTimePressured: false,
+        excludeTimePressured: true,
         notes: [note]
       };
     case "time_pressured":

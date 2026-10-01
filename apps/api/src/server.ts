@@ -417,6 +417,7 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
     trainingSessionRepository: deps.trainingSessionRepository,
     attemptHistoryReader: deps.attemptHistoryReader,
     enrollmentReader: deps.enrollmentReader,
+    questionContentReader: deps.questionContentReader,
     practiceApi: service
   });
   const authService = new AuthApiService(deps);

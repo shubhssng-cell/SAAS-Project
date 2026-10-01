@@ -17,6 +17,17 @@
 export const TRAINING_DIMENSIONS = ["calculation", "speed", "trap", "novelty", "pressure", "revision", "overtraining"] as const;
 export type TrainingDimension = (typeof TRAINING_DIMENSIONS)[number];
 
+/**
+ * One stage of a staged training system, in order, with hand-authored student-safe words. The KEYS restate the provider's own stage
+ * vocabulary (e.g. `CALCULATION_TRAINING_STAGES`) -- this package cannot import a concrete provider -- and a test asserts they stay equal.
+ * The copy names what a stage is about; it never states a threshold, a score, or anything about the student.
+ */
+export interface TrainingStageDefinition {
+  key: string;
+  label: string;
+  summary: string;
+}
+
 export interface TrainingSystemDefinition {
   /** Stable id. For a built system it equals its provider's `providerId`. */
   systemId: string;
@@ -27,11 +38,30 @@ export interface TrainingSystemDefinition {
   trains: string;
   /** The `@ipmat/training-systems` provider that serves this system, or `null` when none exists yet. */
   providerId: string | null;
+  /** Optional title shown on the session screen (defaults to "<label> training"), e.g. "Calculation Gym". */
+  sessionTitle?: string;
+  /** Present only for a system whose provider works in ordered stages (Phase 5 Unit 2: Calculation). The stage itself is always decided by the provider, from history. */
+  stages?: readonly TrainingStageDefinition[];
+  /** Optional system-specific, student-safe sentence for "not applicable right now" (what the student would need to have done first), replacing the generic one. */
+  notApplicableNote?: string;
 }
 
 /** Display order. Deterministic and fixed -- never sorted by any score. */
 export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
-  { systemId: "calculation-gym", dimension: "calculation", label: "Calculation", trains: "Accuracy on questions that need heavier arithmetic.", providerId: "calculation-gym" },
+  {
+    systemId: "calculation-gym",
+    dimension: "calculation",
+    label: "Calculation",
+    sessionTitle: "Calculation Gym",
+    trains: "Deliberate calculation practice: accuracy on questions that need heavier arithmetic.",
+    providerId: "calculation-gym",
+    stages: [
+      { key: "foundational", label: "Stage 1 · Foundations", summary: "Lighter arithmetic, to build a reliable base." },
+      { key: "mixed", label: "Stage 2 · Heavier arithmetic", summary: "Questions with more demanding calculation." },
+      { key: "time_pressured", label: "Stage 3 · Under time pressure", summary: "Demanding calculation on questions built to be timed." }
+    ],
+    notApplicableNote: "Needs recorded answers on both lighter and heavier-arithmetic questions of the same concept first."
+  },
   { systemId: "speed-lab", dimension: "speed", label: "Speed", trains: "Pace on concepts you already answer correctly.", providerId: "speed-lab" },
   { systemId: "trap-lab", dimension: "trap", label: "Traps", trains: "Spotting the specific trap a question is built around.", providerId: "trap-lab" },
   { systemId: "novelty-training", dimension: "novelty", label: "Novelty", trains: "Unfamiliar twists on concepts you have already practised.", providerId: "novelty-training" },

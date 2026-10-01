@@ -1,16 +1,31 @@
 import { describe, expect, it } from "vitest";
 import type { TrainingSessionViewModel } from "../../src/adapter/index.js";
-import { COMPLETION_PRESETS, DEFAULT_COMPLETION_PRESET_ID, describeCompletion, describeProgress, isStartable, trainingResultPath, trainingSessionPath } from "../../src/training/trainingEntry.js";
+import {
+  COMPLETION_PRESETS,
+  DEFAULT_COMPLETION_PRESET_ID,
+  SESSION_RECORD_NOTE,
+  describeAnswered,
+  describeCompletion,
+  describeProgress,
+  describeQuestionPosition,
+  formatClock,
+  isStartable,
+  trainingResultPath,
+  trainingSessionPath
+} from "../../src/training/trainingEntry.js";
 
 function session(overrides: Partial<TrainingSessionViewModel> = {}): TrainingSessionViewModel {
   return {
     sessionId: "s-1",
     systemId: "novelty-training",
     systemLabel: "Novelty",
+    systemTitle: "Novelty training",
     objective: { statement: "Unfamiliar twists.", targetConceptName: "Percentages" },
     status: "active",
     completion: { kind: "fixed_question_count", questionCount: 5 },
     progress: { completedQuestionCount: 2, submittedCount: 1, skippedCount: 1, elapsedSeconds: 100, remainingQuestions: 3, remainingSeconds: null, completionReached: false, hasOpenQuestion: false },
+    stage: null,
+    summary: { submittedCount: 1, skippedCount: 1, correctCount: 1, incorrectCount: 0, totalTimeSeconds: 31, expectedTimeSeconds: 35 },
     ...overrides
   };
 }
@@ -41,6 +56,24 @@ describe("Training entry helpers (Phase 5 Unit 1)", () => {
   it("only an `available` system is startable", () => {
     expect(isStartable("available")).toBe(true);
     for (const a of ["not_applicable", "no_eligible_question", "unavailable", "not_built", ""]) expect(isStartable(a)).toBe(false);
+  });
+
+  it("states question position as 'Question N of M' for a fixed-count session, and never past the end", () => {
+    expect(describeQuestionPosition(session())).toBe("Question 3 of 5");
+    expect(describeQuestionPosition(session({ progress: { ...session().progress, completedQuestionCount: 5 } }))).toBe("Question 5 of 5");
+    expect(describeQuestionPosition(session({ completion: { kind: "fixed_duration", durationSeconds: 300 }, progress: { ...session().progress, remainingSeconds: 65 } }))).toBe("2 questions done · 1:05 left");
+  });
+
+  it("states the answered result as a count, or nothing when nothing was answered -- never a percentage or rating", () => {
+    expect(describeAnswered(session())).toBe("1 of 1 correct");
+    expect(describeAnswered(session({ summary: { ...session().summary, submittedCount: 0, correctCount: 0 } }))).toBeNull();
+    expect(formatClock(90)).toBe("1:30");
+    expect(formatClock(-5)).toBe("0:00");
+  });
+
+  it("the session-record caveat claims no lasting progress", () => {
+    expect(SESSION_RECORD_NOTE).toMatch(/record of this session only/);
+    expect(SESSION_RECORD_NOTE.toLowerCase()).not.toMatch(/mastered|improved|fixed|guarantee|permanent/);
   });
 
   it("no helper output speaks about confidence, emotion or any inferred state", () => {

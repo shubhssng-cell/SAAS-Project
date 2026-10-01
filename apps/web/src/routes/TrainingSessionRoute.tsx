@@ -1,22 +1,39 @@
 import { useEffect, useRef, useState } from "react";
-import { isSessionExpiredError, type TrainingNextViewModel, type TrainingSessionViewModel } from "../adapter/index.js";
+import { isSessionExpiredError, type TrainingNextViewModel, type TrainingSessionViewModel, type TrainingStageChangeViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { QuestionPlayer } from "../components/QuestionPlayer.js";
 import { Button, Card, ErrorNotice, LoadingState, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
-import { describeCompletion, describeProgress, trainingResultPath } from "../training/trainingEntry.js";
+import { describeAnswered, describeCompletion, describeQuestionPosition, describeProgress, formatClock, SESSION_RECORD_NOTE, trainingResultPath } from "../training/trainingEntry.js";
 
 type SessionState = { status: "loading" } | { status: "loaded"; next: TrainingNextViewModel } | { status: "error"; sessionExpired: boolean };
 
-function SessionHeader({ session }: { session: TrainingSessionViewModel }) {
+function SessionHeader({ session, showPosition = false }: { session: TrainingSessionViewModel; showPosition?: boolean }) {
   return (
     <Card>
-      <p className="mode-tag">{session.systemLabel} training</p>
+      <p className="mode-tag">{session.systemTitle}</p>
+      {session.stage && (
+        <p className="subtext" data-testid="training-stage">
+          <strong>{session.stage.label}</strong> — {session.stage.summary}
+        </p>
+      )}
       <p className="subtext recommendation-explanation">{session.objective.statement}</p>
       <p className="subtext" role="status">
-        {describeProgress(session)}
+        {showPosition ? describeQuestionPosition(session) : describeProgress(session)}
       </p>
+    </Card>
+  );
+}
+
+/** Shown once, above the question, when the stage this question is served at differs from the previous one. Authored words only. */
+function StageTransitionNotice({ change }: { change: TrainingStageChangeViewModel }) {
+  return (
+    <Card>
+      <p className="mode-tag">{change.direction === "forward" ? "Next stage" : "Stage changed"}</p>
+      <h2 className="headline headline-compact">{change.to.label}</h2>
+      <p className="subtext recommendation-explanation">{change.to.summary}</p>
+      <p className="subtext">{change.note}</p>
     </Card>
   );
 }
@@ -78,21 +95,50 @@ export function TrainingSessionRoute({ sessionId }: { sessionId: string }) {
   if (next.status === "completed") {
     const { session } = next;
     return (
-      <Screen eyebrow={`${session.systemLabel} training`} headline="Session complete." subtext={`You worked on: ${session.objective.statement}`}>
+      <Screen eyebrow={session.systemTitle} headline="Session complete." subtext={`You worked on: ${session.objective.statement}`}>
         <Card>
           <div className="fact-row">
-            <span className="fact-label">Questions answered</span>
-            <span className="fact-value">{session.progress.submittedCount}</span>
+            <span className="fact-label">Questions completed</span>
+            <span className="fact-value">{session.progress.completedQuestionCount}</span>
           </div>
           <div className="fact-row">
-            <span className="fact-label">Questions skipped</span>
-            <span className="fact-value">{session.progress.skippedCount}</span>
+            <span className="fact-label">Answered</span>
+            <span className="fact-value">{session.summary.submittedCount}</span>
           </div>
+          <div className="fact-row">
+            <span className="fact-label">Skipped</span>
+            <span className="fact-value">{session.summary.skippedCount}</span>
+          </div>
+          {describeAnswered(session) && (
+            <div className="fact-row">
+              <span className="fact-label">Answered correctly</span>
+              <span className="fact-value">{describeAnswered(session)}</span>
+            </div>
+          )}
+          {session.summary.submittedCount > 0 && (
+            <div className="fact-row">
+              <span className="fact-label">Time on answered questions</span>
+              <span className="fact-value">
+                {formatClock(session.summary.totalTimeSeconds)} <span className="fact-value-note">(expected {formatClock(session.summary.expectedTimeSeconds)})</span>
+              </span>
+            </div>
+          )}
+          {session.stage && (
+            <div className="fact-row">
+              <span className="fact-label">Current stage</span>
+              <span className="fact-value">{session.stage.label}</span>
+            </div>
+          )}
           <div className="fact-row">
             <span className="fact-label">Session length</span>
             <span className="fact-value">{describeCompletion(session.completion)}</span>
           </div>
+          <div className="fact-row">
+            <span className="fact-label">Ended</span>
+            <span className="fact-value">{session.status === "completed" ? "Completed normally" : "Ended"}</span>
+          </div>
         </Card>
+        <p className="subtext">{SESSION_RECORD_NOTE}</p>
         <div className="btn-row btn-row-flush">
           <Button onClick={() => navigate("/training")}>Back to training</Button>
           <Button variant="secondary" onClick={() => navigate("/dashboard")}>
@@ -120,7 +166,7 @@ export function TrainingSessionRoute({ sessionId }: { sessionId: string }) {
       }
     };
     return (
-      <Screen eyebrow={`${next.session.systemLabel} training`} headline="No further question fits right now." subtext={next.message}>
+      <Screen eyebrow={next.session.systemTitle} headline="No further question fits right now." subtext={next.message}>
         <SessionHeader session={next.session} />
         {failure && <ErrorNotice>{failure}</ErrorNotice>}
         <Button block disabled={ending} onClick={handleEnd}>
@@ -130,7 +176,7 @@ export function TrainingSessionRoute({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const { question, session } = next;
+  const { question, session, stageTransition } = next;
 
   // Submit and skip share one in-flight guard, exactly like ordinary practice: neither can repeat or overlap.
   async function handleSubmit(chosenAnswer: string, timeTakenSeconds: number) {
@@ -171,7 +217,8 @@ export function TrainingSessionRoute({ sessionId }: { sessionId: string }) {
 
   return (
     <>
-      <SessionHeader session={session} />
+      <SessionHeader session={session} showPosition />
+      {stageTransition && <StageTransitionNotice change={stageTransition} />}
       <QuestionPlayer question={question} onSubmit={handleSubmit} onSkip={handleSkip} submitting={submitting} skipping={skipping} submitError={failure} />
     </>
   );

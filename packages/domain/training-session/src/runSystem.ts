@@ -2,6 +2,7 @@ import { buildDefaultProviderRegistry } from "@ipmat/training-orchestration";
 import { runTrainingSystemProvider } from "@ipmat/training-systems";
 import type { TrainingSystemContext, TrainingSystemOutcome, TrainingSystemProvider } from "@ipmat/training-systems";
 import { findTrainingSystem, type TrainingSystemDefinition } from "./catalog.js";
+import { readStageKey } from "./stage.js";
 import { TrainingSessionError } from "./errors.js";
 
 /**
@@ -50,4 +51,14 @@ export function toAvailability(run: TrainingSystemRun): TrainingSystemAvailabili
     case "error":
       return "unavailable";
   }
+}
+
+/**
+ * The stage key a run reports, if its provider is staged. Only an outcome that carries a requirement (`selected` or
+ * `no_eligible_question` -- the system IS applicable) has one; `not_applicable`/`error`/`not_built` do not, and the stage is then simply unknown.
+ */
+export function stageKeyOfRun(run: TrainingSystemRun): string | null {
+  if (run.status !== "ran") return null;
+  const outcome = run.outcome;
+  return outcome.status === "selected" || outcome.status === "no_eligible_question" ? readStageKey(outcome.requirement) : null;
 }

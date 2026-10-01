@@ -14,8 +14,8 @@ import { PracticeQuestionRoute } from "../routes/PracticeQuestionRoute.js";
 import { PracticeResultRoute } from "../routes/PracticeResultRoute.js";
 import { SignupPage } from "../routes/SignupPage.js";
 import { TrainingHubRoute } from "../routes/TrainingHubRoute.js";
+import { TrainingResultRoute } from "../routes/TrainingResultRoute.js";
 import { TrainingSessionRoute } from "../routes/TrainingSessionRoute.js";
-import { trainingSessionPath } from "../training/trainingEntry.js";
 import { matchPath } from "./match.js";
 import { ROUTE_TABLE } from "./routeTable.js";
 import { usePathname } from "./router.js";
@@ -133,7 +133,7 @@ const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement
     <RequireAuth>
       <OnboardingGate mode="require-complete">
         <EnrollmentGate mode="require-complete">
-          <PracticeResultRoute questionId={params.questionId ?? ""} continueTo={trainingSessionPath(params.sessionId ?? "")} backTo={trainingSessionPath(params.sessionId ?? "")} />
+          <TrainingResultRoute sessionId={params.sessionId ?? ""} questionId={params.questionId ?? ""} />
         </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
