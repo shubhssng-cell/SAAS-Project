@@ -32,6 +32,8 @@ export interface TrainingSystemCardView {
   availability: TrainingSystemAvailability;
   /** Hand-authored, student-safe sentence for the availability -- never a model/provider string. */
   note: string;
+  /** The completion rules a student may choose for this system, or `null` when every rule is allowed. */
+  completionKinds: Array<"fixed_question_count" | "fixed_duration"> | null;
 }
 
 export type TrainingCompletionView = { kind: "fixed_question_count"; questionCount: number } | { kind: "fixed_duration"; durationSeconds: number };

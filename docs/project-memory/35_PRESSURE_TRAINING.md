@@ -34,6 +34,10 @@ Pressure Training's own generated `notes` string originally included: "This refl
 
 `@ipmat/training-systems` + `@ipmat/mastery`. **Never** `@ipmat/practice-block`/`@ipmat/practice-session` directly — block evidence arrives only as the restated primitive `TrainingPracticeBlockContext` shape.
 
-## Current, honest status
+## Student-facing since Phase 5 Unit 6
+
+Pressure Training is a real card in the Training Hub ([../PHASE_5_UNIT_6_REVIEW.md](../PHASE_5_UNIT_6_REVIEW.md), D-080). **The provider was not changed.** A session is ONE practice block and is TIMED ONLY (catalog `completionKinds: ["fixed_duration"]`, enforced server-side; the duration is also the block's own time budget); the server's clock ends it and the web only shows a "Time left" line. No stages; no pressure score or state. Each finished run is itself a new qualifying block. Hub copy is keyed by the provider's reason without showing it. Found and fixed: concurrent session starts for a student with an existing active practice session could 500 on a unique block-sequence violation. Thresholds remain PROVISIONAL; no real student has used it.
+
+## Current, honest status (as of D-061 — superseded by the section above for the caller question)
 
 **No caller anywhere assembles a real `TrainingSystemContext.practiceBlocks` from persisted `PracticeSession`/`PracticeBlock` data.** Pressure Training is therefore *always* `insufficient_evidence` against any real flow today — the exact gap the future Training Recommendation Composition layer is designed to close. See [37_TRAINING_RECOMMENDATION.md](37_TRAINING_RECOMMENDATION.md) §15.

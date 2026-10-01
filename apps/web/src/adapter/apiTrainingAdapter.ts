@@ -300,7 +300,8 @@ export function readTrainingHub(body: unknown): TrainingHubViewModel {
   const systems = v.systems.map((entry) => {
     const s = asObject(entry);
     if (typeof s.systemId !== "string" || typeof s.label !== "string" || typeof s.trains !== "string" || typeof s.note !== "string" || !TRAINING_AVAILABILITIES.includes(s.availability as TrainingAvailability)) throw malformedTraining();
-    return { systemId: s.systemId, label: s.label, trains: s.trains, availability: s.availability as TrainingAvailability, note: s.note };
+    const kinds = Array.isArray(s.completionKinds) ? s.completionKinds.filter((k): k is "fixed_question_count" | "fixed_duration" => k === "fixed_question_count" || k === "fixed_duration") : null;
+    return { systemId: s.systemId, label: s.label, trains: s.trains, availability: s.availability as TrainingAvailability, note: s.note, completionKinds: kinds };
   });
   return { systems, activeSession: v.activeSession === null || v.activeSession === undefined ? null : readTrainingSession(v.activeSession) };
 }

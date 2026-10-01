@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { createPracticeBlock, type PracticeBlockState } from "@ipmat/practice-block";
 import { PersistenceError } from "./errors.js";
 import { PrismaPracticeBlockRepository } from "./prismaPracticeBlockRepository.js";
@@ -64,6 +64,20 @@ export class PrismaTrainingSessionRepository implements TrainingSessionRepositor
   }
 
   async create(input: Parameters<TrainingSessionRepository["create"]>[0]): Promise<StoredTrainingSession> {
+    try {
+      return await this.createInTransaction(input);
+    } catch (error) {
+      // Two instances starting at once for a student who ALREADY has an active practice session both compute the same next block sequence number;
+      // the loser hits that unique index (or the one-active-session index) instead of a serialization failure. Either way another instance won the
+      // race: report it as the same conflict the explicit active-session check above raises, so the caller resumes the winner.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new PersistenceError("conflict", "This enrollment already has an active training session.");
+      }
+      throw error;
+    }
+  }
+
+  private async createInTransaction(input: Parameters<TrainingSessionRepository["create"]>[0]): Promise<StoredTrainingSession> {
     return runSerializableTransaction(this.prisma, async (tx) => {
       const enrollment = await tx.enrollment.findUnique({ where: { id: input.enrollmentId } });
       if (!enrollment) {

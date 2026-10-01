@@ -122,6 +122,8 @@ export interface TrainingSystemCardViewModel {
   availability: TrainingAvailability;
   /** Server-authored sentence explaining the availability. */
   note: string;
+  /** The session-length kinds this system allows (`null` = all). Pressure Training allows a timed run only. */
+  completionKinds: Array<"fixed_question_count" | "fixed_duration"> | null;
 }
 
 export type TrainingCompletionViewModel = { kind: "fixed_question_count"; questionCount: number } | { kind: "fixed_duration"; durationSeconds: number };

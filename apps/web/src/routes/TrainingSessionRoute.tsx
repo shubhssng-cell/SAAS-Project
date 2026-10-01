@@ -5,9 +5,29 @@ import { QuestionPlayer } from "../components/QuestionPlayer.js";
 import { Button, Card, ErrorNotice, LoadingState, Screen } from "../design/index.js";
 import { usePracticeSession } from "../practice/PracticeSessionContext.js";
 import { useNavigate } from "../router/router.js";
-import { describeAnswered, describeCompletion, describeQuestionPosition, describeProgress, formatClock, SESSION_RECORD_NOTE, trainingResultPath } from "../training/trainingEntry.js";
+import { describeAnswered, describeCompletion, describeQuestionPosition, describeProgress, describeTimeLeft, formatClock, SESSION_RECORD_NOTE, trainingResultPath } from "../training/trainingEntry.js";
 
 type SessionState = { status: "loading" } | { status: "loaded"; next: TrainingNextViewModel } | { status: "error"; sessionExpired: boolean };
+
+/**
+ * A live countdown for a TIMED session (Pressure Training). Seeded from the server's remaining seconds when the question loads and ticked by
+ * the wall clock -- display only; the server's clock alone decides when the session is over (completion is applied on the next step).
+ */
+function TimeLeft({ session }: { session: TrainingSessionViewModel }) {
+  const seed = session.progress.remainingSeconds ?? 0;
+  const [left, setLeft] = useState(seed);
+  useEffect(() => {
+    setLeft(seed);
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => setLeft(Math.max(0, seed - Math.floor((Date.now() - startedAt) / 1000))), 1000);
+    return () => window.clearInterval(interval);
+  }, [seed, session.sessionId, session.progress.completedQuestionCount]);
+  return (
+    <p className="subtext" data-testid="session-time-left">
+      {describeTimeLeft(left)}
+    </p>
+  );
+}
 
 function SessionHeader({ session, showPosition = false }: { session: TrainingSessionViewModel; showPosition?: boolean }) {
   return (
@@ -22,6 +42,7 @@ function SessionHeader({ session, showPosition = false }: { session: TrainingSes
       <p className="subtext" role="status">
         {showPosition ? describeQuestionPosition(session) : describeProgress(session)}
       </p>
+      {showPosition && session.completion.kind === "fixed_duration" && session.progress.remainingSeconds !== null && <TimeLeft session={session} />}
     </Card>
   );
 }

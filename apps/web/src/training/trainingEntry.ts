@@ -23,6 +23,13 @@ export const COMPLETION_PRESETS: readonly CompletionPreset[] = [
 
 export const DEFAULT_COMPLETION_PRESET_ID = "q5";
 
+/** The presets a system allows (`kinds` = its `completionKinds`, `null` = all). Never empty: a system that allows a kind we have no preset for falls back to all presets. */
+export function presetsFor(kinds: ReadonlyArray<"fixed_question_count" | "fixed_duration"> | null): readonly CompletionPreset[] {
+  if (kinds === null) return COMPLETION_PRESETS;
+  const allowed = COMPLETION_PRESETS.filter((preset) => kinds.includes(preset.completion.kind));
+  return allowed.length > 0 ? allowed : COMPLETION_PRESETS;
+}
+
 export function describeCompletion(completion: TrainingCompletionViewModel): string {
   return completion.kind === "fixed_question_count" ? `${completion.questionCount} question${completion.questionCount === 1 ? "" : "s"}` : `${Math.round(completion.durationSeconds / 60)} minutes`;
 }
@@ -76,3 +83,8 @@ export function describeAnswered(session: TrainingSessionViewModel): string | nu
 
 /** The standing caveat shown with a finished session: a session is a record of what happened, not a measure of anything permanent. */
 export const SESSION_RECORD_NOTE = "This is a record of this session only. It is evidence of what you did here, not a measure of lasting progress.";
+
+/** What the live "time left" line says. Display only: the SERVER's clock decides when a timed session is over; this is seeded from its remaining seconds. */
+export function describeTimeLeft(remainingSeconds: number): string {
+  return remainingSeconds > 0 ? `Time left: ${formatClock(remainingSeconds)}` : "Time is up for this session. Finish the open question; no new question will start.";
+}

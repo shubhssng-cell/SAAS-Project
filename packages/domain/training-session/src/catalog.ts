@@ -56,6 +56,12 @@ export interface TrainingSystemDefinition {
    * after every recorded attempt). The objective is a snapshot taken at start, so it must not name a concept that may no longer be the target.
    */
   conceptNotInObjective?: boolean;
+  /**
+   * Optional restriction of which completion rules a student may choose for this system. Pressure Training is a TIMED, sustained run whose block
+   * carries the session's time budget (D-061: budget consumption is one of its evidenced dimensions), so it allows `fixed_duration` only.
+   * Absent = every rule is allowed. Enforced server-side; the hub only offers what is allowed.
+   */
+  completionKinds?: readonly ("fixed_question_count" | "fixed_duration")[];
   /** Optional sentence shown (instead of the generic one) when a session's system stops applying mid-session because its OWN evidence now says nothing more is needed. */
   noLongerApplicableNote?: string;
   /** Optional sentence appended to the objective when the provider names no target concept (e.g. Trap Lab, whose recurrence is not concept-scoped). */
@@ -126,7 +132,26 @@ export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
     noLongerApplicableNote: "Your recorded practice now includes several questions in each unfamiliar style, so there is nothing more to add right now. You can end the session.",
     focusSentence: "This session is expanding the kinds of questions you've encountered."
   },
-  { systemId: "pressure-training", dimension: "pressure", label: "Pressure", trains: "Holding your performance across a timed run of questions.", providerId: "pressure-training" },
+  {
+    systemId: "pressure-training",
+    dimension: "pressure",
+    label: "Pressure",
+    sessionTitle: "Pressure Training",
+    trains: "Practice a sustained, timed run of questions: keep working steadily across a whole sequence, not just one question.",
+    providerId: "pressure-training",
+    // No `stages`: Pressure Training has no progression vocabulary (D-061); its evidence is sustained-sequence BLOCK evidence, not a graduated dimension.
+    completionKinds: ["fixed_duration"],
+    // The evidenced concept is recomputed from the block history after every attempt, so the start-time objective never names one.
+    conceptNotInObjective: true,
+    notApplicableByReason: {
+      insufficient_evidence: "Needs several earlier training sessions of at least three questions each on the same concept first.",
+      sufficient_blocks_no_pressure_detected: "Your recorded training sessions don't call for this right now."
+    },
+    notApplicableNote: "Needs several earlier training sessions of at least three questions each on the same concept first.",
+    noEligibleNote: "No published question for this training is available right now.",
+    noLongerApplicableNote: "Your recorded training sessions no longer call for this, so there is nothing more to add right now. You can end the session.",
+    focusSentence: "This session is a sustained, timed run of questions."
+  },
   { systemId: "revision", dimension: "revision", label: "Revision", trains: "Revisiting concepts after time has passed.", providerId: null },
   { systemId: "overtraining", dimension: "overtraining", label: "Overtraining", trains: "Keeping repeated practice from over-narrowing.", providerId: null }
 ];

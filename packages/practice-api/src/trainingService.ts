@@ -63,7 +63,7 @@ export class TrainingApiService {
       const systems: TrainingSystemCardView[] = runs.map((run) => {
         const availability = toAvailability(run);
         const note = this.noteFor(run, availability);
-        return { systemId: run.definition.systemId, dimension: run.definition.dimension, label: run.definition.label, trains: run.definition.trains, availability, note };
+        return { systemId: run.definition.systemId, dimension: run.definition.dimension, label: run.definition.label, trains: run.definition.trains, availability, note, completionKinds: run.definition.completionKinds ? [...run.definition.completionKinds] : null };
       });
       const active = await this.deps.trainingSessionRepository.findActiveByEnrollmentId(claim.enrollmentId);
       return { systems, activeSession: active ? await this.toView(this.assertOwned(active, claim), now, { stageKey: null }) : null };
@@ -85,6 +85,9 @@ export class TrainingApiService {
       const config = validateTrainingSessionConfig(input.config);
       const definition = findTrainingSystem(input.systemId);
       if (definition === null) throw new TrainingSessionError("unknown_system", "That training system does not exist.");
+      if (definition.completionKinds && !definition.completionKinds.includes(config.completion.kind)) {
+        throw new TrainingSessionError("invalid_config", "That session length is not available for this training.");
+      }
       assertEnrollmentOwnership(await this.deps.enrollmentReader.findById(claim.enrollmentId), claim);
 
       return await this.serialized(`enrollment|${claim.enrollmentId}`, async () => {

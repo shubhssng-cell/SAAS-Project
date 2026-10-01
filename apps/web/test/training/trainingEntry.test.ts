@@ -8,8 +8,10 @@ import {
   describeCompletion,
   describeProgress,
   describeQuestionPosition,
+  describeTimeLeft,
   formatClock,
   isStartable,
+  presetsFor,
   trainingResultPath,
   trainingSessionPath
 } from "../../src/training/trainingEntry.js";
@@ -79,5 +81,27 @@ describe("Training entry helpers (Phase 5 Unit 1)", () => {
   it("no helper output speaks about confidence, emotion or any inferred state", () => {
     const text = JSON.stringify([COMPLETION_PRESETS, describeProgress(session()), describeCompletion(session().completion)]).toLowerCase();
     for (const banned of ["confidence", "emotion", "motivation", "anxiety", "mood"]) expect(text).not.toContain(banned);
+  });
+});
+
+describe("Pressure Training entry helpers (Phase 5 Unit 6)", () => {
+  it("presetsFor offers every preset when a system has no restriction, and only the allowed kind otherwise", () => {
+    expect(presetsFor(null)).toEqual(COMPLETION_PRESETS);
+    const timed = presetsFor(["fixed_duration"]);
+    expect(timed.map((p) => p.id)).toEqual(["m5", "m10"]);
+    expect(timed.every((p) => p.completion.kind === "fixed_duration")).toBe(true);
+    expect(presetsFor(["fixed_question_count"]).every((p) => p.completion.kind === "fixed_question_count")).toBe(true);
+  });
+
+  it("presetsFor never returns an empty list (a kind with no preset falls back to all)", () => {
+    expect(presetsFor([])).toEqual(COMPLETION_PRESETS);
+  });
+
+  it("describeTimeLeft shows a clock while time remains and an honest, non-alarming line once it is up", () => {
+    expect(describeTimeLeft(600)).toBe("Time left: 10:00");
+    expect(describeTimeLeft(65)).toBe("Time left: 1:05");
+    expect(describeTimeLeft(0)).toBe("Time is up for this session. Finish the open question; no new question will start.");
+    expect(describeTimeLeft(-3)).toBe("Time is up for this session. Finish the open question; no new question will start.");
+    expect(describeTimeLeft(30)).not.toMatch(/stress|hurry|fail|behind|slow/i);
   });
 });

@@ -35,3 +35,27 @@ describe("training system catalog -- registration and lookup", () => {
     expect(findTrainingSystem("overtraining")?.providerId).toBeNull();
   });
 });
+
+describe("Pressure Training catalog entry (Phase 5 Unit 6)", () => {
+  const pressure = findTrainingSystem("pressure-training")!;
+
+  it("is wired to the existing pressure-training provider, with no stages and a timed-run-only restriction", () => {
+    expect(pressure.providerId).toBe("pressure-training");
+    expect(pressure.dimension).toBe("pressure");
+    expect(pressure.stages).toBeUndefined();
+    expect(pressure.completionKinds).toEqual(["fixed_duration"]);
+    expect(pressure.conceptNotInObjective).toBe(true);
+  });
+
+  it("is the only system that restricts the completion kind", () => {
+    const restricted = TRAINING_SYSTEM_CATALOG.filter((d) => d.completionKinds !== undefined).map((d) => d.systemId);
+    expect(restricted).toEqual(["pressure-training"]);
+  });
+
+  it("has an authored sentence for each provider not-applicable reason, none of which shows a code, threshold, count or trait claim", () => {
+    expect(Object.keys(pressure.notApplicableByReason ?? {}).sort()).toEqual(["insufficient_evidence", "sufficient_blocks_no_pressure_detected"]);
+    const copy = [pressure.trains, pressure.sessionTitle, pressure.notApplicableNote, pressure.noEligibleNote, pressure.noLongerApplicableNote, pressure.focusSentence, ...Object.values(pressure.notApplicableByReason ?? {})].join(" ");
+    expect(copy).not.toMatch(/insufficient_evidence|sufficient_blocks|within_block|reduced_recovery|budget_consumption|\d+%|threshold/i);
+    expect(copy).not.toMatch(/stress|anxi|fatigue|panic|nervous|confidence|motivat|struggle|weak|lack|poor|resilien|crack/i);
+  });
+});

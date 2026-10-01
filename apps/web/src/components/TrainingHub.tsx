@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { TrainingCompletionViewModel, TrainingHubViewModel, TrainingSystemCardViewModel } from "../adapter/index.js";
 import { Button, Card, ErrorNotice, Screen } from "../design/index.js";
-import { COMPLETION_PRESETS, DEFAULT_COMPLETION_PRESET_ID, describeProgress, isStartable } from "../training/trainingEntry.js";
+import { DEFAULT_COMPLETION_PRESET_ID, describeProgress, isStartable, presetsFor } from "../training/trainingEntry.js";
 
 function SystemCard({
   system,
@@ -16,6 +16,8 @@ function SystemCard({
 }) {
   const [presetId, setPresetId] = useState(DEFAULT_COMPLETION_PRESET_ID);
   const startable = isStartable(system.availability);
+  const presets = presetsFor(system.completionKinds);
+  const selectedPresetId = presets.some((p) => p.id === presetId) ? presetId : presets[0]!.id;
   const selectId = `completion-${system.systemId}`;
 
   return (
@@ -30,8 +32,8 @@ function SystemCard({
           <label className="form-label" htmlFor={selectId}>
             Session length
           </label>
-          <select id={selectId} className="form-input" value={presetId} onChange={(event) => setPresetId(event.target.value)} disabled={anyStarting}>
-            {COMPLETION_PRESETS.map((preset) => (
+          <select id={selectId} className="form-input" value={selectedPresetId} onChange={(event) => setPresetId(event.target.value)} disabled={anyStarting}>
+            {presets.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.label}
               </option>
@@ -43,7 +45,7 @@ function SystemCard({
         block
         disabled={!startable || anyStarting}
         aria-label={startable ? `Start ${system.label} training` : `${system.label} training is not available`}
-        onClick={() => onStart(system.systemId, (COMPLETION_PRESETS.find((p) => p.id === presetId) ?? COMPLETION_PRESETS[0]!).completion)}
+        onClick={() => onStart(system.systemId, (presets.find((p) => p.id === selectedPresetId) ?? presets[0]!).completion)}
       >
         {starting ? "Starting…" : startable ? "Start training" : "Not available"}
       </Button>
