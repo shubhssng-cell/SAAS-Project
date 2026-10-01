@@ -14,7 +14,7 @@ Numbering is **Phase-4-relative** (Unit 1 … Unit 5); there is no relation to t
 | Unit 2 | Hypothesis generation + student confirmation / correction | **COMPLETE** (below) |
 | Unit 3 | Persist confirmed diagnosis + RepairPlan | **COMPLETE** (below) |
 | Unit 4 | Targeted repair selection + repair lifecycle | **COMPLETE** (below) |
-| Unit 5 | Full end-to-end Autopsy → Repair → improved-practice hardening | NOT STARTED (not begun) |
+| Unit 5 | End-to-end Autopsy → Repair hardening | **COMPLETE** (below) — **PHASE 4 COMPLETE** (technical + policy validation; no outcome calibration) |
 
 *(This is a working plan; later units may be adjusted when they start.)*
 
@@ -383,3 +383,123 @@ Domain: 14 lifecycle tests (`packages/domain/autopsy/test/repairLifecycle.test.t
 ### What Unit 5 will build (and Unit 4 did NOT)
 
 Unit 5 — **end-to-end Autopsy → Repair hardening**: failure-mode and abuse review of the whole chain; the correction → diagnosis-pass design decision (schema + safe prompt + confirmation); content/pool sufficiency for demonstrable repair; calibration questions on the provisional lifecycle policy; a real-model run when a key exists. **Unit 5 has NOT been started.**
+
+
+## Unit 5 — End-to-end Autopsy → Repair hardening (FINAL UNIT OF PHASE 4)
+
+> **A hardening unit: no new intelligence.** The whole chain was exercised as one system to find cross-module contradictions, lifecycle bugs, ownership failures, duplicate side effects, stale state, restart/concurrency problems — and to state precisely what has and has not been validated.
+
+### The complete chain (as built)
+
+```
+Attempt (submitted, graded)                                   @ipmat/attempt, practice-api
+  -> Observation evidence (observed / derived / unknown)      Unit 1  describeObservationEvidence()
+  -> Hypothesis OFFER (model proposes, app validates)         Unit 2  generateObservationHypothesis(); category = DESIGNED trap category
+       persisted once: autopsies row, confirmed = NULL        Unit 3  unique attempt_id
+  -> Student response, recorded ONCE (first wins)             Unit 3  conditional UPDATE ... WHERE confirmed IS NULL
+       confirm  -> confirmed = true  -> exactly ONE repair_plans row (unique autopsy_id)
+       reject   -> confirmed = false (no diagnosis, no plan)
+       correct  -> confirmed = false + the student's exact words (state: awaiting_diagnosis; no diagnosis, no plan)
+  -> Targeted repair selection (explicit tiers, no score)     Unit 4  existing repair tier; repair > training systems > adaptive
+  -> Repair attempt = an ordinary persisted attempt
+  -> Lifecycle pending -> in_progress -> completed            Unit 4  evaluateRepairLifecycle() over persisted attempts (derived; stored column synced forward-only)
+  -> Next recommendation (repair continues, or ordinary practice resumes)
+```
+
+### Correction → diagnosis pass: DECISION (resolved, not implemented)
+
+The question was whether the existing architecture can support *original hypothesis → student rejects + correction → correction as new evidence → new hypothesis/diagnosis → student confirmation → RepairPlan*. Inspection of the abstractions says **not without a substantial change**, so — per the unit's instruction — **no large migration and no second diagnosis system was built**:
+
+1. **Schema.** `autopsies.attempt_id` is unique and `findByAttemptId` / the offer endpoint / the token's stored-offer check all assume ONE autopsy per attempt. A second hypothesis needs either dropping that uniqueness or a `supersedes` link, plus an explicit rule for which row is "current" in every reader. That is a cross-cutting data-model change.
+2. **Input class.** The hypothesis generator and its validator accept *observed facts only* (numbered recorded sentences; a cited line must be one the student was shown). A student's free text is student-asserted and unverified: it needs its own prompt contract, its own grounding rule (what may be cited, what may NOT be inferred from it), prompt-injection handling, and length/content limits beyond the current 500-char cap.
+3. **Confirmation path.** A second offer needs a second token/response lifecycle (the first response is terminal by design: D-034/D-038/D-072).
+4. **Safety invariant.** `buildRepairPlan()` correctly refuses anything but `confirmed` (D-039); relaxing it would let an unconfirmed correction steer practice.
+
+**What IS guaranteed and tested** (service level, HTTP, real Postgres): the correction is stored exactly; the original proposal is never overwritten; no diagnosis, no plan, no repair flow; no later request body or replay can turn it into either; recommendations are unchanged by it; the database still refuses a second autopsy for an attempt (a deliberate tripwire — changing that is a design decision, not an accident).
+
+**The future contract (to be built deliberately, not patched in):** (a) a new `autopsies` row linked to the original (`supersedes_autopsy_id`), the original left intact and the uniqueness replaced by "one *current* row per attempt"; (b) a diagnosis-pass prompt whose input is the observation evidence **plus** the student's words labelled *student-asserted, unverified*; its output is validated against the same grounding/safety rules and may cite the student's words only as "you said"; (c) a fresh `awaiting_confirmation` offer and token, confirmed by the student exactly like the first; (d) only then `buildRepairPlan()` → one plan for the *new* autopsy; (e) the plan's provenance chain includes both autopsies. Until then `awaiting_diagnosis` has no consumer and is honest about it.
+
+### RepairPlan lifecycle — audit result
+
+Forward-only (`pending → in_progress → completed`, never back); idempotent (`WHERE status IN (allowed-from)`); derived from persisted attempts so restart/second instance reconstruct it; one plan per autopsy (database-enforced) and one repair flow per recommendation; a completed plan never blocks ordinary practice; a new confirmed diagnosis creates a new plan. On real Postgres: 24 racing writers across two clients → exactly one completion, at most one `in_progress` win, no regression, no duplicate; recommendations racing with submissions never duplicate a plan or regress status. No permanent repair-loop lock exists: the round limit (3) releases any plan.
+
+### Repair completion policy (provisional; unchanged from Unit 4, now exercised end to end)
+
+`demonstrated` = the last 2 direct-match attempts correct (a wrong answer or a skip resets the run); `round_limit` = 3 attempts on the concept since the confirmation. One correct repair answer never completes a plan (asserted at service level, on Postgres and in the browser). `completed` never means "fixed"/"mastered" and no student-facing text says so. The plan stays traceable: plan → autopsy → attempt, with the student's confirmation time.
+
+### Synthetic TEST DATA pool (validation scaffolding only)
+
+Service level: ten synthetic questions — same concept; same cell + trap at three tiers; same family other cell; same trap other family; two broader; one unpublished; one malformed (expected time 0). Postgres: six synthetic questions that REUSE the real Reverse / Successive cells (same concept, family, cell and trap), prefixed `[TEST DATA phase-4-unit-5]`, provenance `phase-4-unit-5-TEST-DATA`, unpublished again in `finally`. They prove **exact repair match beats broader fallback**, that draft and malformed exact candidates are never served, and that `demonstrated` completion is reachable (impossible on the one-question-per-family seed). After every run the real published set was asserted unchanged (3 real questions) and zero synthetic questions remained published. They are test data, not content, and contribute nothing to calibration.
+
+### Validation — three separate things
+
+| Level | Meaning | Status |
+|---|---|---|
+| **Technical validation** | the code follows its invariants (typed contracts, once-only writes, ownership, determinism, no leakage) | **Claimed** — tests at domain, service, HTTP and real-Postgres level, plus real-browser runs |
+| **Policy validation** | controlled scenarios behave according to the documented policy (A–G scenarios, tier order, lifecycle rules, fallback) | **Claimed** — scripted scenarios on synthetic and seeded pools |
+| **Outcome calibration** | real student data shows the policy improves learning | **NOT claimed.** No real students, almost no real content, no real model |
+
+No lifecycle constant, tier order, difficulty rule or copy has been shown to improve learning.
+
+### Calibration boundary — what future real data would need
+
+The loop persists, per student: attempts (outcome, answer, timestamps, events), the offered hypothesis with its observation evidence, the student's response and its time, the correction text, the RepairPlan (target, status) and its link to the diagnosed attempt. That supports future measurement of: post-error improvement, repeated-error resolution, time improvement, retention, progression after repair, repair completion rate. **Not recorded today** (a calibration study would first need these): which tier/question was served *as a repair* and why (recomputed, not stored), fallback frequency, the completion basis (`demonstrated` vs `round_limit`), "unnecessary"/"false" repair judgments (they need a ground truth no one has), and any control group. These are named gaps, not features added in this unit.
+
+### Real-model boundary
+
+No live model has ever been exercised in this repository (no `ANTHROPIC_API_KEY` in the environment). Every browser/Postgres run used the dev-scripted scaffold (not AI; refused in production). The whole suite is provider-independent. No live smoke test was added because it could not be run or verified; `npm run smoke:anthropic` (question-engine) remains the only opt-in live check and does not cover the hypothesis task. When a key exists, a live hypothesis smoke test should check structured output, safety validation, evidence grounding and student-safe rendering — and one success would still not be model validation.
+
+### Security / abuse audit — results
+
+Probed over the real HTTP server (`apps/api/test/phase4Security.test.ts`) and on Postgres: unauthenticated → 401 on every chain endpoint; another student → 403 on offer, response, evidence, result, autopsy; unknown attempt → 404; before submission → 409 (no hypothesis, diagnosis, plan or answer key anywhere); garbage/truncated/other-secret/oversize tokens → 409/400 and nothing recorded; a token swapped onto another attempt or another student → 403; replay of a used token → 200 with the first answer unchanged (`alreadyRecorded`), never a second diagnosis; forged body fields (status, diagnosis, repairPlan, hypothesis text, student/attempt ids, confirmedAt) are ignored — the stored offer decides everything; a correction cannot be upgraded by any later body; no endpoint exists to create/read/modify a diagnosis or plan (404/405); malformed responses → 400; 20 concurrent identical confirmations → one winner; concurrent conflicting responses → one consistent outcome seen by all callers. **Findings:** no exploitable defect was found in the chain. One *behavioral* gap was found and is documented, not patched (below).
+
+### Known technical debt / limitations
+
+- **No plan backfill.** If the diagnosed question becomes unavailable between the offer and the student's confirmation, the confirmation is recorded safely (no error, no partial state) but **no RepairPlan is created, and none is created later** when the question returns. Tested; a deliberate "first response wins" consequence. A backfill would be new behavior.
+- A repair "round" is any finalized attempt on the target concept after the confirmation, including an attempt started before the confirmation and submitted after it, and including ordinary practice on that concept — it is not limited to questions served as repair.
+- The originally diagnosed question can be served again as a repair question after one intervening question.
+- Lifecycle constants (2 correct / 3 rounds) and the "direct match" definition are provisional; the speed tie-break is inert (`behaviorSignals` are not persisted on `RepairPlan`).
+- Stored `completed` has no reason column; `demonstrated` vs `round_limit` is recomputed.
+- The correction diagnosis pass does not exist (decision above).
+- The seeded database still has one question per family with distinct traps; demonstration there is unreachable (only the synthetic pool shows it).
+- Answer changes, hints and solution opening remain unobserved in the practice flow (Unit 1).
+- Dev-scripted offers only; no model quality evidence.
+
+### Phase 4 exit criteria
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | observation evidence is reliable | Unit 1 tests; identical object on restarted/second instance (Postgres); derived from persisted attempts only |
+| 2 | hypothesis generation is fail-safe | provider error / unsafe / ungrounded / mismatched output → `unavailable`, nothing stored, result + Continue unaffected (service, Postgres, browser) |
+| 3 | confirmation semantics are correct | first response wins; confirm/reject/correct exactly as specified; 20-way and conflicting concurrency |
+| 4 | confirmed diagnosis persistence works | autopsy row, response time, provenance; restart/second-instance reads identical |
+| 5 | rejection is safe | no diagnosis, no plan, no repair flow (all levels) |
+| 6 | correction is safe | exact words stored, original kept, no diagnosis/plan, cannot be upgraded; boundary resolved by decision above |
+| 7 | RepairPlan persistence works | one plan per autopsy (DB unique), provenance chain, student-safe view only |
+| 8 | targeted repair selection works | exact beats family beats trap-only beats concept fallback; draft/malformed excluded; Postgres synthetic pool |
+| 9 | repair priority works | repair outranks every adaptive reason; ordinary practice when no plan |
+| 10 | repair fallback works | no candidate → deterministic ordinary/“nothing to recommend”; plan survives the gap; browser ×4 cycles |
+| 11 | repair lifecycle works | derived, forward-only, idempotent; demonstrated and round-limit paths; browser completion by demonstration |
+| 12 | duplicate prevention works | unique attempt_id, unique autopsy_id, conditional update; replay/duplicate/concurrent tests |
+| 13 | concurrency is safe | 24 racing writers; 24-way recommendation bursts across 3 instances; submissions racing recommendations (Postgres) |
+| 14 | restart reconstruction works | Postgres + browser across API restart |
+| 15 | multi-instance behavior is deterministic | second instance and 12–24-way cross-instance bursts identical |
+| 16 | ownership isolation works | 401/403/404 matrix; swapped tokens; strangers see nothing |
+| 17 | unpublished-question safety works | draft and malformed candidates never served; unpublishing mid-flow handled safely |
+| 18 | answer leakage is prevented | nothing before submission (409; page source checked in browser); student-safe views carry no key |
+| 19 | psychological inference is prevented | all student-facing strings scanned (service, HTTP, Postgres, browser) |
+| 20 | correction-diagnosis boundary explicitly resolved | decision + future contract above |
+| 21 | current limitations documented | section above |
+| 22 | technical vs policy vs outcome validation separated | table above — only the first two claimed |
+
+### Tests added in Unit 5
+
+`packages/practice-api/test/phase4EndToEnd.test.ts` (16: scenarios A–G, completion semantics, lifecycle hardening, whole-chain determinism incl. candidate-order invariance and 16 concurrent calls, pre-submission gating, ownership, leakage scan of every student-facing surface); `apps/api/test/phase4Security.test.ts` (13: the security matrix above over real HTTP); six real-Postgres tests in `prismaPersistence.integration.test.ts` (synthetic exact-beats-broader with restart/second instance/24-way concurrency and demonstration completion; broader-only copy; 24-writer repair-state race + new plan after completion; submissions racing recommendations; twin-student determinism; diagnosed question unavailable between offer and confirmation). Browser: a scripted real-browser run of the full loop with a refresh at every stage, API restart, second instance, rejection, correction, AI unavailable and a content gap.
+
+### Phase 4 status: COMPLETE
+
+Technical and policy validation only. Outcome calibration, a live model, real content depth and the correction diagnosis pass are explicitly outstanding.
+
+### What comes next (from the roadmap — nothing started here)
+
+The master roadmap's next phase is **Phase 5 — Student-facing Training Systems** (Calculation Gym / Speed Lab / Trap Lab / Novelty Training / Pressure Training made visible and enterable). Phase 6 (content expansion) is where content-pool sufficiency for demonstrable repair is addressed in earnest. No Phase 5 work was started.

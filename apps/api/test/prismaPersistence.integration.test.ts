@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { PersistenceError, PrismaAttemptRepository, createPrismaClient } from "@ipmat/db";
+import { PersistenceError, PrismaAttemptRepository, PrismaRepairPlanRepository, createPrismaClient } from "@ipmat/db";
 import { startAttempt } from "@ipmat/attempt";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -1414,6 +1414,220 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
       await a.prisma.question.updateMany({ where: { id: { in: ids } }, data: { validationState: "published" } });
     }
     expect((await recommendationOf(a, s.cookie)).json.modeLabel).toBe(REPAIR_LABEL); // the plan itself was never lost or completed by the gap
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Phase 4 Unit 5 -- END-TO-END HARDENING on real Postgres, with a richer SYNTHETIC pool clearly labelled TEST DATA (body prefixed
+  // "[TEST DATA phase-4-unit-5]", provenance sourceRef "phase-4-unit-5-TEST-DATA"). The synthetic questions REUSE the real Reverse Percentage /
+  // Successive Percentage Change cells (same concept, family, cell and trap), so an EXACT repair match exists and can be shown to beat a
+  // broader one. They are unpublished again in `finally`; the real published set is asserted unchanged. Scaffolding for validating the
+  // POLICY and its persistence -- not question content, and not calibration.
+  // ---------------------------------------------------------------------------------------------
+
+  interface RepairPool { exact: string[]; exactByTier: Record<string, string>; broader: string; unpublishedExact: string; malformedExact: string; release: () => Promise<void> }
+
+  async function publishRepairPool(): Promise<RepairPool> {
+    const real = (await a.prisma.question.findMany({ where: { validationState: "published" }, include: { patternTaxonomyCell: { include: { patternFamily: true } } } })).filter((q) => !q.body.startsWith("[TEST DATA"));
+    const reverse = real.find((q) => q.patternTaxonomyCell.patternFamily.name === "Reverse Percentage")!;
+    const successive = real.find((q) => q.patternTaxonomyCell.patternFamily.name === "Successive Percentage Change")!;
+    const provenance = await a.prisma.provenance.create({ data: { sourceType: "original", sourceRef: "phase-4-unit-5-TEST-DATA", attributedTo: "synthetic test data (not question content)" } });
+    const created: string[] = [];
+    const make = async (template: typeof reverse, label: string, over: { tier?: "standard" | "advanced" | "hard"; state?: "published" | "human_reviewed"; expected?: number }) => {
+      const { id: _id, provenanceId: _p, createdAt: _c, patternTaxonomyCell: _cell, ...rest } = template;
+      void _id; void _p; void _c; void _cell;
+      const id = randomUUID();
+      created.push(id);
+      await a.prisma.question.create({
+        data: { ...rest, id, body: `[TEST DATA phase-4-unit-5] ${label} -- ${template.body}`, difficultyTier: over.tier ?? template.difficultyTier, expectedTimeSeconds: over.expected ?? template.expectedTimeSeconds, validationState: over.state ?? "published", provenanceId: provenance.id } as never
+      });
+      return id;
+    };
+    try {
+      const std = await make(reverse, "exact standard", { tier: "standard" });
+      const adv = await make(reverse, "exact advanced", { tier: "advanced" });
+      const hard = await make(reverse, "exact hard", { tier: "hard" });
+      const broader = await make(successive, "broader (other family)", { tier: "advanced" });
+      const unpublishedExact = await make(reverse, "exact but UNPUBLISHED", { state: "human_reviewed" });
+      const malformedExact = await make(reverse, "exact but MALFORMED (expected time 0)", { expected: 0 });
+      return {
+        exact: [std, adv, hard],
+        exactByTier: { standard: std, advanced: adv, hard },
+        broader,
+        unpublishedExact,
+        malformedExact,
+        release: async () => {
+          await a.prisma.question.updateMany({ where: { id: { in: created } }, data: { validationState: "human_reviewed" } });
+        }
+      };
+    } catch (error) {
+      await a.prisma.question.updateMany({ where: { id: { in: created } }, data: { validationState: "human_reviewed" } });
+      throw error;
+    }
+  }
+  const publishedRealIds = async () => (await a.prisma.question.findMany({ where: { validationState: "published", NOT: { body: { startsWith: "[TEST DATA" } } }, select: { id: true }, orderBy: { id: "asc" } })).map((q) => q.id);
+
+  it("PHASE 4 UNIT 5 (synthetic TEST DATA pool): an EXACT repair candidate beats the broader one; draft and malformed exact candidates are never served; identical on a restarted instance, a second instance and under concurrency; the real published set is unchanged", async () => {
+    const real = await familyIds();
+    const publishedBefore = await publishedRealIds();
+    const pool = await publishRepairPool();
+    try {
+      const s = await newStudent(a, "p4u5-exact");
+      const diagnosed = await confirmedPlanFor(s, real.reverse);
+      const rec = await recommendationOf(a, s.cookie);
+      const exactIds = [...pool.exact, real.reverse];
+      expect(rec.json.modeLabel).toBe(REPAIR_LABEL);
+      expect(exactIds).toContain(rec.json.questionId);
+      expect(rec.json.questionId).not.toBe(real.reverse); // just answered
+      expect(rec.json.questionId).not.toBe(pool.broader);
+      expect(rec.json.questionId).not.toBe(pool.unpublishedExact);
+      expect(rec.json.questionId).not.toBe(pool.malformedExact);
+      expect(rec.json.questionId).toBe(pool.exactByTier.advanced); // closest to the diagnosed question's own (advanced) tier
+      expect(rec.json.explanation).toMatch(/practises the same pattern/);
+      expect(rec.json.explanation).not.toMatch(/broader/);
+
+      const restarted = await startInstance();
+      try {
+        expect((await recommendationOf(restarted, s.cookie)).json).toEqual(rec.json);
+        expect((await recommendationOf(b, s.cookie)).json).toEqual(rec.json);
+        const burst = await Promise.all(Array.from({ length: 24 }, (_, i) => recommendationOf([a, b, restarted][i % 3]!, s.cookie)));
+        for (const r of burst) expect(r.json).toEqual(rec.json);
+      } finally {
+        await restarted.close();
+      }
+
+      // two consecutive correct DIRECT-MATCH answers demonstrate the repair: the plan completes and ordinary practice resumes (never "fixed")
+      await startAndSubmit(a, s.cookie, rec.json.questionId as string, "correct");
+      const second = await recommendationOf(a, s.cookie);
+      expect(second.json.modeLabel).toBe(REPAIR_LABEL);
+      expect((await planRow(diagnosed))!.status).toBe("in_progress");
+      expect(exactIds).toContain(second.json.questionId);
+      await startAndSubmit(a, s.cookie, second.json.questionId as string, "correct");
+      const resumed = await recommendationOf(a, s.cookie);
+      expect(resumed.json.modeLabel).not.toBe(REPAIR_LABEL);
+      expect((await planRow(diagnosed))!.status).toBe("completed");
+      expect((await recommendationOf(b, s.cookie)).json).toEqual(resumed.json);
+      for (const r of [rec, second, resumed]) expect(JSON.stringify({ ...r.json, questionId: undefined })).not.toMatch(/base_confusion|taxonomy|autopsy|misconception|concept_fallback|trap_only|fixed|mastered|confiden|motivat|careless/i);
+    } finally {
+      await pool.release();
+    }
+    expect(await publishedRealIds()).toEqual(publishedBefore);
+    expect(await a.prisma.question.count({ where: { body: { startsWith: "[TEST DATA phase-4-unit-5]" }, validationState: "published" } })).toBe(0); // every synthetic question is unpublished again
+  });
+
+  it("PHASE 4 UNIT 5 (synthetic TEST DATA pool): with ONLY a broader candidate available the student is told it is broader -- no false exact-match claim", async () => {
+    const real = await familyIds();
+    const pool = await publishRepairPool();
+    try {
+      await a.prisma.question.updateMany({ where: { id: { in: [...pool.exact, pool.malformedExact] } }, data: { validationState: "human_reviewed" } });
+      // pool now: real.reverse (diagnosed), real.point, real.successive, the broader synthetic -- none is the exact cell except the diagnosed question itself
+      const s = await newStudent(a, "p4u5-broader");
+      await confirmedPlanFor(s, real.reverse);
+      const rec = await recommendationOf(a, s.cookie);
+      expect(rec.json.modeLabel).toBe(REPAIR_LABEL);
+      expect(rec.json.questionId).not.toBe(real.reverse);
+      expect(rec.json.explanation).toMatch(/broader Percentages question/);
+      expect(rec.json.explanation).not.toMatch(/practises the same pattern/);
+      expect((await recommendationOf(b, s.cookie)).json).toEqual(rec.json);
+    } finally {
+      await pool.release();
+    }
+  });
+
+  it("PHASE 4 UNIT 5: concurrent REPAIR-STATE updates on the real database are forward-only and idempotent (24 racing writers across two clients), and a new confirmed diagnosis after completion starts a new plan", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "p4u5-race");
+    const diagnosed = await confirmedPlanFor(s, real.reverse);
+    const plan = (await planRow(diagnosed))!;
+    const repoA = new PrismaRepairPlanRepository(a.prisma);
+    const repoB = new PrismaRepairPlanRepository(b.prisma);
+    const writes = await Promise.all(Array.from({ length: 24 }, (_, i) => (i % 2 ? repoA : repoB).advanceStatus({ planId: plan.id, studentId: s.studentId, to: i % 3 === 0 ? "completed" : "in_progress" })));
+    const completedWins = writes.filter((won, i) => won && i % 3 === 0).length;
+    const inProgressWins = writes.filter((won, i) => won && i % 3 !== 0).length;
+    expect(completedWins).toBe(1); // exactly one writer moves the plan to completed
+    expect(inProgressWins).toBeLessThanOrEqual(1); // and at most one got in before it, never after
+    expect((await planRow(diagnosed))!.status).toBe("completed");
+    expect(await repoA.advanceStatus({ planId: plan.id, studentId: s.studentId, to: "completed" })).toBe(false); // already completed: a no-op
+    expect(await repoA.advanceStatus({ planId: plan.id, studentId: s.studentId, to: "in_progress" })).toBe(false); // never backwards
+    expect(await repoA.advanceStatus({ planId: plan.id, studentId: randomUUID(), to: "completed" })).toBe(false); // never another student's plan
+    expect((await planRow(diagnosed))!.status).toBe("completed");
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+
+    // the stored status says completed -> repair no longer applies; a NEW confirmed diagnosis starts a fresh, valid plan
+    expect((await recommendationOf(a, s.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL);
+    const again = await confirmedPlanFor(s, real.successive);
+    expect((await planRow(again))!.status).toBe("pending");
+    expect((await recommendationOf(b, s.cookie)).json.modeLabel).toBe(REPAIR_LABEL);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(2);
+  });
+
+  it("PHASE 4 UNIT 5: recommendations racing with attempt submissions never duplicate a plan or move its status backwards; the end state matches the attempts", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "p4u5-interleave");
+    const diagnosed = await confirmedPlanFor(s, real.reverse);
+    const statusOrder = { pending: 0, in_progress: 1, completed: 2 } as const;
+    let high = 0;
+    const watch = async () => {
+      const status = (await planRow(diagnosed))!.status as keyof typeof statusOrder;
+      expect(statusOrder[status]).toBeGreaterThanOrEqual(high);
+      high = statusOrder[status];
+    };
+    for (let round = 0; round < 3; round++) {
+      const rec = await recommendationOf(a, s.cookie);
+      if (rec.json.modeLabel !== REPAIR_LABEL) break;
+      await Promise.all([
+        startAndSubmit(b, s.cookie, rec.json.questionId as string, "wrong"),
+        ...Array.from({ length: 8 }, (_, i) => recommendationOf(i % 2 ? a : b, s.cookie)),
+        ...Array.from({ length: 4 }, () => watch())
+      ]);
+      await watch();
+    }
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+    expect((await recommendationOf(a, s.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL); // three rounds -> released
+    await watch();
+    expect((await planRow(diagnosed))!.status).toBe("completed");
+  });
+
+  it("PHASE 4 UNIT 5: identical histories give identical repair decisions for two different students (no hidden randomness or per-student state)", async () => {
+    const real = await familyIds();
+    const pool = await publishRepairPool();
+    try {
+      const run = async (label: string) => {
+        const s = await newStudent(a, label);
+        await confirmedPlanFor(s, real.reverse);
+        const seen: unknown[] = [];
+        for (const outcome of ["correct", "wrong", "correct"] as const) {
+          const rec = await recommendationOf(a, s.cookie);
+          seen.push([rec.json.modeLabel, rec.json.questionId, rec.json.explanation]);
+          if (rec.json.modeLabel !== REPAIR_LABEL) break;
+          await startAndSubmit(a, s.cookie, rec.json.questionId as string, outcome);
+        }
+        return seen;
+      };
+      const first = await run("p4u5-twin-a");
+      const second = await run("p4u5-twin-b");
+      expect(second).toEqual(first);
+      expect(first.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      await pool.release();
+    }
+  });
+
+  it("PHASE 4 UNIT 5: if the diagnosed question becomes unavailable between the offer and the student's confirmation, the confirmation is recorded SAFELY with no plan (no error, no partial state) -- and is not retroactively turned into one", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "p4u5-unavailable");
+    const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+    try {
+      await a.prisma.question.update({ where: { id: real.reverse }, data: { validationState: "human_reviewed" } });
+      const done = await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" });
+      expect(done.status).toBe(200);
+      expect(done.json).toMatchObject({ status: "confirmed", persisted: true, diagnosis: { state: "confirmed" }, repairPlan: null });
+    } finally {
+      await a.prisma.question.update({ where: { id: real.reverse }, data: { validationState: "published" } });
+    }
+    expect(await planRow(attemptId)).toBeNull();
+    expect((await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId } })).confirmed).toBe(true);
+    expect((await recommendationOf(a, s.cookie)).json.modeLabel).not.toBe(REPAIR_LABEL); // a known, documented limitation: no backfill
   });
 
   it("repository level: the database rejects a second open attempt as a typed conflict, but allows a new one once the first is finalized", async () => {
