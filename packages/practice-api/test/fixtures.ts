@@ -113,7 +113,7 @@ export class World {
   trainingRecommendationOverrides: Partial<TrainingRecommendationDependencies> = {};
 
   /** Phase 4 Unit 2: optional hypothesis generator / sealer injected into the service under test (absent by default). */
-  hypothesis: Pick<PracticeApiDependencies, "hypothesisGenerator" | "hypothesisSealer"> = {};
+  hypothesis: Pick<PracticeApiDependencies, "hypothesisGenerator" | "hypothesisSealer" | "autopsyStore"> = {};
 
   service(): PracticeApiService {
     const questionReader = new InMemoryQuestionReader(this.questions);

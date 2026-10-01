@@ -61,9 +61,9 @@ describe("adapter: requestHypothesis", () => {
 describe("adapter: respondToHypothesis", () => {
   it("sends the token and the response type; a correction is sent exactly as typed", async () => {
     const words = "  I used 120% as the base — not the original.\n✓ ";
-    const { calls, fetchImpl } = fetchReturning(200, { attemptId: "a-1", status: "corrected", studentCorrectionText: words, hypothesisSummary: "x", persisted: false });
+    const { calls, fetchImpl } = fetchReturning(200, { attemptId: "a-1", status: "corrected", studentCorrectionText: words, hypothesisSummary: "x", persisted: true, diagnosis: { state: "confirmed" }, repairPlan: null });
     const result = await createApiTrainingAdapter(fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "opaque-token", response: { type: "corrected", correctedExplanation: words } });
-    expect(result).toEqual({ status: "corrected", studentCorrectionText: words });
+    expect(result).toEqual({ status: "corrected", studentCorrectionText: words, diagnosisState: "confirmed", repairPlan: null });
     expect(calls[0]?.url).toMatch(/\/v1\/attempts\/a-1\/hypothesis\/response$/);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ token: "opaque-token", response: "corrected", correctedExplanation: words });
     expect(JSON.stringify(calls[0]?.init?.body)).not.toMatch(/studentId|enrollmentId/); // identity is cookie-derived only
@@ -71,8 +71,8 @@ describe("adapter: respondToHypothesis", () => {
 
   it("confirm and reject send no correction text, and map to the matching status", async () => {
     for (const type of ["confirmed", "rejected"] as const) {
-      const { calls, fetchImpl } = fetchReturning(200, { attemptId: "a-1", status: type, studentCorrectionText: null, hypothesisSummary: "x", persisted: false });
-      expect(await createApiTrainingAdapter(fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type } })).toEqual({ status: type, studentCorrectionText: null });
+      const { calls, fetchImpl } = fetchReturning(200, { attemptId: "a-1", status: type, studentCorrectionText: null, hypothesisSummary: "x", persisted: true, diagnosis: { state: "confirmed" }, repairPlan: null });
+      expect(await createApiTrainingAdapter(fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type } })).toEqual({ status: type, studentCorrectionText: null, diagnosisState: "confirmed", repairPlan: null });
       expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ token: "t", response: type });
     }
   });
@@ -80,6 +80,41 @@ describe("adapter: respondToHypothesis", () => {
   it("rejects an unknown status and a refusal (the screen then says it could not be recorded)", async () => {
     await expect(createApiTrainingAdapter(fetchReturning(200, { status: "proven" }).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "confirmed" } })).rejects.toBeDefined();
     await expect(createApiTrainingAdapter(fetchReturning(409, { error: { code: "invalid_state", message: "expired" } }).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "confirmed" } })).rejects.toBeDefined();
+  });
+});
+
+describe("adapter: persisted outcomes (Unit 3)", () => {
+  const view = (status: string, state: string, plan: unknown, correction: string | null = null) => ({ attemptId: "a-1", status, studentCorrectionText: correction, hypothesisSummary: "x", persisted: true, alreadyRecorded: false, diagnosis: { state }, repairPlan: plan });
+
+  it("maps a confirmed outcome with the safe practice focus only -- nothing internal is carried", async () => {
+    const body = view("confirmed", "confirmed", { conceptName: "Percentages", patternFamilyName: "Reverse Percentage", status: "pending", autopsyId: "x", targetConceptId: "y" });
+    const result = await createApiTrainingAdapter(fetchReturning(200, body).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "confirmed" } });
+    expect(result).toEqual({ status: "confirmed", studentCorrectionText: null, diagnosisState: "confirmed", repairPlan: { conceptName: "Percentages", patternFamilyName: "Reverse Percentage" } });
+    expect(JSON.stringify(result)).not.toMatch(/autopsyId|targetConceptId|status":"pending/);
+  });
+
+  it("maps rejected (no diagnosis) and corrected (exact words, awaiting a diagnosis) without a plan", async () => {
+    const rejected = await createApiTrainingAdapter(fetchReturning(200, view("rejected", "not_confirmed", null)).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "rejected" } });
+    expect(rejected).toEqual({ status: "rejected", studentCorrectionText: null, diagnosisState: "not_confirmed", repairPlan: null });
+    const words = "  exactly\nthis ✓ ";
+    const corrected = await createApiTrainingAdapter(fetchReturning(200, view("corrected", "awaiting_diagnosis", null, words)).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "corrected", correctedExplanation: words } });
+    expect(corrected).toEqual({ status: "corrected", studentCorrectionText: words, diagnosisState: "awaiting_diagnosis", repairPlan: null });
+  });
+
+  it("an already-answered offer (after a reload) maps to the stored outcome; a malformed diagnosis state is refused", async () => {
+    const answered = { status: "answered", attemptId: "a-1", result: view("rejected", "not_confirmed", null) };
+    expect(await createApiTrainingAdapter(fetchReturning(200, answered).fetchImpl).requestHypothesis("a-1")).toEqual({ status: "answered", result: { status: "rejected", studentCorrectionText: null, diagnosisState: "not_confirmed", repairPlan: null } });
+    await expect(createApiTrainingAdapter(fetchReturning(200, view("confirmed", "proven", null)).fetchImpl).respondToHypothesis({ attemptId: "a-1", token: "t", response: { type: "confirmed" } })).rejects.toBeDefined();
+    await expect(createApiTrainingAdapter(fetchReturning(200, { status: "answered", result: { status: "confirmed" } }).fetchImpl).requestHypothesis("a-1")).rejects.toBeDefined();
+  });
+
+  it("the result wording is honest: confirmed = recorded explanation, rejected = not confirmed, corrected = recorded but not a confirmed diagnosis", () => {
+    const source = src("components/PossibleExplanation.tsx");
+    expect(source).toContain("Recorded as a confirmed explanation.");
+    expect(source).toContain("This explanation was not confirmed.");
+    expect(source).toContain("Your correction was recorded.");
+    expect(source).toContain("They are not treated as a confirmed explanation.");
+    expect(source).not.toContain("only used on this page");
   });
 });
 

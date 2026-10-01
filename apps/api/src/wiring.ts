@@ -3,7 +3,9 @@ import type { EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import type { PrismaClient } from "@prisma/client";
 import {
   InMemoryAttemptRepository,
+  InMemoryAutopsyDecisionRepository,
   InMemoryEnrollmentRepository,
+  InMemoryErrorTaxonomyReader,
   InMemoryConceptReader,
   InMemoryExamReader,
   InMemoryPrepPhaseTemplateReader,
@@ -13,7 +15,9 @@ import {
   InMemoryStudentAccountRepository,
   InMemoryTrainingQuestionReader,
   PrismaAttemptRepository,
+  PrismaAutopsyDecisionRepository,
   PrismaAutopsyRepository,
+  PrismaErrorTaxonomyReader,
   PrismaConceptReader,
   PrismaEnrollmentReader,
   PrismaEnrollmentRepository,
@@ -90,6 +94,8 @@ export function createInMemoryDependencies(
   const questions = new InMemoryQuestionReader(seed.questions);
   const questionContent = new InMemoryQuestionContentReader(seed.questionContent);
   const autopsyReader: Pick<AutopsyRepository, "findByAttemptId"> = { findByAttemptId: async () => null };
+  // Phase 4 Unit 3: offers, answers and confirmed RepairPlans (one store, read back by the recommendation composition below).
+  const autopsyStore = new InMemoryAutopsyDecisionRepository();
   const studentAccounts = new InMemoryStudentAccountRepository();
   const sessions = new InMemorySessionRepository();
   const enrollmentRepository = new InMemoryEnrollmentRepository();
@@ -119,7 +125,8 @@ export function createInMemoryDependencies(
   const trainingRecommendationDeps: TrainingRecommendationDependencies = {
     enrollmentReader,
     attemptHistoryReader: attempts,
-    repairPlanReader: { findConfirmedActiveByStudentId: async () => [] },
+    repairPlanReader: autopsyStore,
+    errorTaxonomyReader: new InMemoryErrorTaxonomyReader(),
     trainingQuestionReader: new InMemoryTrainingQuestionReader(seed.trainingQuestions),
     questionReader: questions,
     conceptReader: new InMemoryConceptReader(seed.concepts),
@@ -135,6 +142,7 @@ export function createInMemoryDependencies(
     questionReader: questions,
     questionContentReader: questionContent,
     autopsyReader,
+    autopsyStore,
     studentAccounts,
     sessions,
     enrollments: enrollmentRepository,
@@ -169,6 +177,7 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
     enrollmentReader,
     attemptHistoryReader: attempts,
     repairPlanReader: new PrismaRepairPlanRepository(prisma),
+    errorTaxonomyReader: new PrismaErrorTaxonomyReader(prisma),
     trainingQuestionReader: new PrismaTrainingQuestionReader(prisma),
     questionReader,
     conceptReader: new PrismaConceptReader(prisma),
@@ -184,6 +193,7 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
     questionReader,
     questionContentReader: new PrismaQuestionContentReader(prisma),
     autopsyReader: new PrismaAutopsyRepository(prisma),
+    autopsyStore: new PrismaAutopsyDecisionRepository(prisma),
     studentAccounts: new PrismaStudentAccountRepository(prisma),
     sessions: new PrismaSessionRepository(prisma),
     enrollments: new PrismaEnrollmentRepository(prisma),

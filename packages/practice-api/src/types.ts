@@ -1,5 +1,5 @@
-import type { AutopsyRepository, EnrollmentReader, InProgressAttemptReader, QuestionContentReader, QuestionReader } from "@ipmat/db";
-import type { AutopsyHypothesis, ObservationEvidence } from "@ipmat/training-recommendation";
+import type { AutopsyDecisionRepository, AutopsyRepository, EnrollmentReader, InProgressAttemptReader, QuestionContentReader, QuestionReader } from "@ipmat/db";
+import type { AutopsyHypothesis, AutopsyOutput, ObservationEvidence } from "@ipmat/training-recommendation";
 import type { PracticeLoopService } from "@ipmat/practice-loop";
 import type { TrainingRecommendationService } from "@ipmat/training-recommendation";
 
@@ -22,7 +22,7 @@ import type { TrainingRecommendationService } from "@ipmat/training-recommendati
  * The generator owns the model call and the safety validation (`@ipmat/autopsy`'s `generateObservationHypothesis()`, wired in `apps/api`);
  * this package never imports an AI SDK.
  */
-export type HypothesisGenerator = (observation: ObservationEvidence) => Promise<AutopsyHypothesis>;
+export type HypothesisGenerator = (observation: ObservationEvidence, context: { designedErrorCategory: NonNullable<AutopsyOutput["candidateErrorEvidence"]>["proposedErrorCategory"] }) => Promise<AutopsyHypothesis>;
 
 /**
  * Seals/opens the confirmation token (authenticated encryption, wired in `apps/api`). Unit 2 stores NOTHING: the exact hypothesis that was
@@ -48,6 +48,8 @@ export interface PracticeApiDependencies {
   /** Phase 4 Unit 2 (optional). Both must be present for a hypothesis to be offered. */
   hypothesisGenerator?: HypothesisGenerator | null;
   hypothesisSealer?: HypothesisSealer | null;
+  /** Phase 4 Unit 3: where offers and the student's answers (and the RepairPlan of a confirmed one) are persisted. Required for any hypothesis to be offered. */
+  autopsyStore?: AutopsyDecisionRepository | null;
 }
 
 /** The identity claim every operation requires — the same "caller supplies studentId/enrollmentId, this layer verifies the relationship" trust boundary `@ipmat/training-recommendation`/`@ipmat/practice-loop` already have. Resolving this FROM a real authenticated session is explicitly future work (D-004, still open) — this boundary adds no new trust assumption beyond what those two services already require of their own callers. */
@@ -149,13 +151,18 @@ export interface AttemptEvidenceView {
  */
 export type HypothesisOfferView =
   | { status: "ready"; attemptId: string; hypothesis: { summary: string; supportingEvidence: string[] }; token: string }
+  /** The student already answered the stored offer (a refresh, a restart, another device): the persisted result, never a new offer. */
+  | { status: "answered"; attemptId: string; result: HypothesisResponseView }
   | { status: "not_applicable" | "unavailable"; attemptId: string };
 
 export type HypothesisResponseInput = { type: "confirmed" } | { type: "rejected" } | { type: "corrected"; correctedExplanation: string };
 
 /**
- * What the student's response produced. `confirmed` means ONLY "the student said this matches"; it is not proof of a cause. `persisted`
- * is always `false` in Unit 2: nothing is stored and no RepairPlan exists (Unit 3 persists the confirmed diagnosis).
+ * The PERSISTED outcome of the student's response (Phase 4 Unit 3). `confirmed` means ONLY "the student said this explanation matches"; it is
+ * not proof of a cause. `diagnosis.state`: `confirmed` (a student-confirmed diagnosis exists), `not_confirmed` (rejected: no diagnosis), or
+ * `awaiting_diagnosis` (the student corrected it in their own words: recorded exactly, but NOT turned into a diagnosis -- that needs a later
+ * diagnosis pass). `repairPlan` is only ever present for a confirmed diagnosis, and exposes just the practice focus -- no ids, no internal
+ * fields. `alreadyRecorded` is true when an earlier response was already stored and this call changed nothing.
  */
 export interface HypothesisResponseView {
   attemptId: string;
@@ -163,7 +170,10 @@ export interface HypothesisResponseView {
   /** The student's own words, exactly as submitted -- only when `status === "corrected"`. */
   studentCorrectionText: string | null;
   hypothesisSummary: string;
-  persisted: false;
+  persisted: true;
+  alreadyRecorded: boolean;
+  diagnosis: { state: "confirmed" | "not_confirmed" | "awaiting_diagnosis" };
+  repairPlan: { conceptName: string; patternFamilyName: string; status: "pending" | "in_progress" | "completed" } | null;
 }
 
 /**

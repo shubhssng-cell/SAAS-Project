@@ -15,7 +15,8 @@ type Phase =
  * Phase 4 Unit 2 -- ONE possible explanation for an incorrect answer, offered for the student to confirm, reject or correct.
  *
  * It is always framed as a guess, never as a fact ("This is a guess based on what was recorded -- not a fact"), it lists only the
- * recorded facts it rests on, and nothing here is saved: the response only changes what this page shows. It is supplementary -- while it
+ * recorded facts it rests on. Since Unit 3 the student's response is saved by the server (once; the first answer stands) and shown again
+ * after a reload or restart. It is supplementary -- while it
  * loads, if it is unavailable, or if it fails, the result above it and Continue below it are unaffected, and no explanation is ever invented.
  * The student's own words are sent exactly as typed; this component never rewrites, categorizes or "improves" them.
  */
@@ -33,6 +34,7 @@ export function PossibleExplanation({ adapter, attemptId }: { adapter: TrainingR
       .then((offer) => {
         if (cancelled) return;
         if (offer.status === "ready") setPhase({ kind: "ready", offer, stage: "asking", error: null });
+        else if (offer.status === "answered") setPhase({ kind: "done", summary: "", result: offer.result });
         else setPhase({ kind: offer.status === "not_applicable" ? "hidden" : "unavailable" });
       })
       .catch(() => {
@@ -73,12 +75,17 @@ export function PossibleExplanation({ adapter, attemptId }: { adapter: TrainingR
       <Card>
         <h2 className="headline headline-compact">A possible explanation</h2>
         <p className="subtext" role="status">
-          {result.status === "confirmed" && "Thanks. You said this matches what happened."}
-          {result.status === "rejected" && "Thanks. You said this isn't what happened."}
-          {result.status === "corrected" && "Thanks. Here is what you told us:"}
+          {result.status === "confirmed" && "Recorded as a confirmed explanation."}
+          {result.status === "rejected" && "This explanation was not confirmed."}
+          {result.status === "corrected" && "Your correction was recorded."}
         </p>
         {result.status === "corrected" && result.studentCorrectionText !== null && <blockquote className="hypothesis-text">{result.studentCorrectionText}</blockquote>}
-        <p className="subtext evidence-note">Your answer is only used on this page for now.</p>
+        {result.status === "corrected" && <p className="subtext evidence-note">Your own words are saved as you wrote them. They are not treated as a confirmed explanation.</p>}
+        {result.status === "confirmed" && result.repairPlan !== null && (
+          <p className="subtext evidence-note">
+            Practice focus: {result.repairPlan.patternFamilyName} in {result.repairPlan.conceptName}.
+          </p>
+        )}
       </Card>
     );
   }

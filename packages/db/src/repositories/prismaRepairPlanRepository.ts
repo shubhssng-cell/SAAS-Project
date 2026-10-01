@@ -95,12 +95,12 @@ export class PrismaRepairPlanRepository implements RepairPlanRepository {
 }
 
 /** Shared `include` for every read that must return a full `StoredRepairPlan` — `attemptId`/`confirmedAt` come from the joined `Autopsy` (via `autopsyId`), `targetErrorTaxonomyCode` from the joined `ErrorTaxonomy` (via the existing `targetErrorTaxonomyId` relation), never a second, separate query per row. */
-const REPAIR_PLAN_JOIN_INCLUDE = {
+export const REPAIR_PLAN_JOIN_INCLUDE = {
   autopsy: { select: { attemptId: true, confirmedAt: true } },
   errorTaxonomy: { select: { code: true } }
 } as const;
 
-function toStoredRepairPlan(row: {
+export function toStoredRepairPlan(row: {
   id: string;
   autopsyId: string;
   studentId: string;

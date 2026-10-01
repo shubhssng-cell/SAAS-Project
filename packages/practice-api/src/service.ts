@@ -1,6 +1,6 @@
 import { AttemptLifecycleError, type AttemptOwnershipClaim, type AttemptState } from "@ipmat/attempt";
-import { PersistenceError, SerializationFailureError } from "@ipmat/db";
-import { applyConfirmationResponse, assertEnrollmentOwnership, type AutopsyHypothesis, type ConfirmationResponse } from "@ipmat/training-recommendation";
+import { PersistenceError, SerializationFailureError, type StoredDiagnosis } from "@ipmat/db";
+import { applyConfirmationResponse, assertEnrollmentOwnership, buildRepairPlan, type AutopsyHypothesis, type ConfirmationResponse, type RepairPlan } from "@ipmat/training-recommendation";
 import { toPracticeApiError } from "./errors.js";
 import { toAttemptEvidenceView, toAttemptResultView, toPendingAutopsyView, toRecommendationView, toStudentQuestionView } from "./presentation.js";
 import type {
@@ -36,24 +36,49 @@ import { assertNonEmptyString, assertValidClaim } from "./validation.js";
  * startedAt`) — exactly the "duration as a trusted fact" this boundary
  * must never allow (C).
  */
-/** How long an issued explanation can be answered. After that (or after anything else invalidates the token) the student is simply offered a fresh one. */
+/** How long an issued confirmation token can be used. The OFFER itself is persisted and never expires; a student who comes back later is simply handed a fresh token for the same stored offer. */
 export const HYPOTHESIS_TOKEN_TTL_MS = 6 * 60 * 60 * 1000;
 export const MAX_CORRECTION_CHARS = 500;
 const MAX_TOKEN_CHARS = 20_000;
 
+/**
+ * What a token binds (sealed, so the client can neither read nor alter it): the student, the attempt, the stored offer's id AND its exact text.
+ * The response is applied only if the stored offer still matches all of it.
+ */
 interface HypothesisTokenPayload {
-  v: 1;
+  v: 2;
   studentId: string;
   attemptId: string;
+  autopsyId: string;
+  hypothesisText: string;
   expiresAtMs: number;
-  hypothesis: AutopsyHypothesis;
 }
 
 function isTokenPayload(value: unknown): value is HypothesisTokenPayload {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  const h = v.hypothesis as Record<string, unknown> | undefined;
-  return v.v === 1 && typeof v.studentId === "string" && typeof v.attemptId === "string" && typeof v.expiresAtMs === "number" && typeof h === "object" && h !== null && typeof h.proposedExplanation === "string" && h.confirmationStatus === "awaiting_confirmation";
+  return v.v === 2 && typeof v.studentId === "string" && typeof v.attemptId === "string" && typeof v.autopsyId === "string" && typeof v.hypothesisText === "string" && typeof v.expiresAtMs === "number";
+}
+
+const asStrings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+
+/** The student-safe projection of a stored decision. Status is derived from the one authoritative pair (`confirmed`, correction text), exactly as the persistence mapping defines it. */
+function toHypothesisResponseView(stored: StoredDiagnosis, alreadyRecorded: boolean): HypothesisResponseView {
+  const { autopsy, repairPlan } = stored;
+  const status: HypothesisResponseView["status"] = autopsy.confirmed === true ? "confirmed" : autopsy.studentCorrectionText !== null ? "corrected" : "rejected";
+  return {
+    attemptId: autopsy.attemptId,
+    status,
+    studentCorrectionText: autopsy.studentCorrectionText,
+    hypothesisSummary: autopsy.hypothesisText,
+    persisted: true,
+    alreadyRecorded,
+    diagnosis: { state: status === "confirmed" ? "confirmed" : status === "corrected" ? "awaiting_diagnosis" : "not_confirmed" },
+    repairPlan:
+      repairPlan !== null && repairPlan.targetConceptName !== null && repairPlan.targetPatternFamilyName !== null
+        ? { conceptName: repairPlan.targetConceptName, patternFamilyName: repairPlan.targetPatternFamilyName, status: repairPlan.status }
+        : null
+  };
 }
 
 export class PracticeApiService {
@@ -303,10 +328,15 @@ export class PracticeApiService {
   }
 
   /**
-   * Phase 4 Unit 2 -- offers ONE possible explanation for an incorrect, submitted attempt, built from its observation evidence. Never
-   * before submission (409), never for another student's attempt (403). Every failure to produce a safe hypothesis -- no model configured,
-   * a provider error or timeout, malformed/unsafe/ungrounded output -- yields `unavailable` and nothing else: no fabricated text, no raw
-   * model output, no error detail. Stores nothing.
+   * Phase 4 Unit 2/3 -- offers ONE possible explanation for an incorrect, submitted attempt, and PERSISTS the offer.
+   *   - nothing before submission (409), never another student's attempt (403);
+   *   - an offer already stored for the attempt is returned as-is (no new model call, identical on every instance); if the student has already
+   *     answered it, the persisted result is returned (`answered`) so a refresh or restart shows the same state;
+   *   - otherwise the model proposes (the safety validation lives in the injected generator), the offer is stored with its Unit 1 evidence as
+   *     provenance -- exactly one offer per attempt, enforced by the database -- and a sealed token for it is returned;
+   *   - every failure to produce a safe offer (no model, provider error/timeout, unsafe or ungrounded output, unresolved question metadata)
+   *     answers `unavailable` and nothing else: no fabricated text, no raw output, no error detail.
+   * The model's own category is never used: the hypothesis's category is the question's DESIGNED trap category, resolved through the taxonomy.
    */
   async generateHypothesis(claim: StudentRequestClaim, input: { attemptId: string; now?: string }): Promise<HypothesisOfferView> {
     assertValidClaim(claim);
@@ -317,15 +347,31 @@ export class PracticeApiService {
       const attempt = await this.loadFinalizedOwnedAttempt(claim, input.attemptId);
       if (attempt.status !== "submitted" || attempt.isCorrect !== false) return { status: "not_applicable", attemptId: attempt.id };
 
-      const evidence = await this.deps.trainingRecommendationService.getAttemptObservationEvidence({ studentId: claim.studentId, enrollmentId: claim.enrollmentId, attemptId: attempt.id });
-      if (evidence === null) throw new AttemptLifecycleError("attempt_not_found", `No evidence is available for attempt "${attempt.id}".`);
+      const { hypothesisGenerator: generate, hypothesisSealer: sealer, autopsyStore: store } = this.deps;
+      if (!store) return { status: "unavailable", attemptId: attempt.id };
 
-      const { hypothesisGenerator: generate, hypothesisSealer: sealer } = this.deps;
+      const issue = (stored: StoredDiagnosis): HypothesisOfferView => {
+        if (stored.autopsy.confirmed !== null) return { status: "answered", attemptId: attempt.id, result: toHypothesisResponseView(stored, true) };
+        if (!sealer) return { status: "unavailable", attemptId: attempt.id };
+        const payload: HypothesisTokenPayload = { v: 2, studentId: claim.studentId, attemptId: attempt.id, autopsyId: stored.autopsy.id, hypothesisText: stored.autopsy.hypothesisText, expiresAtMs: Date.parse(now) + HYPOTHESIS_TOKEN_TTL_MS };
+        return {
+          status: "ready",
+          attemptId: attempt.id,
+          hypothesis: { summary: stored.autopsy.hypothesisText, supportingEvidence: asStrings(stored.autopsy.evidenceUsed["supportingEvidence"]) },
+          token: sealer.seal(payload)
+        };
+      };
+
+      const existing = await store.findByAttemptId(attempt.id);
+      if (existing !== null) return issue(existing);
+
       if (!generate || !sealer) return { status: "unavailable", attemptId: attempt.id };
+      const pieces = await this.deps.trainingRecommendationService.getAttemptAutopsyOutput({ studentId: claim.studentId, enrollmentId: claim.enrollmentId, attemptId: attempt.id });
+      if (pieces === null) return { status: "unavailable", attemptId: attempt.id };
 
       let hypothesis: AutopsyHypothesis;
       try {
-        hypothesis = await generate(evidence);
+        hypothesis = await generate(pieces.observation, { designedErrorCategory: pieces.output.candidateErrorEvidence?.proposedErrorCategory ?? null });
       } catch {
         return { status: "unavailable", attemptId: attempt.id }; // provider failure, timeout, schema failure or a rejected proposal
       }
@@ -333,13 +379,8 @@ export class PracticeApiService {
         return { status: "unavailable", attemptId: attempt.id };
       }
 
-      const payload: HypothesisTokenPayload = { v: 1, studentId: claim.studentId, attemptId: attempt.id, expiresAtMs: Date.parse(now) + HYPOTHESIS_TOKEN_TTL_MS, hypothesis };
-      return {
-        status: "ready",
-        attemptId: attempt.id,
-        hypothesis: { summary: hypothesis.proposedExplanation, supportingEvidence: [...hypothesis.supportingEvidence] },
-        token: sealer.seal(payload)
-      };
+      const { stored } = await store.offer({ studentId: claim.studentId, hypothesis, output: pieces.output, observation: pieces.observation });
+      return issue(stored);
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);
@@ -347,10 +388,15 @@ export class PracticeApiService {
   }
 
   /**
-   * Phase 4 Unit 2 -- applies the student's response to EXACTLY the hypothesis that was offered (carried in the sealed token), through the
-   * domain's `applyConfirmationResponse()`. `confirmed` = the student said it matches; `rejected` = it does not; `corrected` = the student's
-   * own words, preserved exactly. Nothing is stored (`persisted: false`): no diagnosis, no RepairPlan. A token that is not authentic,
-   * expired, or issued to a different student/attempt is refused.
+   * Phase 4 Unit 3 -- records the student's response to the stored offer, ONCE.
+   *   confirmed -> the hypothesis is a student-CONFIRMED diagnosis, and a RepairPlan is built by the existing `buildRepairPlan()` and stored in
+   *                the same transaction (exactly one: the database allows one plan per autopsy);
+   *   rejected  -> recorded as not confirmed; no diagnosis, no RepairPlan;
+   *   corrected -> the student's own words are stored exactly; NOT a diagnosis and no RepairPlan (turning a free-text correction into a
+   *                structured diagnosis needs a later diagnosis pass, D-039).
+   * The token (sealed: student + attempt + stored offer id and text + expiry) is verified, and the stored offer must still match it. A second
+   * response -- same or different, same instance or another, even concurrent -- changes nothing and returns the persisted result
+   * (`alreadyRecorded: true`): the first response wins.
    */
   async respondToHypothesis(claim: StudentRequestClaim, input: { attemptId: string; token: string; response: HypothesisResponseInput; now?: string }): Promise<HypothesisResponseView> {
     assertValidClaim(claim);
@@ -368,24 +414,53 @@ export class PracticeApiService {
     const now = input.now ?? new Date().toISOString();
 
     try {
-      await this.loadFinalizedOwnedAttempt(claim, input.attemptId);
-      const opened = this.deps.hypothesisSealer?.open(input.token) ?? null;
+      const attempt = await this.loadFinalizedOwnedAttempt(claim, input.attemptId);
       const stale = new PracticeApiError("invalid_state", "This explanation is no longer valid. Please request a new one.", 409);
-      if (!isTokenPayload(opened)) throw stale;
+      const store = this.deps.autopsyStore;
+      const opened = this.deps.hypothesisSealer?.open(input.token) ?? null;
+      if (!store || !isTokenPayload(opened)) throw stale;
       if (opened.studentId !== claim.studentId || opened.attemptId !== input.attemptId) {
         throw new AttemptLifecycleError("ownership_mismatch", "This explanation was not issued for this student and attempt.");
       }
       if (Date.parse(now) > opened.expiresAtMs) throw stale;
 
-      const response: ConfirmationResponse = type === "corrected" ? { type: "corrected", correctedExplanation: (input.response as { correctedExplanation: string }).correctedExplanation } : type === "confirmed" ? { type: "confirmed" } : { type: "rejected" };
-      const decided = applyConfirmationResponse(opened.hypothesis, response, { now });
-      return {
-        attemptId: input.attemptId,
-        status: decided.confirmationStatus as "confirmed" | "rejected" | "corrected",
-        studentCorrectionText: decided.studentCorrectionText,
-        hypothesisSummary: decided.proposedExplanation,
-        persisted: false
+      const stored = await store.findByAttemptId(attempt.id);
+      if (stored === null || stored.autopsy.id !== opened.autopsyId || stored.autopsy.hypothesisText !== opened.hypothesisText) throw stale;
+      if (stored.autopsy.confirmed !== null) return toHypothesisResponseView(stored, true); // already answered: the first response stands
+
+      const offered: AutopsyHypothesis = {
+        attemptId: attempt.id,
+        proposedErrorCategory: stored.autopsy.likelyRootCause as AutopsyHypothesis["proposedErrorCategory"],
+        proposedExplanation: stored.autopsy.hypothesisText,
+        supportingEvidence: asStrings(stored.autopsy.evidenceUsed["supportingEvidence"]),
+        contradictoryEvidence: asStrings(stored.autopsy.evidenceUsed["contradictoryEvidence"]),
+        missingEvidence: asStrings(stored.autopsy.evidenceUsed["missingEvidence"]),
+        modelConfidence: null, // the model's own number is internal and is not needed to apply a response
+        confirmationRequired: true,
+        confirmationStatus: "awaiting_confirmation",
+        studentCorrectionText: null,
+        respondedAt: null,
+        generationMetadata: { provider: stored.autopsy.generatedByProvider, model: "stored-offer", promptVersion: stored.autopsy.promptVersion, task: "autopsy-hypothesis", timestamp: stored.autopsy.createdAt, latencyMs: 0, tokenUsage: null, estimatedCostUsd: null, attempts: 1, success: true, validationOutcome: "valid" }
       };
+      const response: ConfirmationResponse = type === "corrected" ? { type: "corrected", correctedExplanation: (input.response as { correctedExplanation: string }).correctedExplanation } : type === "confirmed" ? { type: "confirmed" } : { type: "rejected" };
+      const decided = applyConfirmationResponse(offered, response, { now });
+
+      // Only a student-CONFIRMED hypothesis can yield a RepairPlan, built by the existing planner. If it cannot be built (no structured target:
+      // e.g. the question had no resolvable designed trap) the confirmation is still recorded -- just without a plan.
+      let plan: RepairPlan | null = null;
+      if (decided.confirmationStatus === "confirmed") {
+        const pieces = await this.deps.trainingRecommendationService.getAttemptAutopsyOutput({ studentId: claim.studentId, enrollmentId: claim.enrollmentId, attemptId: attempt.id });
+        if (pieces !== null) {
+          try {
+            plan = buildRepairPlan(decided, pieces.output);
+          } catch {
+            plan = null;
+          }
+        }
+      }
+
+      const { stored: after, applied } = await store.respond({ studentId: claim.studentId, decided, plan });
+      return toHypothesisResponseView(after, !applied);
     } catch (error) {
       if (error instanceof PracticeApiError) throw error;
       throw toPracticeApiError(error);

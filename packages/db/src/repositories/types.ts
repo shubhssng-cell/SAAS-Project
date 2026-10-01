@@ -4,6 +4,7 @@ import type {
   AutopsyOutput,
   AutopsyQuestionContext,
   AutopsyPersistenceRecord,
+  ErrorTaxonomyEntry,
   RecommendedTrainingMode,
   RepairPlan,
   RepairPlanPersistenceRecord,
@@ -52,6 +53,33 @@ export interface AutopsyRepository {
   /** Upserts on `attemptId` (unique in the schema) — saving twice for the same attempt updates the same row, matching Autopsy's real 1:1-with-Attempt shape. */
   save(input: { hypothesis: AutopsyHypothesis; output: AutopsyOutput }): Promise<StoredAutopsy>;
   findByAttemptId(attemptId: string): Promise<StoredAutopsy | null>;
+}
+
+/** Phase 4 Unit 3: an Autopsy row together with the RepairPlan built from it (if any -- only a student-CONFIRMED hypothesis ever has one). */
+export interface StoredDiagnosis {
+  autopsy: StoredAutopsy;
+  repairPlan: StoredRepairPlan | null;
+}
+
+/**
+ * Phase 4 Unit 3 -- offer / answer persistence with once-only semantics (see `PrismaAutopsyDecisionRepository`). Unlike
+ * `AutopsyRepository.save()` (an upsert that can overwrite), nothing here can alter an offer or re-decide an answered one.
+ */
+export interface AutopsyDecisionRepository {
+  findByAttemptId(attemptId: string): Promise<StoredDiagnosis | null>;
+  /** Stores the awaiting offer for an attempt, or returns the one already stored (`created: false`) -- an offer is immutable once stored. `observation` is the Unit 1 evidence it was generated from (provenance). */
+  offer(input: { studentId?: string; hypothesis: AutopsyHypothesis; output: AutopsyOutput; observation: unknown }): Promise<{ stored: StoredDiagnosis; created: boolean }>;
+  /**
+   * Records the student's decision on a still-awaiting offer and, in the SAME transaction, the RepairPlan (`plan`, only for a confirmed
+   * hypothesis). Exactly one caller can apply a response (`applied: true`); anyone else gets the already-persisted state (`applied: false`)
+   * and nothing is created.
+   */
+  respond(input: { studentId: string; decided: AutopsyHypothesis; plan: RepairPlan | null }): Promise<{ stored: StoredDiagnosis; applied: boolean }>;
+}
+
+/** Phase 4 Unit 3: the existing error taxonomy, read-only (needed to resolve a question's designed trap to its category). */
+export interface ErrorTaxonomyReader {
+  findAll(): Promise<ErrorTaxonomyEntry[]>;
 }
 
 /**

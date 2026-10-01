@@ -121,7 +121,7 @@ describe("createApiTrainingAdapter -- loadQuestion / submitAnswer", () => {
     await expect(adapter.submitAnswer({ questionId: "never-loaded", chosenAnswer: "A", timeTakenSeconds: 1 })).rejects.toThrow();
   });
 
-  it("submitAnswer reflects a real pending autopsy hypothesis when getAutopsyForConfirmation reports one, never fabricating it", async () => {
+  it("submitAnswer never routes into the legacy autopsy screen (hasAutopsy is false): the explanation card lives on the result screen and Continue stays primary", async () => {
     const { fetchImpl } = routedFetch({
       "/v1/attempts/attempt-1/submit": { ok: true, status: 200, body: { attemptId: "attempt-1", questionId: "q-1", status: "submitted", isCorrect: false, chosenAnswer: "B", correctAnswer: "A", timeSpentSeconds: 12, expectedTimeSeconds: 60 } },
       "/v1/attempts/attempt-1/autopsy": { ok: true, status: 200, body: { attemptId: "attempt-1", pending: true, hypothesis: { summary: "You may have misapplied the base.", supportingEvidence: ["Answered faster than expected"] } } },
@@ -130,7 +130,7 @@ describe("createApiTrainingAdapter -- loadQuestion / submitAnswer", () => {
     const adapter = createApiTrainingAdapter(fetchImpl);
     await adapter.loadQuestion("q-1");
     const result = await adapter.submitAnswer({ questionId: "q-1", chosenAnswer: "B", timeTakenSeconds: 12 });
-    expect(result.hasAutopsy).toBe(true);
+    expect(result.hasAutopsy).toBe(false);
   });
 });
 

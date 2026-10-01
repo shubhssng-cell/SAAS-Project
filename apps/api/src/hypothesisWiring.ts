@@ -98,5 +98,5 @@ export function createHypothesisDependencies(env: Record<string, string | undefi
   const sealer = createHypothesisSealer(env.IPMAT_HYPOTHESIS_SECRET);
   if (config.kind === "none") return { hypothesisGenerator: null, hypothesisSealer: sealer };
   const provider: AiProvider = config.kind === "anthropic" ? new AnthropicProvider(config.model) : new DevScriptedProvider();
-  return { hypothesisGenerator: (observation) => generateObservationHypothesis(provider, { observation }), hypothesisSealer: sealer };
+  return { hypothesisGenerator: (observation, context) => generateObservationHypothesis(provider, { observation, designedErrorCategory: context.designedErrorCategory }), hypothesisSealer: sealer };
 }

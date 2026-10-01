@@ -1,5 +1,6 @@
 import { toAutopsyEvidence, type AttemptState } from "@ipmat/attempt";
-import { buildObservationEvidence, type HistoricalAttemptRecord, type ObservationEvidence } from "@ipmat/autopsy";
+import { buildAutopsyOutput, buildObservationEvidence, type AutopsyOutput, type AutopsyQuestionContext, type HistoricalAttemptRecord, type ObservationEvidence } from "@ipmat/autopsy";
+import type { AttemptAutopsyEvidence } from "@ipmat/attempt";
 import type { CanonicalQuestion } from "@ipmat/db";
 import { assertEnrollmentOwnership, assertFinalizedAttemptsOwnedBy, assertValidRequest } from "./ownership.js";
 import { toAttemptQuestionContext } from "./readModels.js";
@@ -18,10 +19,13 @@ import type { TrainingRecommendationDependencies, TrainingRecommendationRequest 
  * DNA-complete pool, cannot be loaded, or whose concept link does not resolve is EXCLUDED from history (the same rule mastery uses),
  * never given invented context.
  */
-export async function composeAttemptObservationEvidence(
-  deps: TrainingRecommendationDependencies,
-  request: TrainingRecommendationRequest & { attemptId: string }
-): Promise<ObservationEvidence | null> {
+interface AttemptInputs {
+  evidence: AttemptAutopsyEvidence;
+  question: AutopsyQuestionContext | null;
+  priorAttempts: HistoricalAttemptRecord[];
+}
+
+async function loadAttemptInputs(deps: TrainingRecommendationDependencies, request: TrainingRecommendationRequest & { attemptId: string }): Promise<AttemptInputs | null> {
   assertValidRequest(request);
   const enrollment = assertEnrollmentOwnership(await deps.enrollmentReader.findById(request.enrollmentId), request);
   const studentId = enrollment.studentId;
@@ -65,13 +69,38 @@ export async function composeAttemptObservationEvidence(
     priorAttempts.push({ evidence: toAutopsyEvidence(attempt, toAttemptQuestionContext(canonical)), question });
   }
 
-  return buildObservationEvidence({
-    evidence: toAutopsyEvidence(target, toAttemptQuestionContext(targetCanonical)),
-    question: targetLinked ? targetQuestion : null,
-    priorAttempts
-  });
+  return { evidence: toAutopsyEvidence(target, toAttemptQuestionContext(targetCanonical)), question: targetLinked ? targetQuestion : null, priorAttempts };
+}
+
+export async function composeAttemptObservationEvidence(
+  deps: TrainingRecommendationDependencies,
+  request: TrainingRecommendationRequest & { attemptId: string }
+): Promise<ObservationEvidence | null> {
+  const inputs = await loadAttemptInputs(deps, request);
+  return inputs === null ? null : buildObservationEvidence(inputs);
+}
+
+/**
+ * Phase 4 Unit 3 -- the Unit 1 observation evidence AND the full deterministic `AutopsyOutput` for the same attempt (what
+ * `buildRepairPlan()` needs), from the same persisted inputs. The output carries the answer key and the question's designed error category
+ * (the taxonomy entry the question's trap code resolves to); it is SERVER-SIDE ONLY and is never returned to a student.
+ * `null` when the attempt cannot be resolved or its question metadata is unknown (no guess is made about either).
+ */
+export async function composeAttemptAutopsyOutput(
+  deps: TrainingRecommendationDependencies,
+  request: TrainingRecommendationRequest & { attemptId: string }
+): Promise<{ observation: ObservationEvidence; output: AutopsyOutput } | null> {
+  const inputs = await loadAttemptInputs(deps, request);
+  if (inputs === null || inputs.question === null) return null;
+  const errorTaxonomy = deps.errorTaxonomyReader ? await deps.errorTaxonomyReader.findAll() : [];
+  return {
+    observation: buildObservationEvidence(inputs),
+    output: buildAutopsyOutput({ evidence: inputs.evidence, question: inputs.question, errorTaxonomy, priorAttempts: inputs.priorAttempts })
+  };
 }
 
 export type { ObservationEvidence } from "@ipmat/autopsy";
 export { applyConfirmationResponse, describeObservationEvidence } from "@ipmat/autopsy";
 export type { AutopsyHypothesis, ConfirmationResponse } from "@ipmat/autopsy";
+export { buildRepairPlan, toAutopsyPersistenceRecord } from "@ipmat/autopsy";
+export type { AutopsyOutput, RepairPlan } from "@ipmat/autopsy";

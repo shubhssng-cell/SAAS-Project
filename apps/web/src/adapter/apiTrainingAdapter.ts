@@ -173,6 +173,7 @@ function readAttemptEvidence(body: unknown): AttemptEvidenceViewModel {
 function readHypothesisOffer(body: unknown): HypothesisOfferViewModel {
   const value = asObject(body);
   if (value.status === "not_applicable" || value.status === "unavailable") return { status: value.status };
+  if (value.status === "answered") return { status: "answered", result: readHypothesisResult(value.result) };
   const h = asObject(value.hypothesis);
   const evidence = h.supportingEvidence;
   if (value.status !== "ready" || typeof h.summary !== "string" || h.summary.length === 0 || typeof value.token !== "string" || !Array.isArray(evidence) || !evidence.every((e) => typeof e === "string")) {
@@ -186,7 +187,14 @@ function readHypothesisResult(body: unknown): HypothesisResultViewModel {
   if (value.status !== "confirmed" && value.status !== "rejected" && value.status !== "corrected") {
     throw new PracticeApiRequestError({ kind: "unexpected", message: "The confirmation response was malformed." });
   }
-  return { status: value.status, studentCorrectionText: typeof value.studentCorrectionText === "string" ? value.studentCorrectionText : null };
+  const diagnosis = asObject(value.diagnosis);
+  const state = diagnosis.state;
+  if (state !== "confirmed" && state !== "not_confirmed" && state !== "awaiting_diagnosis") {
+    throw new PracticeApiRequestError({ kind: "unexpected", message: "The confirmation response was malformed." });
+  }
+  const plan = asObject(value.repairPlan);
+  const repairPlan = typeof plan.conceptName === "string" && typeof plan.patternFamilyName === "string" ? { conceptName: plan.conceptName, patternFamilyName: plan.patternFamilyName } : null;
+  return { status: value.status, studentCorrectionText: typeof value.studentCorrectionText === "string" ? value.studentCorrectionText : null, diagnosisState: state, repairPlan };
 }
 
 function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { summary: string; supportingEvidence: string[] } | null } {
@@ -244,7 +252,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     attemptIdByQuestion.delete(input.questionId);
     questionsPracticedSoFar += 1;
 
-    return readAttemptResult(submitted, await isAutopsyPending(attemptId));
+    return readAttemptResult(submitted, false);
   }
 
   // `timeSpentSeconds`/status come back from the server; nothing about the skip (not even a duration) is sent from here.
@@ -257,15 +265,6 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     attemptIdByQuestion.delete(questionId);
     questionsPracticedSoFar += 1;
     return skipped;
-  }
-
-  // Whether an autopsy hypothesis is actually pending is resolved via the
-  // EXISTING getAutopsyForConfirmation read (never fabricated from the submit
-  // response, which carries no such signal) -- see this file's own doc comment.
-  async function isAutopsyPending(attemptId: string): Promise<boolean> {
-    return get(`/v1/attempts/${attemptId}/autopsy`)
-      .then((body) => readPendingAutopsy(body).pending)
-      .catch(() => false);
   }
 
   return {
@@ -289,8 +288,9 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
     async getAttemptResult(attemptId: string): Promise<AttemptResultViewModel> {
       const body = await get(`/v1/attempts/${encodeURIComponent(attemptId)}/result`);
       const parsed = readAttemptResult(body, false, ["submitted", "skipped"]);
-      // A skipped attempt has nothing to diagnose; only a graded one can have a pending autopsy.
-      return parsed.status === "skipped" ? parsed : { ...parsed, hasAutopsy: await isAutopsyPending(attemptId) };
+      // Phase 4 Unit 3: `hasAutopsy` is always false here. A persisted offer now exists for every incorrect attempt, and the old "see what the system
+      // noticed" route would otherwise replace Continue; the explanation is offered by the card on the result screen itself, so Continue stays primary.
+      return parsed;
     },
 
     async getAttemptEvidence(attemptId: string): Promise<AttemptEvidenceViewModel> {

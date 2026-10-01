@@ -749,7 +749,8 @@ model Autopsy {
 
   attempt       Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   errorTaxonomy ErrorTaxonomy? @relation(fields: [errorTaxonomyId], references: [id])
-  repairPlans   RepairPlan[]
+  // Phase 4 Unit 3 (migration 0011): at most ONE RepairPlan per Autopsy -- the database-level guarantee that a single confirmation can never produce two plans.
+  repairPlan    RepairPlan?
 
   @@index([errorTaxonomyId])
   @@map("autopsies")
@@ -807,7 +808,7 @@ model RepairPlan {
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
   errorTaxonomy ErrorTaxonomy? @relation(fields: [targetErrorTaxonomyId], references: [id])
 
-  @@index([autopsyId])
+  @@unique([autopsyId])
   @@index([studentId])
   @@map("repair_plans")
 }

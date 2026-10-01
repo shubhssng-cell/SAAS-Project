@@ -12,8 +12,8 @@ Numbering is **Phase-4-relative** (Unit 1 … Unit 5); there is no relation to t
 |---|---|---|
 | Unit 1 | Autopsy **evidence** (observation only) surfaced in the real student flow | **COMPLETE** (below) |
 | Unit 2 | Hypothesis generation + student confirmation / correction | **COMPLETE** (below) |
-| Unit 3 | Persist confirmed diagnosis + RepairPlan | NOT STARTED |
-| Unit 4 | Targeted repair-question selection + adaptive integration | NOT STARTED |
+| Unit 3 | Persist confirmed diagnosis + RepairPlan | **COMPLETE** (below) |
+| Unit 4 | Targeted repair-question selection + adaptive integration | NOT STARTED (not begun) |
 | Unit 5 | Full end-to-end Autopsy → Repair → improved-practice hardening | NOT STARTED |
 
 *(This is a working plan; later units may be adjusted when they start.)*
@@ -126,6 +126,8 @@ See Unit 2 below: the hypothesis and the student's confirmation, correction or r
 
 ## Unit 2 — Hypothesis generation + student confirmation / correction
 
+> **Superseded in part by Unit 3:** the statements below that "nothing is stored", that a response is "not consumed" and that a refresh regenerates the explanation describe Unit 2 as shipped. Unit 3 (below) persists the offer and the response once, replaces the stateless token, and ends regeneration-on-refresh.
+
 > **Unit 2 introduces interpretation — but only as a hypothesis.** A model proposes ONE possible explanation from the Unit 1 observation evidence; the application decides whether it may reach a student; the student confirms, rejects or corrects it. The system never converts an inferred explanation into a confirmed diagnosis, and **nothing is persisted**: no diagnosis, no RepairPlan (Unit 3).
 
 ### The three layers (and where each lives)
@@ -222,6 +224,91 @@ Default suite (no database): full repository **2078 passed + 54 skipped** across
 - Answer changes, hints and solution opening remain effectively unobserved in the current flow (Unit 1 limitation).
 - Real-database and browser verification are opt-in, on a disposable local container.
 
-### What Unit 3 will build (and Unit 2 did NOT)
+## Unit 3 — Persist the confirmed diagnosis + RepairPlan
 
-Unit 3 — **persist the confirmed diagnosis + create the RepairPlan**: store the hypothesis and the student's response (confirmed / rejected / corrected, with the exact correction text) using the existing `Autopsy` persistence, enforce once-only responses and cache the offered hypothesis (ending regeneration on refresh), and — **only for a student-confirmed hypothesis** — build a `RepairPlan` through the existing `buildRepairPlan()` (a "corrected" hypothesis is not accepted by it without a further diagnosis pass, D-039). Targeted repair-question selection and adaptive integration are Unit 4. **None of this was started in Unit 2.**
+> **Unit 3 makes the student's answer durable — and nothing else.** The offered explanation is stored; the student's response is stored once; only a student-CONFIRMED explanation becomes a diagnosis, and only then is exactly one RepairPlan created. No question is selected, ranked or scored for repair (Unit 4).
+
+### Lifecycle
+
+```
+Observation evidence   Unit 1   derived on every read
+      v
+Hypothesis (offer)     Unit 2   generated once -> PERSISTED (Unit 3): autopsies row, confirmed = NULL ("awaiting")
+      v
+Student response       Unit 3   confirm | reject | correct -- recorded ONCE (first response wins)
+      v
+Confirmed diagnosis    Unit 3   only for "confirm": autopsies.confirmed = true, confirmed_at = response time
+      v
+RepairPlan             Unit 3   only for "confirm": one repair_plans row, built by the existing buildRepairPlan()
+```
+
+### The three outcomes
+
+| Student does | `autopsies` row | RepairPlan | API `diagnosis.state` | UI text |
+|---|---|---|---|---|
+| **Confirm** | `confirmed = true`, `confirmed_at` | exactly one (if a structured target exists) | `confirmed` | "Recorded as a confirmed explanation." + practice focus |
+| **Reject** (no correction) | `confirmed = false`, no correction text | none | `not_confirmed` | "This explanation was not confirmed." |
+| **Correct** (own words) | `confirmed = false`, `student_correction_text` = the exact words | none | `awaiting_diagnosis` | "Your correction was recorded." + the words, exactly |
+
+The status is derived from the one authoritative pair (`confirmed`, correction text), exactly as the existing `toAutopsyPersistenceRecord()` mapping defines it — no new column, no new table.
+
+**Correction is not a diagnosis.** A free-text correction has no structured category to target; turning it into one needs a further diagnosis pass (D-039: `buildRepairPlan()` refuses anything but `confirmationStatus === "confirmed"`). Unit 3 stores the words and stops. The state name `awaiting_diagnosis` marks exactly that boundary; no code produces a diagnosis from it yet.
+
+**Confirmed but no target.** If the question has no resolvable designed trap (no `trapErrorTaxonomyCode`, or the taxonomy cannot resolve it), the confirmation is still recorded but no plan is invented (`repairPlan: null`).
+
+### Where the category comes from
+
+The hypothesis's `proposedErrorCategory` — what a RepairPlan targets — is the question's **designed** trap category (question metadata resolved through the existing `ErrorTaxonomy`), never the model's own pick. `generateObservationHypothesis()` now takes `designedErrorCategory` and the model's category field is ignored. The dev-scripted scaffold therefore produces plan-capable hypotheses without pretending to be a model.
+
+### Once-only, enforced by the database
+
+- `autopsies.attempt_id` is unique → at most one offer per attempt; a racing second offer finds the first (`created: false`).
+- `respond()` is one transaction: `UPDATE autopsies SET … WHERE attempt_id = ? AND confirmed IS NULL`. Exactly one caller can win; only the winner creates the RepairPlan. A loser changes nothing and gets the persisted state (`alreadyRecorded: true`).
+- **Migration `0011_one_repair_plan_per_autopsy`**: `repair_plans.autopsy_id` becomes UNIQUE (replacing a plain index; `Autopsy.repairPlans` → `repairPlan?`). Even a bug could not create a second plan for one autopsy. This is the only schema change; verified with `prisma migrate deploy` and `prisma migrate diff` (no drift) on a disposable Postgres.
+- **Repeat semantics**: the same response again, a different response (confirm→reject, reject→confirm), another instance, or 12 concurrent requests across two instances all return the persisted result; the first response (and its timestamp) stands. A repeat is not an error.
+
+### Token and trust
+
+The server-sealed token (AES-256-GCM, shared secret) no longer carries the hypothesis; it binds `studentId`, `attemptId`, the stored offer's id and its exact text, and an expiry (6 h). On a response the server verifies: the claim's student and attempt match the token (403 otherwise), the token opens and is unexpired and in the v2 format (409 `invalid_state` otherwise), and the **stored** offer still has that id and text. The stored offer is the source of truth; the client cannot alter the hypothesis, the diagnosis, the attempt, the student, or any provenance. The offer itself never expires: a student who returns later is handed a fresh token for the same stored offer (no new model call), or the stored answer if already answered.
+
+### Provenance
+
+- The stored offer keeps the Unit 1 observation evidence it was generated from (`evidence_used.observationEvidence`) plus the hypothesis's supporting/contradictory/missing evidence, provider and prompt version.
+- The `repair_plans` row links autopsy (→ attempt, evidence package, hypothesis) and student; `confirmed_at` is the student's confirmation. `follow_up_question_ids` is empty by design.
+- None of this is exposed to the student: the API returns only status, the student's own words, the hypothesis summary, and — for a confirmed one — `{conceptName, patternFamilyName, status}`.
+
+### API
+
+- `POST /v1/attempts/:id/hypothesis` → `ready` (stored offer + fresh token) | `answered` (the persisted result) | `not_applicable` | `unavailable`. Nothing before submission (409), another student's attempt 403, unknown 404.
+- `POST /v1/attempts/:id/hypothesis/response` → `{ status, studentCorrectionText, hypothesisSummary, persisted: true, alreadyRecorded, diagnosis: { state }, repairPlan | null }`.
+
+### UI
+
+Confirm → "Recorded as a confirmed explanation." + "Practice focus: <pattern> in <concept>." Reject → "This explanation was not confirmed." Correct → "Your correction was recorded." + the exact words + a note that they are not treated as a confirmed explanation. The state survives reload and API restart (the card reads the stored answer). The result screen's Continue is unchanged; the legacy "see what the system noticed" detour no longer replaces it (a persisted offer exists for every incorrect attempt).
+
+### Observed effect on recommendations (reported, not built)
+
+The existing composition already reads confirmed, active RepairPlans, and the existing orchestrator's repair tier already consumes them. Unit 3 changed none of that code; it simply means a stored confirmed plan now exists to read. In the browser, after confirming, the next recommendation reads "Fix a confirmed mistake pattern" (that existing tier's copy: "You confirmed a specific mistake last time — here's a question to test whether you've corrected it."); after reject/correct it is unchanged ("Try a related question"). This is pre-existing behavior reaching real data for the first time. Which question the repair tier picks is **not** targeted repair selection and has not been reviewed for repair quality — that is Unit 4.
+
+### Failure and retry semantics
+
+- Model failure / unsafe output / no model / no store: `unavailable`; nothing stored, nothing fabricated; result and Continue unaffected.
+- A failed response write: the client shows "We couldn't record that. Please try again."; nothing was recorded, and retrying is safe (the transaction is all-or-nothing, and a repeat returns the persisted result).
+- Token expired or stale: 409; asking for the offer again returns the same stored offer with a fresh token.
+- If a plan cannot be built for a confirmed explanation, the confirmation is kept and no plan exists (never a partial or placeholder plan).
+
+### Tests
+
+Domain/service (`packages/practice-api`, in-memory store with the Prisma contract): 26 tests covering persistence, exactly-one diagnosis/plan, reject/correct creating neither, exact correction, idempotency incl. 10 concurrent, forged/expired/moved/old-format tokens, ownership, unfinished attempts, provenance, student isolation, no psychological wording, no answer leakage, no Unit 4 behavior (no selection/mastery dependency). HTTP (`apps/api`): offer/confirm/reject/correct/once-only over the real server. Web: adapter mapping of the persisted outcomes and the honest wording. Real Postgres (`prismaPersistence.integration.test.ts`): offer persisted once; confirm → rows with provenance, duplicates (sequential, cross-instance, 12 concurrent) → one plan; reject and correct → no plan; DB constraints refuse a second plan/autopsy; restart and second-instance reconstruction; recommendation reads the stored plan and ignores reject/correct.
+
+### Limitations (honest)
+
+- **No real model has ever run** (no key). The offer comes from the development-scripted scaffold in browser/PG runs; the validator's strictness against real output is unmeasured. `npm run smoke:anthropic` remains the opt-in check.
+- The correction text is stored but never analysed; "awaiting_diagnosis" has no consumer yet.
+- A confirmed plan's `followUpQuestionIds` is empty; repair-question selection does not exist.
+- Plan `status` never leaves `pending` (nothing advances it yet).
+- The in-memory development store mirrors the contract but with stand-in ids; the database path is the verified one.
+
+### What Unit 4 will build (and Unit 3 did NOT)
+
+Unit 4 — **targeted repair-question selection and adaptive integration**: choose, rank and explain follow-up questions for a stored confirmed RepairPlan; define how a plan advances (`pending → in_progress → completed`); decide how plan-driven selection interacts with the existing adaptive tiers (and whether the repair tier's current behavior should be kept, changed or gated); consume the stored correction text only via a future diagnosis pass. **Unit 4 has NOT been started.**

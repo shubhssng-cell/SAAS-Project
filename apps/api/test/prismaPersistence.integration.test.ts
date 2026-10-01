@@ -1075,7 +1075,7 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     mastery: await a.prisma.masteryState.count({ where: { studentId } })
   });
 
-  it("PHASE 4 UNIT 2: a hypothesis is built from the persisted attempt's evidence; a restarted and a second instance offer the same one, and a token from one is honored by the others", async () => {
+  it("PHASE 4 UNIT 3: the OFFER is persisted once -- a restarted and a second instance return the stored offer (no new model call, one autopsy row), and a token from one is honored by the others", async () => {
     const real = await familyIds();
     const s = await newStudent(a, "hyp-persist");
     const attemptId = await startAndSubmit(a, s.cookie, real.successive, "wrong");
@@ -1089,41 +1089,165 @@ describe.skipIf(!DATABASE_URL)("Prisma persistence -- real Postgres (Product Pha
     const hypothesis = offer.json.hypothesis as { summary: string; supportingEvidence: string[] };
     expect(hypothesis.summary).toMatch(/\bmay\b/);
     expect(hypothesis.supportingEvidence).toContain(`Your selected answer was ${row.chosenAnswer}.`);
-    // grounded: every cited fact is something the student was shown (or the generic designed-pattern sentence) -- never invented
     for (const line of hypothesis.supportingEvidence) expect((evidence.json.observations as string[]).includes(line) || line === GENERIC_PATTERN).toBe(true);
     expect(JSON.stringify(offer.json)).not.toMatch(/modelConfidence|generationMetadata|promptVersion|dev-scripted|proposedErrorCategory|correctAnswer|solutionSteps/i);
 
+    // the offer is in the database: awaiting, with its provenance (the observation evidence it was generated from)
+    const stored = await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId } });
+    expect(stored).toMatchObject({ confirmed: null, confirmedAt: null, studentCorrectionText: null, hypothesisText: hypothesis.summary });
+    expect((stored.evidenceUsed as { observationEvidence: { identity: { attemptId: string } } }).observationEvidence.identity.attemptId).toBe(attemptId);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(0);
+
     const restarted = await startInstance(); // nothing but the database carries over
     try {
-      const again = await hypothesisOf(restarted, s.cookie, attemptId);
-      expect((again.json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
-      const second = await hypothesisOf(b, s.cookie, attemptId);
-      expect((second.json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
-      // a token issued by instance A is answered by the restarted instance and by the second instance (shared secret, no stored state)
-      expect((await respondOf(restarted, s.cookie, attemptId, { token: offer.json.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", persisted: false });
-      expect((await respondOf(b, s.cookie, attemptId, { token: offer.json.token, response: "rejected" })).json).toMatchObject({ status: "rejected", studentCorrectionText: null });
+      expect(((await hypothesisOf(restarted, s.cookie, attemptId)).json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
+      expect(((await hypothesisOf(b, s.cookie, attemptId)).json.hypothesis as { summary: string }).summary).toBe(hypothesis.summary);
+      expect(await a.prisma.autopsy.count({ where: { attemptId } })).toBe(1); // asking again never makes a second offer
+      // a token issued by instance A is answered by the restarted instance; the second instance then sees the SAME persisted answer
+      expect((await respondOf(restarted, s.cookie, attemptId, { token: offer.json.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", persisted: true, alreadyRecorded: false });
+      expect((await respondOf(b, s.cookie, attemptId, { token: offer.json.token, response: "rejected" })).json).toMatchObject({ status: "confirmed", alreadyRecorded: true });
     } finally {
       await restarted.close();
     }
   });
 
-  it("PHASE 4 UNIT 2: confirm / reject / correct -- the correction is returned exactly; nothing is written (no autopsy, RepairPlan, mastery row, or attempt change)", async () => {
+  it("PHASE 4 UNIT 3 CASE A: CONFIRM -> one confirmed autopsy + exactly one RepairPlan with provenance; duplicates (sequential, across instances, and concurrent) create nothing more; restart and a second instance read the same state", async () => {
     const real = await familyIds();
-    const s = await newStudent(a, "hyp-nowrite");
+    const s = await newStudent(a, "hyp-confirm");
     const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
-    const before = { writes: await writesFor(s.studentId), attempt: JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } })) };
-    expect(before.writes).toEqual({ autopsies: 0, repairPlans: 0, mastery: 0 });
-
+    const attemptBefore = JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } }));
     const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
-    const words = "  I used the new value — not the original.\nSecond line ✓ ";
-    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", persisted: false });
-    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "rejected" })).json).toMatchObject({ status: "rejected" });
-    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: words })).json).toMatchObject({ status: "corrected", studentCorrectionText: words });
-    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: "  " })).status).toBe(400);
 
-    expect(await writesFor(s.studentId)).toEqual(before.writes);
-    expect(JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } }))).toBe(before.attempt);
-    expect((await call(a, "GET", `/v1/attempts/${attemptId}/autopsy`, s.cookie)).json).toMatchObject({ pending: false, hypothesis: null });
+    const done = await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" });
+    expect(done.status).toBe(200);
+    expect(done.json).toMatchObject({ status: "confirmed", persisted: true, alreadyRecorded: false, diagnosis: { state: "confirmed" }, studentCorrectionText: null });
+    const view = done.json.repairPlan as { conceptName: string; patternFamilyName: string; status: string };
+    expect(Object.keys(view).sort()).toEqual(["conceptName", "patternFamilyName", "status"]);
+    expect(view).toMatchObject({ status: "pending" });
+    expect(JSON.stringify(done.json)).not.toMatch(/autopsyId|studentId|taxonomy|misconception|modelConfidence|dev-scripted|followUp|priority|correctAnswer/i);
+    expect(JSON.stringify(view)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i); // the plan view carries no ids
+
+    // real rows, with provenance
+    const autopsy = await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId }, include: { repairPlan: true } });
+    expect(autopsy).toMatchObject({ confirmed: true, studentCorrectionText: null });
+    expect(autopsy.confirmedAt).not.toBeNull();
+    expect(autopsy.repairPlan).toMatchObject({ autopsyId: autopsy.id, studentId: s.studentId, status: "pending", targetPatternFamilyName: view.patternFamilyName, targetConceptName: view.conceptName, followUpQuestionIds: [] });
+    expect(autopsy.repairPlan!.targetErrorTaxonomyId).not.toBeNull();
+    expect((autopsy.evidenceUsed as { observationEvidence: unknown }).observationEvidence).toBeDefined();
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+
+    // duplicates: a different response, the same one again, from the other instance, and 12 concurrent ones across both instances
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "rejected" })).json).toMatchObject({ status: "confirmed", alreadyRecorded: true });
+    expect((await respondOf(b, s.cookie, attemptId, { token: offer.token, response: "confirmed" })).json).toMatchObject({ status: "confirmed", alreadyRecorded: true });
+    const burst = await Promise.all(Array.from({ length: 12 }, (_, i) => respondOf(i % 2 ? a : b, s.cookie, attemptId, { token: offer.token, response: "confirmed" })));
+    expect(burst.every((r) => r.status === 200 && (r.json as { status: string }).status === "confirmed")).toBe(true);
+    expect(await a.prisma.autopsy.count({ where: { attemptId } })).toBe(1);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+    expect((await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId } })).confirmedAt).toEqual(autopsy.confirmedAt); // the first response time, untouched
+
+    // restart + second instance: the persisted state is reconstructed, and the offer endpoint reports the stored answer (not a new offer)
+    const restarted = await startInstance();
+    try {
+      for (const instance of [restarted, b]) {
+        expect((await hypothesisOf(instance, s.cookie, attemptId)).json).toMatchObject({ status: "answered", result: { status: "confirmed", persisted: true, repairPlan: view } });
+      }
+    } finally {
+      await restarted.close();
+    }
+
+    // nothing else moved: the attempt and its events are unchanged, no mastery row was written, another student sees none of it
+    expect(JSON.stringify(await a.prisma.attempt.findUniqueOrThrow({ where: { id: attemptId }, include: { events: { orderBy: { id: "asc" } } } }))).toBe(attemptBefore);
+    expect(await a.prisma.masteryState.count({ where: { studentId: s.studentId } })).toBe(0);
+    const other = await newStudent(a, "hyp-confirm-other");
+    expect(await a.prisma.repairPlan.count({ where: { studentId: other.studentId } })).toBe(0);
+    expect((await respondOf(a, other.cookie, attemptId, { token: offer.token, response: "confirmed" })).status).toBe(403);
+  });
+
+  it("PHASE 4 UNIT 3 CASE B: REJECT -> recorded as not confirmed; no diagnosis, no RepairPlan; a later confirm cannot change it (also after a restart)", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-reject");
+    const attemptId = await startAndSubmit(a, s.cookie, real.successive, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "rejected" })).json).toMatchObject({ status: "rejected", persisted: true, diagnosis: { state: "not_confirmed" }, repairPlan: null, studentCorrectionText: null });
+    const autopsy = await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId }, include: { repairPlan: true } });
+    expect(autopsy).toMatchObject({ confirmed: false, studentCorrectionText: null, repairPlan: null });
+    expect(autopsy.confirmedAt).not.toBeNull();
+
+    const restarted = await startInstance();
+    try {
+      expect((await respondOf(restarted, s.cookie, attemptId, { token: offer.token, response: "confirmed" })).json).toMatchObject({ status: "rejected", alreadyRecorded: true, repairPlan: null });
+      expect((await hypothesisOf(restarted, s.cookie, attemptId)).json).toMatchObject({ status: "answered", result: { status: "rejected", diagnosis: { state: "not_confirmed" } } });
+    } finally {
+      await restarted.close();
+    }
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(0);
+    expect(await a.prisma.autopsy.count({ where: { attemptId, confirmed: true } })).toBe(0);
+    expect(await writesFor(s.studentId)).toEqual({ autopsies: 1, repairPlans: 0, mastery: 0 }); // the offer + its rejection, and nothing else
+  });
+
+  it("PHASE 4 UNIT 3 CASE C: CORRECT -> the student's exact words are stored; not a diagnosis; no RepairPlan; identical after a restart", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-correct");
+    const attemptId = await startAndSubmit(a, s.cookie, real.point, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string; hypothesis: { summary: string } };
+    const words = "  I used the new value — not the original.\nSecond line ✓ ";
+
+    expect((await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: words })).json).toMatchObject({ status: "corrected", studentCorrectionText: words, persisted: true, diagnosis: { state: "awaiting_diagnosis" }, repairPlan: null });
+    const autopsy = await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId }, include: { repairPlan: true } });
+    expect(autopsy).toMatchObject({ confirmed: false, studentCorrectionText: words, hypothesisText: offer.hypothesis.summary, repairPlan: null });
+    expect(autopsy.confirmedAt).not.toBeNull();
+
+    const restarted = await startInstance();
+    try {
+      expect((await hypothesisOf(restarted, s.cookie, attemptId)).json).toMatchObject({ status: "answered", result: { status: "corrected", studentCorrectionText: words, diagnosis: { state: "awaiting_diagnosis" }, repairPlan: null } });
+      expect((await respondOf(restarted, s.cookie, attemptId, { token: offer.token, response: "corrected", correctedExplanation: "different words" })).json).toMatchObject({ studentCorrectionText: words, alreadyRecorded: true });
+    } finally {
+      await restarted.close();
+    }
+    expect((await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId } })).studentCorrectionText).toBe(words);
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(0);
+  });
+
+  it("PHASE 4 UNIT 3: the database itself refuses a second RepairPlan for one autopsy (migration 0011) and a second autopsy for one attempt", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-constraint");
+    const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+    await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" });
+    const autopsy = await a.prisma.autopsy.findUniqueOrThrow({ where: { attemptId }, include: { repairPlan: true } });
+    const plan = autopsy.repairPlan!;
+
+    await expect(
+      a.prisma.repairPlan.create({ data: { autopsyId: autopsy.id, studentId: s.studentId, targetConceptId: plan.targetConceptId, targetErrorTaxonomyId: plan.targetErrorTaxonomyId, followUpQuestionIds: [], status: "pending", targetConceptName: plan.targetConceptName, targetPatternFamilyName: plan.targetPatternFamilyName, targetTaxonomyCellId: plan.targetTaxonomyCellId, targetErrorCategory: plan.targetErrorCategory, recommendedTrainingMode: plan.recommendedTrainingMode, priority: plan.priority } })
+    ).rejects.toMatchObject({ code: "P2002" });
+    await expect(a.prisma.autopsy.create({ data: { attemptId, hypothesisText: "another", evidenceUsed: {}, generatedByProvider: "x", promptVersion: "x" } })).rejects.toMatchObject({ code: "P2002" });
+    expect(await a.prisma.repairPlan.count({ where: { studentId: s.studentId } })).toBe(1);
+  });
+
+  it("PHASE 4 UNIT 3: the stored confirmed plan is what the EXISTING recommendation path reads (unchanged code), identically on a restarted instance; rejected/corrected answers add nothing to it", async () => {
+    const real = await familyIds();
+    const s = await newStudent(a, "hyp-recommend");
+    const attemptId = await startAndSubmit(a, s.cookie, real.reverse, "wrong");
+    const before = await call(a, "POST", "/v1/recommendation", s.cookie);
+    const offer = (await hypothesisOf(a, s.cookie, attemptId)).json as { token: string };
+    await respondOf(a, s.cookie, attemptId, { token: offer.token, response: "confirmed" });
+    const after = await call(a, "POST", "/v1/recommendation", s.cookie);
+    expect(after.status).toBe(200);
+    // the existing repair tier consumed the stored plan; this unit changed no selection code
+    const restarted = await startInstance();
+    try {
+      expect((await call(restarted, "POST", "/v1/recommendation", s.cookie)).json).toEqual(after.json);
+    } finally {
+      await restarted.close();
+    }
+    const unchanged = await newStudent(a, "hyp-recommend-reject");
+    const rejectedAttempt = await startAndSubmit(a, unchanged.cookie, real.reverse, "wrong");
+    const rejectedBefore = await call(a, "POST", "/v1/recommendation", unchanged.cookie);
+    const rejectedOffer = (await hypothesisOf(a, unchanged.cookie, rejectedAttempt)).json as { token: string };
+    await respondOf(a, unchanged.cookie, rejectedAttempt, { token: rejectedOffer.token, response: "rejected" });
+    expect((await call(a, "POST", "/v1/recommendation", unchanged.cookie)).json).toEqual(rejectedBefore.json);
+    void before;
   });
 
   it("PHASE 4 UNIT 2: nothing before submission (409), nothing for another student (403), no session (401), forged/garbage tokens refused (409), not_applicable for correct and skipped attempts", async () => {

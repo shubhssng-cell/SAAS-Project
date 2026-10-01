@@ -1,4 +1,5 @@
 import { autopsyHypothesisAiSchema, generateStructured, type AiCallOptions, type AiProvider, type AutopsyHypothesisAiOutput } from "@ipmat/ai";
+import type { ErrorCategory } from "@ipmat/examiner-lens";
 import { buildHypothesisSystemPrompt } from "./hypothesisPrompts.js";
 import { describeObservationEvidence, type ObservationEvidence } from "./observationEvidence.js";
 import { HypothesisError, type AutopsyHypothesis } from "./types.js";
@@ -97,6 +98,11 @@ export function validateHypothesisCandidate(candidate: AutopsyHypothesisAiOutput
 
 export interface ObservationHypothesisInput {
   observation: ObservationEvidence;
+  /**
+   * The error category of the question's DESIGNED trap (question metadata resolved through the existing taxonomy), or `null`. It -- never a
+   * model's own pick -- becomes the hypothesis's `proposedErrorCategory`, which is what a RepairPlan would target if the student confirms.
+   */
+  designedErrorCategory?: ErrorCategory | null;
 }
 
 /**
@@ -128,7 +134,7 @@ export async function generateObservationHypothesis(provider: AiProvider, input:
 
   return {
     attemptId: observation.identity.attemptId,
-    proposedErrorCategory: result.data.proposedErrorCategory,
+    proposedErrorCategory: input.designedErrorCategory ?? null,
     proposedExplanation: result.data.proposedExplanation.trim(),
     supportingEvidence: verdict.supportingEvidence,
     contradictoryEvidence: verdict.contradictoryEvidence,

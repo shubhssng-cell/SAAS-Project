@@ -6,8 +6,7 @@ import type {
   PracticeSessionRepository,
   QuestionReader,
   RepairPlanRepository,
-  TrainingQuestionReader
-} from "@ipmat/db";
+  TrainingQuestionReader, ErrorTaxonomyReader } from "@ipmat/db";
 
 /**
  * Training Recommendation Composition (docs/project-memory/37_TRAINING_RECOMMENDATION.md).
@@ -33,6 +32,8 @@ export interface TrainingRecommendationDependencies {
   conceptReader: ConceptReader;
   practiceSessionReader: Pick<PracticeSessionRepository, "findActiveByEnrollmentId">;
   practiceBlockReader: Pick<PracticeBlockRepository, "findBySessionId">;
+  /** Phase 4 Unit 3 (optional): the existing error taxonomy, used only to resolve a question's designed trap to its category for the Autopsy output. Absent -> an empty taxonomy (no category is invented). */
+  errorTaxonomyReader?: ErrorTaxonomyReader;
   /** Supplies `computeMasteryState()`'s `now` (pure mastery functions never read the clock themselves). Defaults to the system clock. */
   now?: () => string;
 }

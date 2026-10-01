@@ -73,7 +73,7 @@ export class PrismaAutopsyRepository implements AutopsyRepository {
   }
 }
 
-function toStoredAutopsy(row: {
+export function toStoredAutopsy(row: {
   id: string;
   attemptId: string;
   hypothesisText: string;

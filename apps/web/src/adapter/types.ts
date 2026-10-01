@@ -79,14 +79,22 @@ export interface AttemptEvidenceViewModel {
  */
 export type HypothesisOfferViewModel =
   | { status: "ready"; summary: string; supportingEvidence: string[]; token: string }
+  /** The student already answered this explanation: the stored outcome (shown again after a reload or a restart). */
+  | { status: "answered"; result: HypothesisResultViewModel }
   | { status: "not_applicable" | "unavailable" };
 
 export type HypothesisResponseInput = { type: "confirmed" } | { type: "rejected" } | { type: "corrected"; correctedExplanation: string };
 
-/** What the student's response produced. `corrected` carries their own words exactly. Nothing is stored in Unit 2. */
+/**
+ * What the student's response produced, as PERSISTED (Phase 4 Unit 3). `corrected` carries their own words exactly. `diagnosisState`:
+ * `confirmed` = recorded as a confirmed explanation; `not_confirmed` = rejected (not a diagnosis); `awaiting_diagnosis` = the student's
+ * correction was recorded but is not a confirmed diagnosis. `repairPlan` is the safe practice focus, only for a confirmed explanation.
+ */
 export interface HypothesisResultViewModel {
   status: "confirmed" | "rejected" | "corrected";
   studentCorrectionText: string | null;
+  diagnosisState: "confirmed" | "not_confirmed" | "awaiting_diagnosis";
+  repairPlan: { conceptName: string; patternFamilyName: string } | null;
 }
 
 export interface AutopsyViewModel {
