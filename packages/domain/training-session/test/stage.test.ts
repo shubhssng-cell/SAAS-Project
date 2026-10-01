@@ -3,6 +3,7 @@ import { SPEED_LAB_STAGES } from "@ipmat/speed-lab";
 import { describe, expect, it } from "vitest";
 import { TRAINING_SYSTEM_CATALOG, findTrainingSystem } from "../src/catalog.js";
 import { runTrainingSystem, stageKeyOfRun } from "../src/runSystem.js";
+import { buildTrainingObjective } from "../src/objective.js";
 import { describeStage, describeStageChange, readStageKey } from "../src/stage.js";
 import { makeCandidate, STUDENT } from "./fixtures.js";
 
@@ -84,5 +85,33 @@ describe("stageKeyOfRun -- the stage the provider itself reports", () => {
     const attemptRecords = [rec(0.2, true, 1), rec(0.2, true, 2), rec(0.2, true, 3), rec(0.8, false, 4), rec(0.8, false, 5), rec(0.8, false, 6)];
     const run = runTrainingSystem("calculation-gym", { studentId: STUDENT, masteryByConcept: [], attemptRecords, candidates: [makeCandidate({ conceptName: "Percentages", difficultyDimensions: dims(0.2) })] });
     expect(stageKeyOfRun(run)).toBe("mixed"); // low cleared, no heavy evidence at 0.75 -> stage 2, whether or not a question qualifies
+  });
+});
+
+describe("Trap Lab in the catalog (Phase 5 Unit 4) -- deliberately has NO stages", () => {
+  const trap = findTrainingSystem("trap-lab")!;
+
+  it("is the trap-dimension system served by the existing trap-lab provider, titled 'Trap Lab'", () => {
+    expect(trap).toMatchObject({ systemId: "trap-lab", dimension: "trap", providerId: "trap-lab", label: "Traps", sessionTitle: "Trap Lab" });
+  });
+
+  it("declares no stages, so no stage or transition can ever be derived for it", () => {
+    expect(trap.stages).toBeUndefined();
+    expect(describeStage(trap, "foundational")).toBeNull();
+    expect(describeStageChange(trap, "a", "b")).toBeNull();
+  });
+
+  it("has authored per-reason 'not applicable' copy keyed by the provider's own reasons, the reason code itself never shown", () => {
+    expect(Object.keys(trap.notApplicableByReason ?? {}).sort()).toEqual(["insufficient_evidence", "no_recurring_trap_detected"]);
+    const text = JSON.stringify([trap.notApplicableByReason, trap.notApplicableNote, trap.noEligibleNote, trap.focusSentence, trap.trains]).toLowerCase();
+    for (const banned of ["errortaxonomy", "recurrence", "threshold", "diagnos", "confirmed", "you are", "you always", "prone", "bad at", "lack", "score", "confidence", "stage"]) expect(text, banned).not.toContain(banned);
+    expect(trap.notApplicableByReason!.insufficient_evidence).not.toBe(trap.notApplicableByReason!.no_recurring_trap_detected);
+  });
+
+  it("the objective has a trap-pattern focus and no concept (recurrence is cross-concept, concept is never part of the trap's identity)", () => {
+    expect(buildTrainingObjective(trap, { targetErrorTaxonomyCode: "base_confusion" } as never)).toMatchObject({
+      targetConceptName: null,
+      statement: "Practice a recurring trap pattern: the same kind of trap, in different question formats. This session focuses on a trap pattern that has appeared across your practice."
+    });
   });
 });

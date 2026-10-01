@@ -46,6 +46,10 @@ export interface WorldQuestion {
   conceptual?: number;
   /** `testingModes` (default `["direct"]`). */
   modes?: Array<"direct" | "multi_step" | "time_pressured">;
+  /** `trapErrorTaxonomyCode` (default none). */
+  trap?: string | null;
+  /** Concept name (default "Percentages"). */
+  concept?: string;
   /** A structurally malformed candidate: no `difficultyDimensions` at all (the provider must exclude it, never crash or serve it). */
   malformed?: boolean;
 }
@@ -57,7 +61,7 @@ function trainingRecord(q: WorldQuestion): TrainingQuestionRecord {
       examCode: "IPMAT_INDORE",
       sectionName: "Quant",
       chapterName: "Percentages",
-      conceptName: "Percentages",
+      conceptName: q.concept ?? "Percentages",
       patternFamilyName: "Reverse Percentage",
       patternTaxonomyCellId: q.cell ?? `cell-${q.id}`,
       difficultyTier: "standard",
@@ -65,7 +69,7 @@ function trainingRecord(q: WorldQuestion): TrainingQuestionRecord {
       noveltyLevel: q.noveltyLevel,
       examRelevance: "core",
       testingModes: q.modes ?? ["direct"],
-      trapErrorTaxonomyCode: null,
+      trapErrorTaxonomyCode: q.trap ?? null,
       combinesWithConcepts: []
     },
     expectedTimeSeconds: 90,
@@ -123,7 +127,7 @@ export class TrainingWorld {
   private canonical(): CanonicalQuestion[] {
     return this.allQuestions().map((q) => ({
       id: q.id,
-      conceptId: "concept-percentages",
+      conceptId: `concept-${(q.concept ?? "Percentages").toLowerCase()}`,
       options: null,
       correctAnswer: ANSWER_KEY,
       expectedTimeSeconds: 90,
@@ -132,14 +136,14 @@ export class TrainingWorld {
   }
 
   private content(): StudentQuestionRecord[] {
-    return this.pool.map((q) => ({ id: q.id, chapterName: "Percentages", conceptName: "Percentages", prompt: `Prompt for ${q.id}`, answerFormat: "numeric_entry", options: null, expectedTimeSeconds: 90 }));
+    return this.pool.map((q) => ({ id: q.id, chapterName: "Percentages", conceptName: q.concept ?? "Percentages", prompt: `Prompt for ${q.id}`, answerFormat: "numeric_entry", options: null, expectedTimeSeconds: 90 }));
   }
 
   /** A fresh set of services over the SAME persisted state -- what a restart (or a second API instance) looks like. */
   boot(): { practice: PracticeApiService; training: TrainingApiService } {
     const questionReader = new InMemoryQuestionReader(this.canonical());
     const enrollmentReader = new InMemoryEnrollmentReader(this.enrollments);
-    const concepts: ConceptRecord[] = [{ id: "concept-percentages", name: "Percentages", chapterId: "chapter-1" }];
+    const concepts: ConceptRecord[] = [...new Set(this.allQuestions().map((q) => q.concept ?? "Percentages"))].map((name) => ({ id: `concept-${name.toLowerCase()}`, name, chapterId: "chapter-1" }));
     const recommendation = new TrainingRecommendationService({
       enrollmentReader,
       attemptHistoryReader: this.attempts,

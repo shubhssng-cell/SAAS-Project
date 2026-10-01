@@ -36,6 +36,10 @@ Every Trap-Lab-produced `explanation`/`notes`/diagnostic string is regression-te
 
 Provider-local: filter by trap-code + optional concept match, published, structurally valid → prefer an unvisited taxonomy cell (anti-memorization: "repeat the trap, vary the surface") → least prior exposure → lexicographic questionId.
 
+## Student-facing since Phase 5 Unit 4
+
+Trap Lab is a real card in the Training Hub ([../PHASE_5_UNIT_4_REVIEW.md](../PHASE_5_UNIT_4_REVIEW.md), D-078). **The provider was not changed.** It has NO stages (the session, question and completion views carry `stage: null` and the UI shows no stage, stage progress or next-stage notice); concept stays out of the trap's identity; the hub's "not applicable" copy is keyed by the provider's reason (`insufficient_evidence` vs `no_recurring_trap_detected`) without ever showing the reason or the trap code. Nothing about the trap (code, cell id, count, threshold, resistance) reaches a student view. A start-level `no_eligible_question` is effectively unreachable (the questions that caused the recurrence are themselves qualifying candidates), so the honest "nothing left" state appears inside a session once every qualifying question has been used. The recurrence threshold stays the autopsy package's PROVISIONAL constant; no real student has used it.
+
 ## Status
 
 Wired into orchestration since D-062, and given **first** priority in the fixed order (`trap-lab > calculation-gym > speed-lab > pressure-training > novelty-training`).

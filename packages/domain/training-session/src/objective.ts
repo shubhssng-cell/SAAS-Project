@@ -27,7 +27,7 @@ export function buildTrainingObjective(definition: TrainingSystemDefinition, req
   return {
     systemId: definition.systemId,
     dimension: definition.dimension,
-    statement: targetConceptName === null ? definition.trains : `${definition.trains} Focus: ${targetConceptName}.`,
+    statement: targetConceptName !== null ? `${definition.trains} Focus: ${targetConceptName}.` : definition.focusSentence ? `${definition.trains} ${definition.focusSentence}` : definition.trains,
     targetConceptName
   };
 }

@@ -62,7 +62,7 @@ export class TrainingApiService {
       const runs = await this.deps.trainingRecommendationService.runTrainingSystems(claim, TRAINING_SYSTEM_CATALOG.map((definition) => definition.systemId));
       const systems: TrainingSystemCardView[] = runs.map((run) => {
         const availability = toAvailability(run);
-        const note = availability === "not_applicable" && run.definition.notApplicableNote ? run.definition.notApplicableNote : AVAILABILITY_NOTES[availability];
+        const note = this.noteFor(run, availability);
         return { systemId: run.definition.systemId, dimension: run.definition.dimension, label: run.definition.label, trains: run.definition.trains, availability, note };
       });
       const active = await this.deps.trainingSessionRepository.findActiveByEnrollmentId(claim.enrollmentId);
@@ -205,6 +205,17 @@ export class TrainingApiService {
   }
 
   // ---------------------------------------------------------------------------------------------
+
+  /** Hand-authored copy only. The provider's own reason code selects WHICH authored sentence, and is never shown. */
+  private noteFor(run: Awaited<ReturnType<TrainingApiDependencies["trainingRecommendationService"]["runTrainingSystems"]>>[number], availability: TrainingSystemAvailability): string {
+    const definition = run.definition;
+    if (availability === "not_applicable") {
+      const reason = run.status === "ran" && run.outcome.status === "not_applicable" ? run.outcome.reason : null;
+      return (reason !== null ? definition.notApplicableByReason?.[reason] : undefined) ?? definition.notApplicableNote ?? AVAILABILITY_NOTES[availability];
+    }
+    if (availability === "no_eligible_question" && definition.noEligibleNote) return definition.noEligibleNote;
+    return AVAILABILITY_NOTES[availability];
+  }
 
   private async questionView(
     stored: StoredTrainingSession,

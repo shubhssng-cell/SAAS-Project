@@ -44,6 +44,15 @@ export interface TrainingSystemDefinition {
   stages?: readonly TrainingStageDefinition[];
   /** Optional system-specific, student-safe sentence for "not applicable right now" (what the student would need to have done first), replacing the generic one. */
   notApplicableNote?: string;
+  /**
+   * Optional per-reason student-safe copy, keyed by the provider's own not-applicable reason (the reason code itself is never shown),
+   * so a student can tell "nothing recorded yet" from "recorded, but no recurring pattern". Falls back to `notApplicableNote`.
+   */
+  notApplicableByReason?: Readonly<Record<string, string>>;
+  /** Optional system-specific sentence for "applicable, but no published question fits right now". */
+  noEligibleNote?: string;
+  /** Optional sentence appended to the objective when the provider names no target concept (e.g. Trap Lab, whose recurrence is not concept-scoped). */
+  focusSentence?: string;
 }
 
 /** Display order. Deterministic and fixed -- never sorted by any score. */
@@ -76,7 +85,22 @@ export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
     ],
     notApplicableNote: "Needs several recorded answers on straightforward questions of the same concept first."
   },
-  { systemId: "trap-lab", dimension: "trap", label: "Traps", trains: "Spotting the specific trap a question is built around.", providerId: "trap-lab" },
+  {
+    systemId: "trap-lab",
+    dimension: "trap",
+    label: "Traps",
+    sessionTitle: "Trap Lab",
+    trains: "Practice a recurring trap pattern: the same kind of trap, in different question formats.",
+    providerId: "trap-lab",
+    // No `stages`: Trap Lab has no progression vocabulary (D-056) -- a trap either is a represented error pattern or it is not.
+    notApplicableByReason: {
+      insufficient_evidence: "Needs recorded incorrect answers on questions that share a trap pattern first.",
+      no_recurring_trap_detected: "Your recorded practice doesn't show the same trap pattern across several different questions yet."
+    },
+    notApplicableNote: "Needs recorded incorrect answers on questions that share a trap pattern first.",
+    noEligibleNote: "No published question with this trap pattern is available right now.",
+    focusSentence: "This session focuses on a trap pattern that has appeared across your practice."
+  },
   { systemId: "novelty-training", dimension: "novelty", label: "Novelty", trains: "Unfamiliar twists on concepts you have already practised.", providerId: "novelty-training" },
   { systemId: "pressure-training", dimension: "pressure", label: "Pressure", trains: "Holding your performance across a timed run of questions.", providerId: "pressure-training" },
   { systemId: "revision", dimension: "revision", label: "Revision", trains: "Revisiting concepts after time has passed.", providerId: null },
