@@ -70,8 +70,11 @@ describe("training objective", () => {
     const run = runTrainingSystem("novelty-training", context({ attemptRecords: NOVELTY_HISTORY, candidates: [makeCandidate({ conceptName: "Percentages", noveltyLevel: "novel_combination" })] }));
     if (run.status !== "ran" || run.outcome.status !== "selected") throw new Error("expected selected");
     const objective = buildTrainingObjective(findTrainingSystem("novelty-training")!, run.outcome.requirement);
-    expect(objective).toMatchObject({ systemId: "novelty-training", dimension: "novelty", targetConceptName: "Percentages" });
-    expect(objective.statement).toContain("Focus: Percentages.");
+    // the provider DID name a target concept, but Novelty's target rotates, so the (start-time) objective deliberately does not repeat it (D-079)
+    expect(objective).toMatchObject({ systemId: "novelty-training", dimension: "novelty", targetConceptName: null });
+    expect(objective.statement).toContain("This session is expanding the kinds of questions you've encountered.");
+    const speed = buildTrainingObjective(findTrainingSystem("calculation-gym")!, { targetConceptName: "Percentages" } as never);
+    expect(speed.targetConceptName).toBe("Percentages"); // a system whose target does not rotate still names its concept
   });
 
   it("round-trips through persistence and rejects a malformed stored value", () => {

@@ -115,3 +115,31 @@ describe("Trap Lab in the catalog (Phase 5 Unit 4) -- deliberately has NO stages
     });
   });
 });
+
+describe("Novelty Training in the catalog (Phase 5 Unit 5) -- peer styles, NO stages, no concept in the objective", () => {
+  const novelty = findTrainingSystem("novelty-training")!;
+
+  it("is the novelty-dimension system served by the existing provider, titled 'Novelty Training', with no stages", () => {
+    expect(novelty).toMatchObject({ systemId: "novelty-training", dimension: "novelty", providerId: "novelty-training", label: "Novelty", sessionTitle: "Novelty Training" });
+    expect(novelty.stages).toBeUndefined();
+    expect(describeStage(novelty, "mixed")).toBeNull();
+    expect(describeStageChange(novelty, "a", "b")).toBeNull();
+  });
+
+  it("has authored copy keyed by the provider's own reasons; the reason codes and the style names are never shown", () => {
+    expect(Object.keys(novelty.notApplicableByReason ?? {}).sort()).toEqual(["insufficient_evidence", "sufficient_novelty_exposure"]);
+    const text = JSON.stringify([novelty.notApplicableByReason, novelty.notApplicableNote, novelty.noEligibleNote, novelty.noLongerApplicableNote, novelty.focusSentence, novelty.trains]).toLowerCase();
+    for (const banned of ["novel_", "noveltylevel", "threshold", "exposure count", "you struggle", "weak", "lack", "poor", "not good at", "adaptab", "ability", "confidence", "score", "stage", "mastery"]) expect(text, banned).not.toContain(banned);
+  });
+
+  it("the objective never names a concept (the target rotates) while a non-rotating system still does", () => {
+    expect(novelty.conceptNotInObjective).toBe(true);
+    expect(buildTrainingObjective(novelty, { targetConceptName: "Percentages", targetNoveltyLevel: "novel_context" } as never)).toMatchObject({ targetConceptName: null });
+    expect(buildTrainingObjective(findTrainingSystem("calculation-gym")!, { targetConceptName: "Percentages" } as never).targetConceptName).toBe("Percentages");
+    expect(buildTrainingObjective(findTrainingSystem("speed-lab")!, { targetConceptName: "Percentages" } as never).targetConceptName).toBe("Percentages");
+  });
+
+  it("only systems with a staged provider declare stages -- Calculation and Speed, never Trap or Novelty", () => {
+    expect(TRAINING_SYSTEM_CATALOG.filter((d) => d.stages).map((d) => d.systemId)).toEqual(["calculation-gym", "speed-lab"]);
+  });
+});

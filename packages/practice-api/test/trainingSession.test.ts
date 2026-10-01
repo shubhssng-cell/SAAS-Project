@@ -57,8 +57,9 @@ describe("starting a session", () => {
       completion: { kind: "fixed_question_count", questionCount: 5 },
       progress: { completedQuestionCount: 0, remainingQuestions: 5, hasOpenQuestion: false }
     });
-    expect(session.objective.targetConceptName).toBe("Percentages");
-    expect(session.objective.statement).toContain("Percentages");
+    // Novelty Training re-targets the least-exposed concept/style pair after every attempt (D-079), so its start-time objective names no concept.
+    expect(session.objective.targetConceptName).toBeNull();
+    expect(session.objective.statement).toBe("Practice unfamiliar question styles: build exposure to different ways the exam can present a concept. This session is expanding the kinds of questions you've encountered.");
   });
 
   it("an unknown system is not_found; a system with no engine is refused; one that does not apply is refused -- nothing is created", async () => {

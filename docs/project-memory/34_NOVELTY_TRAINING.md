@@ -22,6 +22,10 @@ Unlike Calculation Gym/Speed Lab, there is no ladder. Targeting the globally low
 
 `@ipmat/training-systems` + `@ipmat/mastery` only — alongside Trap Lab, one of the two lightest providers. Zero new provisional numeric constants introduced.
 
+## Student-facing since Phase 5 Unit 5
+
+Novelty Training is a real card in the Training Hub ([../PHASE_5_UNIT_5_REVIEW.md](../PHASE_5_UNIT_5_REVIEW.md), D-079). **The provider was not changed.** It has NO stages (the three styles are peers; the session, question and completion views carry `stage: null`); the target is the globally lowest-exposure (concept, style) pair and therefore ROTATES, so the session objective no longer names a concept (`conceptNotInObjective`); the hub copy is keyed by the provider's reason (`insufficient_evidence` vs `sufficient_novelty_exposure`) without showing it, and "applicable but no published question" is a separate honest state (evaluate never inspects the candidate pool). The baseline counts DISTINCT standard questions of the concept. No style name, taxonomy-cell id, exposure count or threshold reaches a student view. Exposure is not comprehension and the 3-question baseline/sufficiency are the shared PROVISIONAL mastery constant; no real student has used it.
+
 ## Selection
 
 Prefer an unseen taxonomy cell at the target level → least exposure → lexicographic questionId.

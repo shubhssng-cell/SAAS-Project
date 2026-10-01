@@ -51,6 +51,13 @@ export interface TrainingSystemDefinition {
   notApplicableByReason?: Readonly<Record<string, string>>;
   /** Optional system-specific sentence for "applicable, but no published question fits right now". */
   noEligibleNote?: string;
+  /**
+   * True when the provider's target concept can ROTATE during a session (Novelty Training re-targets the globally least-exposed concept/style pair
+   * after every recorded attempt). The objective is a snapshot taken at start, so it must not name a concept that may no longer be the target.
+   */
+  conceptNotInObjective?: boolean;
+  /** Optional sentence shown (instead of the generic one) when a session's system stops applying mid-session because its OWN evidence now says nothing more is needed. */
+  noLongerApplicableNote?: string;
   /** Optional sentence appended to the objective when the provider names no target concept (e.g. Trap Lab, whose recurrence is not concept-scoped). */
   focusSentence?: string;
 }
@@ -101,7 +108,24 @@ export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
     noEligibleNote: "No published question with this trap pattern is available right now.",
     focusSentence: "This session focuses on a trap pattern that has appeared across your practice."
   },
-  { systemId: "novelty-training", dimension: "novelty", label: "Novelty", trains: "Unfamiliar twists on concepts you have already practised.", providerId: "novelty-training" },
+  {
+    systemId: "novelty-training",
+    dimension: "novelty",
+    label: "Novelty",
+    sessionTitle: "Novelty Training",
+    trains: "Practice unfamiliar question styles: build exposure to different ways the exam can present a concept.",
+    providerId: "novelty-training",
+    // No `stages`: the three novelty levels are PEER categories, not a ladder (D-058) -- exposure-first, no progression.
+    conceptNotInObjective: true,
+    notApplicableByReason: {
+      insufficient_evidence: "Needs several recorded answers on standard questions of one concept first.",
+      sufficient_novelty_exposure: "Your recorded practice already includes several questions in each unfamiliar style, so there is nothing to add right now."
+    },
+    notApplicableNote: "Needs several recorded answers on standard questions of one concept first.",
+    noEligibleNote: "No published question in an unfamiliar style is available right now.",
+    noLongerApplicableNote: "Your recorded practice now includes several questions in each unfamiliar style, so there is nothing more to add right now. You can end the session.",
+    focusSentence: "This session is expanding the kinds of questions you've encountered."
+  },
   { systemId: "pressure-training", dimension: "pressure", label: "Pressure", trains: "Holding your performance across a timed run of questions.", providerId: "pressure-training" },
   { systemId: "revision", dimension: "revision", label: "Revision", trains: "Revisiting concepts after time has passed.", providerId: null },
   { systemId: "overtraining", dimension: "overtraining", label: "Overtraining", trains: "Keeping repeated practice from over-narrowing.", providerId: null }

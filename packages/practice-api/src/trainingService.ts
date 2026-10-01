@@ -172,7 +172,11 @@ export class TrainingApiService {
 
         const [run] = await this.deps.trainingRecommendationService.runTrainingSystems(claim, [stored.systemId], { excludeQuestionIds: attempts.map((attempt) => attempt.questionId) });
         if (!run || run.status === "not_built" || run.outcome.status !== "selected") {
-          return { status: "no_question", session: await this.toView(stored, now, { stageKey: run ? stageKeyOfRun(run) : null }), message: NO_FURTHER_QUESTION_MESSAGE };
+          // A system whose OWN evidence now says nothing more is needed (e.g. Novelty Training: every style sufficiently exposed) says so in its own authored
+          // words; every other case keeps the generic sentence.
+          const stoppedApplying = run !== undefined && run.status === "ran" && run.outcome.status === "not_applicable";
+          const message = (stoppedApplying ? run.definition.noLongerApplicableNote : undefined) ?? NO_FURTHER_QUESTION_MESSAGE;
+          return { status: "no_question", session: await this.toView(stored, now, { stageKey: run ? stageKeyOfRun(run) : null }), message };
         }
         return this.questionView(stored, claim, run.outcome.question.questionId, now, attempts, stageKeyOfRun(run));
       });

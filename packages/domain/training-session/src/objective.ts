@@ -23,7 +23,7 @@ export function readTargetConceptName(requirement: TrainingRequirement): string 
 }
 
 export function buildTrainingObjective(definition: TrainingSystemDefinition, requirement: TrainingRequirement): TrainingObjective {
-  const targetConceptName = readTargetConceptName(requirement);
+  const targetConceptName = definition.conceptNotInObjective ? null : readTargetConceptName(requirement);
   return {
     systemId: definition.systemId,
     dimension: definition.dimension,
