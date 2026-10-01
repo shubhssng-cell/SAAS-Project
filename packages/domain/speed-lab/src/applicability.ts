@@ -33,9 +33,11 @@ function buildRequirement(target: ConceptEvidence, stage: SpeedLabStage): SpeedL
 
   switch (stage) {
     case "steady_pace":
-      return { targetConceptName, stage, maxConceptualLoad: SPEED_LAB_CONSTANTS.LOW_CONCEPTUAL_LOAD_THRESHOLD, requireTimePressured: false, notes };
+      // The steady gate counts low-conceptual-load, non-time-pressured attempts (progression.ts): serve exactly that shape.
+      return { targetConceptName, stage, maxConceptualLoad: SPEED_LAB_CONSTANTS.LOW_CONCEPTUAL_LOAD_THRESHOLD, minConceptualLoad: null, requireTimePressured: false, excludeTimePressured: true, notes };
     case "mixed_pace":
-      return { targetConceptName, stage, maxConceptualLoad: null, requireTimePressured: false, notes };
+      // The mixed gate counts conceptualLoad >= the low-load threshold, non-time-pressured attempts: serve exactly that shape.
+      return { targetConceptName, stage, maxConceptualLoad: null, minConceptualLoad: SPEED_LAB_CONSTANTS.LOW_CONCEPTUAL_LOAD_THRESHOLD, requireTimePressured: false, excludeTimePressured: true, notes };
     case "time_constrained":
       return { targetConceptName, stage, maxConceptualLoad: null, requireTimePressured: true, notes };
   }

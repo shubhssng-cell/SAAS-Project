@@ -18,6 +18,8 @@ function qualifies(candidate: TrainingCandidateQuestion, requirement: SpeedLabRe
   if (candidate.validationState !== "published") return false;
   if (candidate.question.conceptName !== requirement.targetConceptName) return false;
   if (requirement.maxConceptualLoad !== null && candidate.question.difficultyDimensions.conceptualLoad >= requirement.maxConceptualLoad) return false;
+  if (requirement.minConceptualLoad != null && candidate.question.difficultyDimensions.conceptualLoad < requirement.minConceptualLoad) return false;
+  if (requirement.excludeTimePressured && candidate.question.testingModes.includes("time_pressured")) return false;
   if (requirement.requireTimePressured && !candidate.question.testingModes.includes("time_pressured")) return false;
   return true;
 }

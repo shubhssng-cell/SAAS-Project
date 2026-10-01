@@ -62,7 +62,20 @@ export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
     ],
     notApplicableNote: "Needs recorded answers on both lighter and heavier-arithmetic questions of the same concept first."
   },
-  { systemId: "speed-lab", dimension: "speed", label: "Speed", trains: "Pace on concepts you already answer correctly.", providerId: "speed-lab" },
+  {
+    systemId: "speed-lab",
+    dimension: "speed",
+    label: "Speed",
+    sessionTitle: "Speed Lab",
+    trains: "Improve solving speed: working within the expected time on concepts you already answer correctly.",
+    providerId: "speed-lab",
+    stages: [
+      { key: "steady_pace", label: "Stage 1 · Steady pace", summary: "Straightforward questions, to be solved within the expected time." },
+      { key: "mixed_pace", label: "Stage 2 · Mixed pace", summary: "Questions with more conceptual weight, still within the expected time." },
+      { key: "time_constrained", label: "Stage 3 · Time-constrained", summary: "Questions built to be answered under a time limit." }
+    ],
+    notApplicableNote: "Needs several recorded answers on straightforward questions of the same concept first."
+  },
   { systemId: "trap-lab", dimension: "trap", label: "Traps", trains: "Spotting the specific trap a question is built around.", providerId: "trap-lab" },
   { systemId: "novelty-training", dimension: "novelty", label: "Novelty", trains: "Unfamiliar twists on concepts you have already practised.", providerId: "novelty-training" },
   { systemId: "pressure-training", dimension: "pressure", label: "Pressure", trains: "Holding your performance across a timed run of questions.", providerId: "pressure-training" },

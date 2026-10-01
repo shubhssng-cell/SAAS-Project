@@ -30,6 +30,15 @@ export interface SpeedLabRequirement extends TrainingRequirement {
   /** DNA-level ceiling (`difficultyDimensions.conceptualLoad <`), `null` = no ceiling. Never a caller-facing "difficulty" claim. */
   maxConceptualLoad: number | null;
   requireTimePressured: boolean;
+  /**
+   * Phase 5 Unit 3 (docs/DECISIONS.md D-077) -- the stage's SHAPE, restated from `progression.ts`'s own evidence definitions so that what a
+   * stage SERVES is exactly what counts as that stage's progression evidence (progression counts only NON-time-pressured attempts, and the
+   * mixed gate counts only conceptualLoad >= the low-load threshold). Both OPTIONAL: absent means no such constraint (the original D-055
+   * behavior), so a requirement built without them selects exactly as before.
+   */
+  /** Inclusive floor: a qualifying question's `conceptualLoad` must be at or above this. `null`/absent = no floor. */
+  minConceptualLoad?: number | null;
+  excludeTimePressured?: boolean;
 }
 
 /**

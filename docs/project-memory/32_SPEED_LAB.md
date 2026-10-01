@@ -20,7 +20,7 @@ An initial rate-based progression gate ("75% of a stage's attempts must be good-
 
 ## Selection
 
-Provider-local, three steps: filter by requirement → least prior exposure (own local counter) → lowest `expectedTimeSeconds` (documented only as a deterministic preference for a tighter budget, never a claim of "harder/better") → lexicographic questionId.
+Provider-local, three steps: filter by requirement (**since Phase 5 Unit 3 / D-077 the requirement carries each stage's exact evidence shape**: `steady_pace` = conceptualLoad < 0.5 and not time-pressured; `mixed_pace` = conceptualLoad >= 0.5 and not time-pressured; `time_constrained` = carries `time_pressured`. Before D-077 steady could serve a timed question and mixed a light one, neither of which feeds the gate it was served at.) Then: filter by requirement → least prior exposure (own local counter) → lowest `expectedTimeSeconds` (documented only as a deterministic preference for a tighter budget, never a claim of "harder/better") → lexicographic questionId.
 
 ## Dependency footprint
 
@@ -28,4 +28,4 @@ Provider-local, three steps: filter by requirement → least prior exposure (own
 
 ## Status
 
-Wired into orchestration since D-062.
+Wired into orchestration since D-062. **Student-facing since Phase 5 Unit 3** ("Speed Lab" in the Training Hub, see [../PHASE_5_UNIT_3_REVIEW.md](../PHASE_5_UNIT_3_REVIEW.md), D-077): the session framework reads the provider's `requirement.stage` generically; the stage and any stage change are derived from persisted history on every read and never stored. Thresholds remain PROVISIONAL and uncalibrated; no real student has used it.

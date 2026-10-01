@@ -42,6 +42,8 @@ export interface WorldQuestion {
   cell?: string;
   /** `difficultyDimensions.computationalLoad` (default 0.2). */
   load?: number;
+  /** `difficultyDimensions.conceptualLoad` (default 0.2). */
+  conceptual?: number;
   /** `testingModes` (default `["direct"]`). */
   modes?: Array<"direct" | "multi_step" | "time_pressured">;
   /** A structurally malformed candidate: no `difficultyDimensions` at all (the provider must exclude it, never crash or serve it). */
@@ -59,7 +61,7 @@ function trainingRecord(q: WorldQuestion): TrainingQuestionRecord {
       patternFamilyName: "Reverse Percentage",
       patternTaxonomyCellId: q.cell ?? `cell-${q.id}`,
       difficultyTier: "standard",
-      difficultyDimensions: q.malformed ? undefined : { conceptualLoad: 0.2, computationalLoad: q.load ?? 0.2, trapDensity: 0.15, representationNovelty: 0.05, timePressure: 0.1, multiStepDepth: 0.1 },
+      difficultyDimensions: q.malformed ? undefined : { conceptualLoad: q.conceptual ?? 0.2, computationalLoad: q.load ?? 0.2, trapDensity: 0.15, representationNovelty: 0.05, timePressure: 0.1, multiStepDepth: 0.1 },
       noveltyLevel: q.noveltyLevel,
       examRelevance: "core",
       testingModes: q.modes ?? ["direct"],
@@ -170,12 +172,12 @@ export class TrainingWorld {
   }
 
   /** Answers the named questions, in order, as ordinary (ungrouped) practice; `correct` decides whether the correct answer or a wrong one is submitted. */
-  async answer(practice: PracticeApiService, plan: Array<{ id: string; correct: boolean }>, claim: StudentRequestClaim = CLAIM, startSecond = 0): Promise<void> {
+  async answer(practice: PracticeApiService, plan: Array<{ id: string; correct: boolean; seconds?: number }>, claim: StudentRequestClaim = CLAIM, startSecond = 0): Promise<void> {
     let second = startSecond;
     for (const step of plan) {
       const started = await practice.startAttempt(claim, { questionId: step.id, now: t(second) });
-      await practice.submitAttempt(claim, { attemptId: started.attemptId, questionId: step.id, chosenAnswer: step.correct ? CORRECT : WRONG, now: t(second + 60) });
-      second += 120;
+      await practice.submitAttempt(claim, { attemptId: started.attemptId, questionId: step.id, chosenAnswer: step.correct ? CORRECT : WRONG, now: t(second + (step.seconds ?? 60)) });
+      second += Math.max(120, (step.seconds ?? 60) + 60);
     }
   }
 

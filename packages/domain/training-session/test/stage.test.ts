@@ -1,4 +1,5 @@
 import { CALCULATION_TRAINING_STAGES } from "@ipmat/calculation-gym";
+import { SPEED_LAB_STAGES } from "@ipmat/speed-lab";
 import { describe, expect, it } from "vitest";
 import { TRAINING_SYSTEM_CATALOG, findTrainingSystem } from "../src/catalog.js";
 import { runTrainingSystem, stageKeyOfRun } from "../src/runSystem.js";
@@ -17,12 +18,25 @@ describe("Calculation in the catalog (Phase 5 Unit 2)", () => {
     expect(calculation.stages?.map((s) => s.key)).toEqual([...CALCULATION_TRAINING_STAGES]);
   });
 
-  it("only Calculation is staged; no other system claims stages it does not have", () => {
-    expect(TRAINING_SYSTEM_CATALOG.filter((d) => d.stages).map((d) => d.systemId)).toEqual(["calculation-gym"]);
+  it("Speed Lab restates EXACTLY the provider's stage vocabulary too, and is a separate system from Calculation (Phase 5 Unit 3)", () => {
+    const speed = findTrainingSystem("speed-lab")!;
+    expect(speed).toMatchObject({ dimension: "speed", providerId: "speed-lab", sessionTitle: "Speed Lab" });
+    expect(speed.stages?.map((s) => s.key)).toEqual([...SPEED_LAB_STAGES]);
+    expect(speed.trains).toBe("Improve solving speed: working within the expected time on concepts you already answer correctly.");
+    expect(JSON.stringify(speed.stages)).not.toBe(JSON.stringify(calculation.stages));
+  });
+
+  it("only the systems with a staged provider declare stages; no other system claims stages it does not have", () => {
+    expect(TRAINING_SYSTEM_CATALOG.filter((d) => d.stages).map((d) => d.systemId)).toEqual(["calculation-gym", "speed-lab"]);
+  });
+
+  it("Speed Lab's goal sentence names a training aim (\"Improve solving speed\"), never a claim about the student", () => {
+    const trains = findTrainingSystem("speed-lab")!.trains.toLowerCase();
+    for (const banned of ["you are", "you're", "slow solver", "ability", "confidence", "weak", "struggle", "poor", "lack", "score", "%"]) expect(trains, banned).not.toContain(banned);
   });
 
   it("stage copy is authored, threshold-free and says nothing about the student", () => {
-    const text = JSON.stringify(calculation.stages).toLowerCase();
+    const text = JSON.stringify([calculation.stages, findTrainingSystem("speed-lab")!.stages, findTrainingSystem("speed-lab")!.notApplicableNote]).toLowerCase();
     for (const banned of ["0.", "%", "threshold", "accuracy", "score", "confidence", "ability", "weak", "struggle", "improv"]) expect(text, banned).not.toContain(banned);
   });
 });
