@@ -1,0 +1,55 @@
+import type { TrainingCompletionViewModel, TrainingSessionViewModel } from "../adapter/index.js";
+
+/**
+ * Pure helpers for the Training screens (Phase 5 Unit 1), kept out of the components so they are testable without rendering.
+ * Nothing here decides which training system applies or which question comes next -- the server already did; this only
+ * words what it reported and offers the (server-validated) completion presets.
+ */
+
+export interface CompletionPreset {
+  id: string;
+  label: string;
+  completion: TrainingCompletionViewModel;
+}
+
+/** Offered choices only. The server validates every configuration against its own bounds, so a preset is a convenience, never the authority. */
+export const COMPLETION_PRESETS: readonly CompletionPreset[] = [
+  { id: "q3", label: "3 questions", completion: { kind: "fixed_question_count", questionCount: 3 } },
+  { id: "q5", label: "5 questions", completion: { kind: "fixed_question_count", questionCount: 5 } },
+  { id: "q10", label: "10 questions", completion: { kind: "fixed_question_count", questionCount: 10 } },
+  { id: "m5", label: "5 minutes", completion: { kind: "fixed_duration", durationSeconds: 300 } },
+  { id: "m10", label: "10 minutes", completion: { kind: "fixed_duration", durationSeconds: 600 } }
+];
+
+export const DEFAULT_COMPLETION_PRESET_ID = "q5";
+
+export function describeCompletion(completion: TrainingCompletionViewModel): string {
+  return completion.kind === "fixed_question_count" ? `${completion.questionCount} question${completion.questionCount === 1 ? "" : "s"}` : `${Math.round(completion.durationSeconds / 60)} minutes`;
+}
+
+function clock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** One line of progress: observable counts and the configured rule's remainder -- nothing about how the student is doing. */
+export function describeProgress(session: TrainingSessionViewModel): string {
+  const done = session.progress.completedQuestionCount;
+  if (session.completion.kind === "fixed_question_count") return `${done} of ${session.completion.questionCount} questions done`;
+  const left = session.progress.remainingSeconds ?? 0;
+  return `${done} question${done === 1 ? "" : "s"} done · ${clock(left)} left`;
+}
+
+export function trainingSessionPath(sessionId: string): string {
+  return `/training/${encodeURIComponent(sessionId)}`;
+}
+
+/** Where a training question's result lives: the session, the question, and the attempt id (so a refresh can re-read it from the server). */
+export function trainingResultPath(sessionId: string, questionId: string, attemptId: string): string {
+  return `/training/${encodeURIComponent(sessionId)}/result/${encodeURIComponent(questionId)}?attempt=${encodeURIComponent(attemptId)}`;
+}
+
+/** Cards a student can start right now. */
+export function isStartable(availability: string): boolean {
+  return availability === "available";
+}

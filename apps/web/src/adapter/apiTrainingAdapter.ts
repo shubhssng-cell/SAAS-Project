@@ -12,7 +12,12 @@ import type {
   DashboardViewModel,
   QuestionViewModel,
   RecommendationViewModel,
-  TrainingRecommendationAdapter
+  TrainingAvailability,
+  TrainingCompletionViewModel,
+  TrainingHubViewModel,
+  TrainingNextViewModel,
+  TrainingRecommendationAdapter,
+  TrainingSessionViewModel
 } from "./types.js";
 
 /**
@@ -209,6 +214,66 @@ function readPendingAutopsy(body: unknown): { pending: boolean; hypothesis: { su
   };
 }
 
+const TRAINING_AVAILABILITIES: readonly TrainingAvailability[] = ["available", "not_applicable", "no_eligible_question", "unavailable", "not_built"];
+
+function malformedTraining(): PracticeApiRequestError {
+  return new PracticeApiRequestError({ kind: "unexpected", message: MALFORMED_RESULT });
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** A training session the server describes. Anything that is not a complete session is malformed -- an error, never a guessed screen. */
+export function readTrainingSession(body: unknown): TrainingSessionViewModel {
+  const v = asObject(body);
+  const objective = asObject(v.objective);
+  const completion = asObject(v.completion);
+  const progress = asObject(v.progress);
+  const status = v.status;
+  if (typeof v.sessionId !== "string" || v.sessionId === "" || typeof v.systemId !== "string" || typeof v.systemLabel !== "string") throw malformedTraining();
+  if (status !== "active" && status !== "completed" && status !== "abandoned") throw malformedTraining();
+  if (typeof objective.statement !== "string") throw malformedTraining();
+  let parsedCompletion: TrainingCompletionViewModel;
+  if (completion.kind === "fixed_question_count" && typeof completion.questionCount === "number") parsedCompletion = { kind: "fixed_question_count", questionCount: completion.questionCount };
+  else if (completion.kind === "fixed_duration" && typeof completion.durationSeconds === "number") parsedCompletion = { kind: "fixed_duration", durationSeconds: completion.durationSeconds };
+  else throw malformedTraining();
+  const completed = numberOrNull(progress.completedQuestionCount);
+  const submitted = numberOrNull(progress.submittedCount);
+  const skipped = numberOrNull(progress.skippedCount);
+  const elapsed = numberOrNull(progress.elapsedSeconds);
+  if (completed === null || submitted === null || skipped === null || elapsed === null || typeof progress.completionReached !== "boolean" || typeof progress.hasOpenQuestion !== "boolean") throw malformedTraining();
+  return {
+    sessionId: v.sessionId,
+    systemId: v.systemId,
+    systemLabel: v.systemLabel,
+    objective: { statement: objective.statement, targetConceptName: typeof objective.targetConceptName === "string" ? objective.targetConceptName : null },
+    status,
+    completion: parsedCompletion,
+    progress: {
+      completedQuestionCount: completed,
+      submittedCount: submitted,
+      skippedCount: skipped,
+      elapsedSeconds: elapsed,
+      remainingQuestions: numberOrNull(progress.remainingQuestions),
+      remainingSeconds: numberOrNull(progress.remainingSeconds),
+      completionReached: progress.completionReached,
+      hasOpenQuestion: progress.hasOpenQuestion
+    }
+  };
+}
+
+export function readTrainingHub(body: unknown): TrainingHubViewModel {
+  const v = asObject(body);
+  if (!Array.isArray(v.systems)) throw malformedTraining();
+  const systems = v.systems.map((entry) => {
+    const s = asObject(entry);
+    if (typeof s.systemId !== "string" || typeof s.label !== "string" || typeof s.trains !== "string" || typeof s.note !== "string" || !TRAINING_AVAILABILITIES.includes(s.availability as TrainingAvailability)) throw malformedTraining();
+    return { systemId: s.systemId, label: s.label, trains: s.trains, availability: s.availability as TrainingAvailability, note: s.note };
+  });
+  return { systems, activeSession: v.activeSession === null || v.activeSession === undefined ? null : readTrainingSession(v.activeSession) };
+}
+
 export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): TrainingRecommendationAdapter {
   const attemptIdByQuestion = new Map<string, string>();
   let questionsPracticedSoFar = 0;
@@ -218,6 +283,7 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
   const skipFlights = createSingleFlight<AttemptResultViewModel>();
   // Phase 2 Unit 4: concurrent recommendation reads (StrictMode's double mount, a double activation) share one request.
   const recommendationFlights = createSingleFlight<RecommendationViewModel>();
+  const nextFlights = createSingleFlight<TrainingNextViewModel>();
   const fetchRecommendation = () => recommendationFlights.run("next", async () => readRecommendation(await post("/v1/recommendation")));
 
   async function post(path: string, body?: unknown): Promise<unknown> {
@@ -318,6 +384,38 @@ export function createApiTrainingAdapter(fetchImpl: FetchLike = fetch): Training
 
     async getNextRecommendation(): Promise<RecommendationViewModel> {
       return await fetchRecommendation();
+    },
+
+    async getTrainingHub(): Promise<TrainingHubViewModel> {
+      return readTrainingHub(await get("/v1/training/systems"));
+    },
+
+    async startTrainingSession(input: { systemId: string; completion: TrainingCompletionViewModel }): Promise<{ session: TrainingSessionViewModel; resumed: boolean }> {
+      const body = asObject(await post("/v1/training/sessions", { systemId: input.systemId, config: { completion: input.completion } }));
+      return { session: readTrainingSession(body.session), resumed: body.resumed === true };
+    },
+
+    async getTrainingSession(sessionId: string): Promise<TrainingSessionViewModel> {
+      return readTrainingSession(await get(`/v1/training/sessions/${encodeURIComponent(sessionId)}`));
+    },
+
+    // One in-flight "next" per session: StrictMode's double mount or a double activation shares the first request.
+    nextTrainingQuestion(sessionId: string): Promise<TrainingNextViewModel> {
+      return nextFlights.run(sessionId, async () => {
+        const body = asObject(await post(`/v1/training/sessions/${encodeURIComponent(sessionId)}/next`));
+        const session = readTrainingSession(body.session);
+        if (body.status === "completed") return { status: "completed", session };
+        if (body.status === "no_question") return { status: "no_question", session, message: typeof body.message === "string" ? body.message : "" };
+        if (body.status !== "question" || typeof body.attemptId !== "string" || body.attemptId === "") throw malformedTraining();
+        const question = readQuestion(body.question, body.elapsedSeconds);
+        // The server started (or resumed) this attempt inside the session: remember it, so `submitAnswer()`/`skipQuestion()` act on it.
+        attemptIdByQuestion.set(question.questionId, body.attemptId);
+        return { status: "question", session, question };
+      });
+    },
+
+    async finishTrainingSession(sessionId: string): Promise<TrainingSessionViewModel> {
+      return readTrainingSession(await post(`/v1/training/sessions/${encodeURIComponent(sessionId)}/finish`));
     }
   };
 }

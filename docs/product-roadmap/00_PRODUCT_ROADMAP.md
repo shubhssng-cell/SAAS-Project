@@ -35,13 +35,15 @@ Do not confuse the two numbering schemes. When in doubt:
 | 9 | Production / Payments / Business Layer | Real auth decision (D-004), payments, pricing, production hardening. |
 | 10 | Expansion | Second chapter / section / exam, only after the go/no-go gate in MASTER_PLAN.md is met. |
 
-This table is intentionally high-level. Only Phases 0, 1, 2, 3 and 4 have detailed files in this directory so far — see:
+This table is intentionally high-level. Only Phases 0, 1, 2, 3, 4 and 5 have detailed files in this directory so far — see:
 - [PHASE_0_PRODUCT_DEFINITION.md](PHASE_0_PRODUCT_DEFINITION.md)
 - [PHASE_1_PLATFORM_SHELL.md](PHASE_1_PLATFORM_SHELL.md)
 - [PHASE_2_REAL_PRACTICE_LOOP.md](PHASE_2_REAL_PRACTICE_LOOP.md) (Units 1-8 complete)
 - [PHASE_3_ADAPTIVE_PRACTICE.md](PHASE_3_ADAPTIVE_PRACTICE.md) (COMPLETE -- Units 1-5 (3.1-3.5) done — PHASE 3 COMPLETE at technical + policy validation (latest-attempt reaction, accumulated evidence, trend-aware evidence, staged selection policy, hardening/validation); real outcome calibration remains future work; Phase 4 (Question Autopsy / Repair) not started)
 
 - [PHASE_4_AUTOPSY_REPAIR.md](PHASE_4_AUTOPSY_REPAIR.md) (COMPLETE -- Units 1-5 done; PHASE 4 COMPLETE at technical + policy validation, no outcome calibration; Unit 1 (autopsy evidence surfaced, observation only) and Unit 2 (hypothesis + student confirmation/correction) and Unit 3 (offer + response persisted once; a confirmed explanation becomes a diagnosis and exactly one RepairPlan; reject/correct create neither) complete; Unit 4 (targeted repair practice: confirmed plans drive the next question through the existing repair tier, with a derived, conservative pending/in_progress/completed lifecycle) complete; Unit 5 (end-to-end hardening: whole-chain scenarios, security audit, restart/multi-instance/concurrency on real Postgres, correction-diagnosis boundary resolved by decision) complete)
+
+- [PHASE_5_TRAINING_SYSTEMS.md](PHASE_5_TRAINING_SYSTEMS.md) (IN PROGRESS -- Unit 1 (Training System Foundation: a student-chosen, persisted, resumable Training Session framework layered on the existing PracticeBlock and the existing providers; training vs adaptive practice kept separate) complete; Unit 2 = Calculation Gym, NOT started)
 
 Future phase files (2 through 10) will be added as each one is actually about to start, not speculatively ahead of time — this mirrors the existing repo's vertical-slice discipline (see [../MASTER_PLAN.md](../MASTER_PLAN.md) §"What should explicitly NOT be built yet" and the CLAUDE.md working-style rules).
 

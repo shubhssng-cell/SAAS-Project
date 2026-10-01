@@ -104,10 +104,13 @@ export class PracticeApiService {
    * ordinary (non-block) practice, so this boundary is where that check
    * belongs for a real, untrusted caller (D).
    */
-  async startAttempt(claim: StudentRequestClaim, input: { questionId: string; now?: string }): Promise<StartAttemptResult> {
+  async startAttempt(claim: StudentRequestClaim, input: { questionId: string; now?: string; practiceBlockId?: string }): Promise<StartAttemptResult> {
     assertValidClaim(claim);
     assertNonEmptyString(input.questionId, "questionId");
     const now = input.now ?? new Date().toISOString();
+    // Phase 5 Unit 1: `practiceBlockId` is passed ONLY by `TrainingApiService` (a training session's block) -- no HTTP route reads it
+    // from a request, so a client can never place an attempt in a block. The persistence layer re-verifies the block's ownership chain.
+    const practiceBlockId = input.practiceBlockId;
 
     try {
       assertEnrollmentOwnership(await this.deps.enrollmentReader.findById(claim.enrollmentId), claim);
@@ -115,21 +118,22 @@ export class PracticeApiService {
       // Product Phase 2 Unit 5 -- idempotent per (student, enrollment, question): find-then-create runs under a
       // per-key lock so two concurrent starts (a double request, two tabs on one server) cannot both create.
       const attempt = await this.withStartLock(`${claim.studentId}|${claim.enrollmentId}|${input.questionId}`, async () => {
-        const resumable = await this.findResumableAttempt(claim, input.questionId);
+        const resumable = await this.findResumableAttempt(claim, input.questionId, practiceBlockId);
         if (resumable) return resumable;
         try {
           return await this.deps.practiceLoopService.startAttempt({
             studentId: claim.studentId,
             questionId: input.questionId,
             enrollmentId: claim.enrollmentId,
-            now
+            now,
+            ...(practiceBlockId ? { practiceBlockId } : {})
           });
         } catch (error) {
           // Product Phase 2 Unit 7: the in-process lock above cannot see another API instance. If the database's
           // "one open attempt" guarantee rejected our create (or a concurrent serializable write beat us), the
           // other instance's attempt is the winner -- resume it instead of failing the student.
           if ((error instanceof PersistenceError && error.code === "conflict") || error instanceof SerializationFailureError) {
-            const winner = await this.findResumableAttempt(claim, input.questionId);
+            const winner = await this.findResumableAttempt(claim, input.questionId, practiceBlockId);
             if (winner) return winner;
           }
           throw error;
@@ -161,13 +165,19 @@ export class PracticeApiService {
    * question is never resumed -- `null` falls through to `startAttempt()`, which refuses it with the
    * ordinary `question_not_published` error. A finalized attempt never resumes.
    */
-  private async findResumableAttempt(claim: StudentRequestClaim, questionId: string): Promise<AttemptState | null> {
+  private async findResumableAttempt(claim: StudentRequestClaim, questionId: string, practiceBlockId?: string): Promise<AttemptState | null> {
     const canonical = await this.deps.questionReader.findById(questionId);
     if (!canonical || canonical.validationState !== "published") return null;
     const open = await this.deps.inProgressAttemptReader.findInProgressByStudentQuestion({ studentId: claim.studentId, questionId, enrollmentId: claim.enrollmentId });
     if (!open) return null;
     const valid = open.status === "in_progress" && open.studentId === claim.studentId && open.enrollmentId === claim.enrollmentId && open.questionId === questionId;
-    return valid ? open : null;
+    if (!valid) return null;
+    // A training start only ever resumes an attempt that is ALREADY in that same block. An open attempt for this question that lives
+    // elsewhere (ordinary practice, another block) is never silently adopted into a training session -- the student finishes it first.
+    if (practiceBlockId !== undefined && (open.blockMembership?.practiceBlockId ?? null) !== practiceBlockId) {
+      throw new PracticeApiError("invalid_state", "Finish or skip your open question before starting this training question.", 409);
+    }
+    return open;
   }
 
   private readonly startLocks = new Map<string, Promise<void>>();

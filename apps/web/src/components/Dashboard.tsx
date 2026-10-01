@@ -1,6 +1,6 @@
 import type { DashboardViewModel } from "../adapter/index.js";
 import { formatEnrolledDate, greetingSubtext, practiceProgressNote, type PrepStatusViewModel } from "../dashboard/prepStatus.js";
-import { Card, Screen } from "../design/index.js";
+import { Button, Card, Screen } from "../design/index.js";
 import { RecommendationCard } from "./RecommendationCard.js";
 
 /**
@@ -17,12 +17,14 @@ export function Dashboard({
   dashboard,
   studentEmail,
   prepStatus,
-  onStart
+  onStart,
+  onOpenTraining
 }: {
   dashboard: DashboardViewModel;
   studentEmail: string;
   prepStatus: PrepStatusViewModel;
   onStart: () => void;
+  onOpenTraining: () => void;
 }) {
   return (
     <Screen eyebrow="Dashboard" headline="Welcome back." subtext={greetingSubtext(studentEmail)}>
@@ -41,6 +43,15 @@ export function Dashboard({
       <p className="subtext dashboard-practice-note">{practiceProgressNote(dashboard.questionsPracticedSoFar)}</p>
 
       <RecommendationCard recommendation={dashboard.recommendation} actionLabel="Start Practice" onAction={onStart} />
+
+      <Card>
+        <p className="mode-tag">Training</p>
+        <h2 className="headline headline-compact">Train a specific skill.</h2>
+        <p className="subtext recommendation-explanation">Choose one performance dimension to work on deliberately — separate from the practice above, where the system picks the next question.</p>
+        <Button block variant="secondary" onClick={onOpenTraining}>
+          Choose training
+        </Button>
+      </Card>
     </Screen>
   );
 }

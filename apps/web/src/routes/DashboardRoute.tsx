@@ -74,6 +74,7 @@ export function DashboardRoute() {
       studentEmail={authState.student.email}
       prepStatus={prepStatus}
       onStart={() => navigate("/practice/next")}
+      onOpenTraining={() => navigate("/training")}
     />
   );
 }

@@ -699,3 +699,50 @@ export interface PrepPhaseTemplateRecord {
 export interface PrepPhaseTemplateReader {
   findByExamId(examId: string): Promise<PrepPhaseTemplateRecord | null>;
 }
+
+/**
+ * Phase 5 Unit 1 (docs/DECISIONS.md D-075) -- a Training Session as persisted: the thin
+ * `training_sessions` row plus the `PracticeBlock` it is layered on. `objective`/`config` are
+ * stored JSON and therefore UNTRUSTED on the way out -- the application layer re-validates
+ * them (`@ipmat/training-session`) rather than this package trusting a column. `enrollmentId`/
+ * `studentId` are resolved through `PracticeBlock -> PracticeSession -> Enrollment`, never
+ * stored redundantly (D-060).
+ */
+export interface StoredTrainingSession {
+  id: string;
+  systemId: string;
+  objective: unknown;
+  config: unknown;
+  enrollmentId: string;
+  studentId: string;
+  block: PracticeBlockState;
+  createdAt: string;
+}
+
+export interface TrainingSessionRepository {
+  /**
+   * ONE atomic step: ensures the enrollment's single active `PracticeSession` exists (creating it
+   * with `practiceSessionId` only if none does), allocates the next `PracticeBlock`, and records the
+   * training session on it. Refuses (`PersistenceError("conflict")`) when this enrollment already has
+   * an ACTIVE training session -- at most one at a time -- and `missing_reference` for an unknown
+   * enrollment. Under `Serializable` isolation a concurrent create surfaces as
+   * `SerializationFailureError` or `conflict`; the caller re-reads and resumes the winner.
+   */
+  create(input: {
+    id: string;
+    practiceSessionId: string;
+    practiceBlockId: string;
+    enrollmentId: string;
+    systemId: string;
+    objective: unknown;
+    config: unknown;
+    blockSettings: { targetQuestionCount: number | null; blockTimeBudgetSeconds: number | null };
+    now: string;
+  }): Promise<StoredTrainingSession>;
+  findById(trainingSessionId: string): Promise<StoredTrainingSession | null>;
+  /** The enrollment's one active training session, or `null`. */
+  findActiveByEnrollmentId(enrollmentId: string): Promise<StoredTrainingSession | null>;
+  /** Terminal transitions delegate to the block's own lifecycle (`@ipmat/practice-block`): both are final, neither can be undone. */
+  complete(trainingSessionId: string, input: { now: string }): Promise<StoredTrainingSession>;
+  abandon(trainingSessionId: string, input: { now: string }): Promise<StoredTrainingSession>;
+}

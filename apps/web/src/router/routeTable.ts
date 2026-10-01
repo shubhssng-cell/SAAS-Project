@@ -24,5 +24,9 @@ export const ROUTE_TABLE: RouteTableEntry[] = [
   { id: "practice-next", pattern: "/practice/next" },
   { id: "practice-result", pattern: "/practice/:questionId/result" },
   { id: "practice-autopsy", pattern: "/practice/:questionId/autopsy" },
-  { id: "practice-question", pattern: "/practice/:questionId" }
+  { id: "practice-question", pattern: "/practice/:questionId" },
+  // Phase 5 Unit 1 -- deliberate training. Literal/longer patterns first, like the practice routes above.
+  { id: "training", pattern: "/training" },
+  { id: "training-result", pattern: "/training/:sessionId/result/:questionId" },
+  { id: "training-session", pattern: "/training/:sessionId" }
 ];

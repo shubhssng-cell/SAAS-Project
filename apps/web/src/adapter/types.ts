@@ -107,6 +107,54 @@ export interface AutopsyViewModel {
 
 export type AutopsyResponse = "confirmed" | "rejected";
 
+/**
+ * Phase 5 Unit 1 -- Training Sessions. A training system answers "what performance dimension are we deliberately training?"
+ * (never "what should I practice next?" -- that stays `getNextRecommendation()`). Every field is plain, student-safe data the
+ * server already decided: no provider ids, no scores, nothing about how the student feels.
+ */
+export type TrainingAvailability = "available" | "not_applicable" | "no_eligible_question" | "unavailable" | "not_built";
+
+export interface TrainingSystemCardViewModel {
+  systemId: string;
+  label: string;
+  /** What a session in this system deliberately trains. */
+  trains: string;
+  availability: TrainingAvailability;
+  /** Server-authored sentence explaining the availability. */
+  note: string;
+}
+
+export type TrainingCompletionViewModel = { kind: "fixed_question_count"; questionCount: number } | { kind: "fixed_duration"; durationSeconds: number };
+
+export interface TrainingSessionViewModel {
+  sessionId: string;
+  systemId: string;
+  systemLabel: string;
+  objective: { statement: string; targetConceptName: string | null };
+  status: "active" | "completed" | "abandoned";
+  completion: TrainingCompletionViewModel;
+  progress: {
+    completedQuestionCount: number;
+    submittedCount: number;
+    skippedCount: number;
+    elapsedSeconds: number;
+    remainingQuestions: number | null;
+    remainingSeconds: number | null;
+    completionReached: boolean;
+    hasOpenQuestion: boolean;
+  };
+}
+
+export interface TrainingHubViewModel {
+  systems: TrainingSystemCardViewModel[];
+  activeSession: TrainingSessionViewModel | null;
+}
+
+export type TrainingNextViewModel =
+  | { status: "question"; session: TrainingSessionViewModel; question: QuestionViewModel }
+  | { status: "completed"; session: TrainingSessionViewModel }
+  | { status: "no_question"; session: TrainingSessionViewModel; message: string };
+
 export interface TrainingRecommendationAdapter {
   getDashboard(): Promise<DashboardViewModel>;
   loadQuestion(questionId: string): Promise<QuestionViewModel>;
@@ -125,4 +173,12 @@ export interface TrainingRecommendationAdapter {
   /** Applies the student's response to the pending hypothesis and returns the resulting recommendation — a confirmed hypothesis may (transparently, via the real domain layer) become a targeted repair recommendation. */
   respondToAutopsy(input: { attemptId: string; response: AutopsyResponse }): Promise<RecommendationViewModel>;
   getNextRecommendation(): Promise<RecommendationViewModel>;
+  /** Phase 5 Unit 1: every training system with its honest availability, plus the student's active session (if any). */
+  getTrainingHub(): Promise<TrainingHubViewModel>;
+  /** Starts a session (or resumes the active one for the same system). The server validates the completion rule. */
+  startTrainingSession(input: { systemId: string; completion: TrainingCompletionViewModel }): Promise<{ session: TrainingSessionViewModel; resumed: boolean }>;
+  getTrainingSession(sessionId: string): Promise<TrainingSessionViewModel>;
+  /** The session's next step: its open question (resumed), its next question, or completion. Answered through `submitAnswer()`/`skipQuestion()` like any question. */
+  nextTrainingQuestion(sessionId: string): Promise<TrainingNextViewModel>;
+  finishTrainingSession(sessionId: string): Promise<TrainingSessionViewModel>;
 }

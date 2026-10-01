@@ -649,11 +649,32 @@ model PracticeBlock {
 
   practiceSession PracticeSession @relation(fields: [practiceSessionId], references: [id], onDelete: Restrict)
   attempts        Attempt[]
+  trainingSession TrainingSession?
 
   @@unique([practiceSessionId, sequenceNumber])
   @@index([practiceSessionId])
   @@index([status])
   @@map("practice_blocks")
+}
+
+// A student-facing Training Session (Phase 5 Unit 1, docs/DECISIONS.md D-075). It is a THIN record layered on
+// the existing PracticeBlock: the block owns the lifecycle (active/completed/abandoned), the configured
+// completion rule (targetQuestionCount / blockTimeBudgetSeconds) and every Attempt (practice_block_id); this
+// row adds only what a block does not carry -- which training system, and the objective snapshotted when the
+// session started. Status, progress and ownership are never duplicated here: they are derived through
+// practiceBlockId -> PracticeBlock -> PracticeSession -> Enrollment -> Student on every read. `config` is the
+// validated session configuration as submitted (its completion rule is ALSO what the block's two columns hold).
+model TrainingSession {
+  id              String   @id @default(uuid())
+  practiceBlockId String   @unique @map("practice_block_id")
+  systemId        String   @map("system_id")
+  objective       Json
+  config          Json
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  practiceBlock PracticeBlock @relation(fields: [practiceBlockId], references: [id], onDelete: Restrict)
+
+  @@map("training_sessions")
 }
 
 // Canonical observable-behavior vocabulary (docs/DECISIONS.md D-034,

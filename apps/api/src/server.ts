@@ -1,7 +1,7 @@
 import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
 import { EnrollmentApiError, EnrollmentApiService, type EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, type StudentRequestClaim } from "@ipmat/practice-api";
+import { PracticeApiError, PracticeApiService, TrainingApiService, type PracticeApiDependencies, type StudentRequestClaim, type TrainingApiDependencies } from "@ipmat/practice-api";
 
 /**
  * Product Phase 1 Unit 10 (real web/API integration) -- the six practice
@@ -62,8 +62,9 @@ import { PracticeApiError, PracticeApiService, type PracticeApiDependencies, typ
  * `invalid_request` — this file performs no validation of its own.
  */
 
+/** The one path capture of a route: an attempt id for `/v1/attempts/:id/*`, a training session id for `/v1/training/sessions/:id/*`. */
 interface RouteParams {
-  attemptId: string;
+  id: string;
 }
 
 type Handler = (service: PracticeApiService, claim: StudentRequestClaim, body: Record<string, unknown>, query: URLSearchParams, params: RouteParams) => Promise<unknown>;
@@ -115,7 +116,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/v1\/attempts\/([^/]+)\/submit$/,
     handler: async (service, claim, body, query, params) =>
       service.submitAttempt(claim, {
-        attemptId: params.attemptId,
+        attemptId: params.id,
         questionId: stringField(body, query, "questionId"),
         chosenAnswer: stringField(body, query, "chosenAnswer")
       })
@@ -123,17 +124,17 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "POST",
     pattern: /^\/v1\/attempts\/([^/]+)\/skip$/,
-    handler: async (service, claim, body, query, params) => service.skipAttempt(claim, { attemptId: params.attemptId, questionId: stringField(body, query, "questionId") })
+    handler: async (service, claim, body, query, params) => service.skipAttempt(claim, { attemptId: params.id, questionId: stringField(body, query, "questionId") })
   },
   {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/result$/,
-    handler: async (service, claim, body, query, params) => service.getAttemptResult(claim, { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.getAttemptResult(claim, { attemptId: params.id })
   },
   {
     method: "POST",
     pattern: /^\/v1\/attempts\/([^/]+)\/hypothesis$/,
-    handler: async (service, claim, body, query, params) => service.generateHypothesis(claim, { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.generateHypothesis(claim, { attemptId: params.id })
   },
   {
     method: "POST",
@@ -141,19 +142,38 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: async (service, claim, body, query, params) => {
       const type = stringField(body, query, "response");
       const response = type === "corrected" ? { type: "corrected" as const, correctedExplanation: stringField(body, query, "correctedExplanation") } : { type: type as "confirmed" | "rejected" };
-      return service.respondToHypothesis(claim, { attemptId: params.attemptId, token: stringField(body, query, "token"), response });
+      return service.respondToHypothesis(claim, { attemptId: params.id, token: stringField(body, query, "token"), response });
     }
   },
   {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/evidence$/,
-    handler: async (service, claim, body, query, params) => service.getAttemptEvidence(claim, { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.getAttemptEvidence(claim, { attemptId: params.id })
   },
   {
     method: "GET",
     pattern: /^\/v1\/attempts\/([^/]+)\/autopsy$/,
-    handler: async (service, claim, body, query, params) => service.getAutopsyForConfirmation(claim, { attemptId: params.attemptId })
+    handler: async (service, claim, body, query, params) => service.getAutopsyForConfirmation(claim, { attemptId: params.id })
   }
+];
+
+type TrainingHandler = (training: TrainingApiService, claim: StudentRequestClaim, body: Record<string, unknown>, query: URLSearchParams, params: RouteParams) => Promise<unknown>;
+
+/**
+ * Phase 5 Unit 1 -- the Training Session routes. Same cookie-derived claim as every practice route; `studentId`/`enrollmentId`
+ * are never read from the request, and neither is a clock or a block id. A session's questions are answered through the
+ * EXISTING `/v1/attempts/*` routes -- there is no second attempt endpoint.
+ */
+const TRAINING_ROUTES: Array<{ method: string; pattern: RegExp; handler: TrainingHandler }> = [
+  { method: "GET", pattern: /^\/v1\/training\/systems$/, handler: async (training, claim) => training.getHub(claim) },
+  {
+    method: "POST",
+    pattern: /^\/v1\/training\/sessions$/,
+    handler: async (training, claim, body, query) => training.startSession(claim, { systemId: stringField(body, query, "systemId"), config: body.config })
+  },
+  { method: "GET", pattern: /^\/v1\/training\/sessions\/([^/]+)$/, handler: async (training, claim, _body, _query, params) => training.getSession(claim, { sessionId: params.id }) },
+  { method: "POST", pattern: /^\/v1\/training\/sessions\/([^/]+)\/next$/, handler: async (training, claim, _body, _query, params) => training.nextQuestion(claim, { sessionId: params.id }) },
+  { method: "POST", pattern: /^\/v1\/training\/sessions\/([^/]+)\/finish$/, handler: async (training, claim, _body, _query, params) => training.finishSession(claim, { sessionId: params.id }) }
 ];
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -390,8 +410,15 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * `chosenAnswer`, unlike the auth/enrollment table) rather than being
  * folded into `AUTH_ROUTES`.
  */
-export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader">) {
   const service = new PracticeApiService(deps);
+  const trainingService = new TrainingApiService({
+    trainingRecommendationService: deps.trainingRecommendationService,
+    trainingSessionRepository: deps.trainingSessionRepository,
+    attemptHistoryReader: deps.attemptHistoryReader,
+    enrollmentReader: deps.enrollmentReader,
+    practiceApi: service
+  });
   const authService = new AuthApiService(deps);
   const enrollmentService = new EnrollmentApiService(deps);
 
@@ -414,6 +441,15 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
           return;
         }
 
+        const trainingRoute = TRAINING_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+        if (trainingRoute) {
+          const match = trainingRoute.pattern.exec(url.pathname);
+          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
+          const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
+          sendJson(res, 200, await trainingRoute.handler(trainingService, claim, body, url.searchParams, { id: match?.[1] ?? "" }));
+          return;
+        }
+
         const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
 
         if (!route) {
@@ -422,7 +458,7 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
         }
 
         const match = route.pattern.exec(url.pathname);
-        const params: RouteParams = { attemptId: match?.[1] ?? "" };
+        const params: RouteParams = { id: match?.[1] ?? "" };
         const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
         const cookies = parseCookies(req.headers.cookie);
         const claim = await resolvePracticeClaim(authService, enrollmentService, cookies);

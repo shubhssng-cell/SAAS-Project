@@ -13,7 +13,10 @@ const ROUTE_TITLES: Record<string, string> = {
   "practice-next": "Practice",
   "practice-result": "Result",
   "practice-autopsy": "Review",
-  "practice-question": "Question"
+  "practice-question": "Question",
+  training: "Training",
+  "training-result": "Training result",
+  "training-session": "Training session"
 };
 
 /**

@@ -14,6 +14,7 @@ import {
   InMemorySessionRepository,
   InMemoryStudentAccountRepository,
   InMemoryTrainingQuestionReader,
+  InMemoryTrainingSessionRepository,
   PrismaAttemptRepository,
   PrismaAutopsyDecisionRepository,
   PrismaAutopsyRepository,
@@ -31,6 +32,8 @@ import {
   PrismaSessionRepository,
   PrismaStudentAccountRepository,
   PrismaTrainingQuestionReader,
+  PrismaTrainingSessionRepository,
+  PrismaPracticeBlockReader,
   type AutopsyRepository,
   type ConceptRecord,
   type EnrollmentReader,
@@ -40,7 +43,7 @@ import {
 } from "@ipmat/db";
 import { ipmatPrepPhaseTemplate } from "@ipmat/prep-phase";
 import { PracticeLoopService } from "@ipmat/practice-loop";
-import type { PracticeApiDependencies } from "@ipmat/practice-api";
+import type { PracticeApiDependencies, TrainingApiDependencies } from "@ipmat/practice-api";
 import { TrainingRecommendationService, type TrainingRecommendationDependencies } from "@ipmat/training-recommendation";
 
 /**
@@ -85,12 +88,16 @@ export function createInMemoryDependencies(
   } = {}
 ): PracticeApiDependencies &
   AuthApiDependencies &
-  EnrollmentApiDependencies & {
+  EnrollmentApiDependencies &
+  Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & {
     attempts: InMemoryAttemptRepository;
     questions: InMemoryQuestionReader;
     questionContent: InMemoryQuestionContentReader;
   } {
-  const attempts = new InMemoryAttemptRepository();
+  const enrollmentRepository = new InMemoryEnrollmentRepository();
+  // Phase 5 Unit 1: ONE in-memory world for training sessions, their practice sessions/blocks, and the attempts placed in those blocks.
+  const trainingSessions = new InMemoryTrainingSessionRepository({ resolveStudentId: async (enrollmentId) => (await enrollmentRepository.findById(enrollmentId))?.studentId ?? null });
+  const attempts = new InMemoryAttemptRepository({ practiceBlocks: trainingSessions.blockOwnership });
   const questions = new InMemoryQuestionReader(seed.questions);
   const questionContent = new InMemoryQuestionContentReader(seed.questionContent);
   const autopsyReader: Pick<AutopsyRepository, "findByAttemptId"> = { findByAttemptId: async () => null };
@@ -98,7 +105,6 @@ export function createInMemoryDependencies(
   const autopsyStore = new InMemoryAutopsyDecisionRepository();
   const studentAccounts = new InMemoryStudentAccountRepository();
   const sessions = new InMemorySessionRepository();
-  const enrollmentRepository = new InMemoryEnrollmentRepository();
   const examReader = new InMemoryExamReader(seed.exams ?? [DEFAULT_EXAM]);
   const prepPhaseTemplateReader = new InMemoryPrepPhaseTemplateReader(seed.prepPhaseTemplates ?? [DEFAULT_PREP_PHASE_TEMPLATE]);
 
@@ -131,13 +137,15 @@ export function createInMemoryDependencies(
     trainingQuestionReader: new InMemoryTrainingQuestionReader(seed.trainingQuestions),
     questionReader: questions,
     conceptReader: new InMemoryConceptReader(seed.concepts),
-    practiceSessionReader: { findActiveByEnrollmentId: async () => null },
-    practiceBlockReader: { findBySessionId: async () => [] }
+    practiceSessionReader: trainingSessions.practiceSessions,
+    practiceBlockReader: trainingSessions.practiceBlocks
   };
 
   return {
     trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
-    practiceLoopService: new PracticeLoopService(attempts, questions),
+    practiceLoopService: new PracticeLoopService(attempts, questions, trainingSessions.blockReader),
+    trainingSessionRepository: trainingSessions,
+    attemptHistoryReader: attempts,
     inProgressAttemptReader: attempts,
     enrollmentReader,
     questionReader: questions,
@@ -169,7 +177,7 @@ export function createInMemoryDependencies(
  * `@ipmat/training-recommendation` already requires (D-063) — constructed
  * here identically, never a second, competing construction.
  */
-export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies {
+export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> {
   const repairPlans = new PrismaRepairPlanRepository(prisma);
   const attempts = new PrismaAttemptRepository(prisma);
   const enrollmentReader = new PrismaEnrollmentReader(prisma);
@@ -190,7 +198,9 @@ export function createPrismaDependencies(prisma: PrismaClient): PracticeApiDepen
 
   return {
     trainingRecommendationService: new TrainingRecommendationService(trainingRecommendationDeps),
-    practiceLoopService: new PracticeLoopService(attempts, questionReader),
+    practiceLoopService: new PracticeLoopService(attempts, questionReader, new PrismaPracticeBlockReader(prisma)),
+    trainingSessionRepository: new PrismaTrainingSessionRepository(prisma),
+    attemptHistoryReader: attempts,
     inProgressAttemptReader: attempts,
     enrollmentReader,
     questionReader,

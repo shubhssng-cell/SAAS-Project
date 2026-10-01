@@ -27,7 +27,10 @@ describe("pageTitleForPath (Product Phase 1 Unit 11)", () => {
       "practice-next": "/practice/next",
       "practice-result": "/practice/x/result",
       "practice-autopsy": "/practice/x/autopsy",
-      "practice-question": "/practice/x"
+      "practice-question": "/practice/x",
+      training: "/training",
+      "training-result": "/training/s/result/q",
+      "training-session": "/training/s"
     };
     expect(Object.keys(samples).sort()).toEqual(ROUTE_TABLE.map((r) => r.id).sort());
     const titles = ROUTE_TABLE.map((r) => pageTitleForPath(samples[r.id]!));

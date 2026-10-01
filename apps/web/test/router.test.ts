@@ -22,7 +22,10 @@ const REQUIRED_ROUTES: Array<{ id: string; pattern: string }> = [
   { id: "practice-next", pattern: "/practice/next" },
   { id: "practice-result", pattern: "/practice/:questionId/result" },
   { id: "practice-autopsy", pattern: "/practice/:questionId/autopsy" },
-  { id: "practice-question", pattern: "/practice/:questionId" }
+  { id: "practice-question", pattern: "/practice/:questionId" },
+  { id: "training", pattern: "/training" },
+  { id: "training-result", pattern: "/training/:sessionId/result/:questionId" },
+  { id: "training-session", pattern: "/training/:sessionId" }
 ];
 
 describe("ROUTE_TABLE -- covers every route required by Product Phase 1 Unit 2", () => {
@@ -65,7 +68,10 @@ describe("matchPath -- deep-linking resolves every required route directly, with
     ["/practice/next", "practice-next"],
     ["/practice/q-reverse-1/result", "practice-result"],
     ["/practice/q-reverse-1/autopsy", "practice-autopsy"],
-    ["/practice/q-reverse-1", "practice-question"]
+    ["/practice/q-reverse-1", "practice-question"],
+    ["/training", "training"],
+    ["/training/s-1", "training-session"],
+    ["/training/s-1/result/q-9", "training-result"]
   ])("resolves %s to the %s route", (pathname, expectedId) => {
     expect(resolve(pathname)).toBe(expectedId);
   });
@@ -80,9 +86,21 @@ describe("matchPath -- deep-linking resolves every required route directly, with
     expect(matchPath("/practice/:questionId/autopsy", "/practice/q-reverse-1/autopsy")?.params).toEqual({ questionId: "q-reverse-1" });
   });
 
+  it("extracts the session and question ids from a training URL", () => {
+    expect(matchPath("/training/:sessionId", "/training/s-1")?.params).toEqual({ sessionId: "s-1" });
+    expect(matchPath("/training/:sessionId/result/:questionId", "/training/s-1/result/q-9")?.params).toEqual({ sessionId: "s-1", questionId: "q-9" });
+  });
+
+  it("lists the training result route before the generic training session route", () => {
+    const resultIndex = ROUTE_TABLE.findIndex((r) => r.id === "training-result");
+    const sessionIndex = ROUTE_TABLE.findIndex((r) => r.id === "training-session");
+    expect(sessionIndex).toBeGreaterThan(resultIndex);
+  });
+
   it("does not resolve an unknown path to any route", () => {
     expect(resolve("/does-not-exist")).toBeNull();
     expect(resolve("/practice/q-1/unknown-subpath")).toBeNull();
+    expect(resolve("/training/s-1/unknown")).toBeNull();
   });
 
   it("treats a trailing slash the same as no trailing slash", () => {

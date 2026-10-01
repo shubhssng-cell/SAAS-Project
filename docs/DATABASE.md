@@ -245,3 +245,7 @@ CatchUpPlan
 ## What's intentionally not modeled yet
 
 Payments, subscriptions, pricing, parent/guardian accounts, coaching-org multi-tenancy, mock-test assemblies, calculation-gym and vocabulary-gym item banks, trap/pressure/surprise mode configs. These will be additive tables when their phase starts (see [MASTER_PLAN.md](MASTER_PLAN.md)) — nothing above needs to change shape to accommodate them.
+
+## TrainingSession (Product Phase 5 Unit 1, D-075)
+
+`training_sessions` is a thin record layered on `practice_blocks` (one-to-one, `practice_block_id` UNIQUE, `ON DELETE RESTRICT`): `system_id`, `objective` (JSON snapshot), `config` (JSON, the validated completion rule), `created_at`. It deliberately has no status, progress, enrollment or student column -- those are derived through `practice_block -> practice_session -> enrollment` on every read (D-060, D-015). Migration `0012` also adds the hand-written partial unique index `practice_sessions_one_active_per_enrollment` (at most one `active` practice session per enrollment).

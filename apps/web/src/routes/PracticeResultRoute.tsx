@@ -18,7 +18,7 @@ type ResultLoadState = { status: "loading" } | { status: "loaded"; result: Attem
  * the solution always come from the server, never from this component. With neither,
  * there is genuinely nothing to show.
  */
-export function PracticeResultRoute({ questionId }: { questionId: string }) {
+export function PracticeResultRoute({ questionId, continueTo, backTo = `/practice/${questionId}` }: { questionId: string; /** Set only for a training result: where Continue goes instead of `/practice/next`. */ continueTo?: string; backTo?: string }) {
   const { adapter, getLastResult, setLastResult } = usePracticeSession();
   const navigate = useNavigate();
   const attemptId = readAttemptParam(window.location.search);
@@ -34,6 +34,11 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
   function handleContinue() {
     if (continued.current) return;
     continued.current = true;
+    // A result that came from a training session continues back into that session (Phase 5 Unit 1); ordinary practice is unchanged.
+    if (continueTo) {
+      navigate(continueTo);
+      return;
+    }
     navigate("/practice/next");
   }
   const [state, setState] = useState<ResultLoadState>(inSession ? { status: "loaded", result: inSession } : { status: "loading" });
@@ -87,7 +92,7 @@ export function PracticeResultRoute({ questionId }: { questionId: string }) {
   if (!inSession && !attemptId) {
     return (
       <Screen eyebrow="No result to show" headline="This result isn't available anymore." subtext="Answer the question again to see a result.">
-        <Button onClick={() => navigate(`/practice/${questionId}`)}>Back to question</Button>
+        <Button onClick={() => navigate(backTo)}>Back to question</Button>
       </Screen>
     );
   }

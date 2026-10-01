@@ -15,7 +15,7 @@ describe("practice-api -- dependency boundary", () => {
   it("package.json declares exactly the approved dependency set", () => {
     const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf-8")) as { dependencies?: Record<string, string> };
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(
-      ["@ipmat/attempt", "@ipmat/db", "@ipmat/practice-loop", "@ipmat/training-orchestration", "@ipmat/training-recommendation"].sort()
+      ["@ipmat/attempt", "@ipmat/db", "@ipmat/practice-loop", "@ipmat/training-orchestration", "@ipmat/training-recommendation", "@ipmat/training-session"].sort()
     );
   });
 

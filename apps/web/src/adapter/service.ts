@@ -235,6 +235,23 @@ export function createFixtureTrainingAdapter(): TrainingRecommendationAdapter {
 
     async getNextRecommendation(): Promise<RecommendationViewModel> {
       return computeRecommendation();
+    },
+
+    // Training sessions are server-persisted; this in-memory fixture has no such thing and never pretends to.
+    async getTrainingHub(): Promise<never> {
+      throw new Error("Training sessions are not available from the fixture adapter.");
+    },
+    async startTrainingSession(): Promise<never> {
+      throw new Error("Training sessions are not available from the fixture adapter.");
+    },
+    async getTrainingSession(): Promise<never> {
+      throw new Error("Training sessions are not available from the fixture adapter.");
+    },
+    async nextTrainingQuestion(): Promise<never> {
+      throw new Error("Training sessions are not available from the fixture adapter.");
+    },
+    async finishTrainingSession(): Promise<never> {
+      throw new Error("Training sessions are not available from the fixture adapter.");
     }
   };
 }

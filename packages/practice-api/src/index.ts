@@ -3,3 +3,5 @@ export * from "./errors.js";
 export * from "./presentation.js";
 export * from "./validation.js";
 export * from "./service.js";
+export * from "./trainingTypes.js";
+export * from "./trainingService.js";

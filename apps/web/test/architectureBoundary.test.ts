@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  * not re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice", "src/adapter"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice", "src/adapter", "src/training"];
 const EXCLUDED_FILES: string[] = ["src/adapter/service.ts", "src/adapter/fixtures.ts", "src/adapter/presentation.ts"];
 
 const BANNED_IMPORT_SPECIFIERS = [

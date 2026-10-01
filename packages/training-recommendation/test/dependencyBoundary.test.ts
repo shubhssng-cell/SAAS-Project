@@ -25,7 +25,8 @@ describe("training-recommendation -- dependency boundary", () => {
         "@ipmat/practice-block",
         "@ipmat/practice-session",
         "@ipmat/question-engine",
-        "@ipmat/training-orchestration"
+        "@ipmat/training-orchestration",
+        "@ipmat/training-session"
       ].sort()
     );
   });

@@ -2,6 +2,7 @@ import { AttemptLifecycleError } from "@ipmat/attempt";
 import { PersistenceError } from "@ipmat/db";
 import { PracticeLoopError } from "@ipmat/practice-loop";
 import { TrainingRecommendationError } from "@ipmat/training-recommendation";
+import { TrainingSessionError } from "@ipmat/training-session";
 import { PracticeApiError } from "./types.js";
 
 /**
@@ -45,6 +46,28 @@ export function toPracticeApiError(error: unknown): PracticeApiError {
         return new PracticeApiError("invalid_state", "This practice session is no longer active.", 409);
       case "practice_block_ownership_mismatch":
         return new PracticeApiError("ownership_mismatch", "This practice session does not belong to the requesting student.", 403);
+    }
+  }
+
+  if (error instanceof TrainingSessionError) {
+    switch (error.code) {
+      case "invalid_config":
+        return new PracticeApiError("invalid_request", "That session configuration is not allowed.", 400);
+      case "unknown_system":
+      case "session_not_found":
+        return new PracticeApiError("not_found", "No matching training system or session was found.", 404);
+      case "system_not_built":
+        return new PracticeApiError("invalid_state", "This training system is not available yet.", 409);
+      case "system_not_applicable":
+        return new PracticeApiError("invalid_state", "Your recorded practice does not call for this training right now.", 409);
+      case "no_eligible_question":
+        return new PracticeApiError("invalid_state", "No published question fits this training right now.", 409);
+      case "session_already_active":
+        return new PracticeApiError("invalid_state", "Finish your current training session before starting another.", 409);
+      case "session_not_active":
+        return new PracticeApiError("invalid_state", "This training session has already ended.", 409);
+      case "open_attempt_exists":
+        return new PracticeApiError("invalid_state", "Answer or skip your open question before ending the session.", 409);
     }
   }
 

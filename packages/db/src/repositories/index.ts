@@ -39,3 +39,5 @@ export * from "./inMemoryPrepPhaseTemplateReader.js";
 export * from "./prismaAutopsyDecisionRepository.js";
 export * from "./inMemoryAutopsyDecisionRepository.js";
 export * from "./errorTaxonomyReaders.js";
+export * from "./prismaTrainingSessionRepository.js";
+export * from "./inMemoryTrainingSessionRepository.js";

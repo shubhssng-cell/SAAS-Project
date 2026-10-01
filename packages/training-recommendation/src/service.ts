@@ -1,4 +1,5 @@
-import { orchestrateNextTrainingAction, type TrainingOrchestrationResult } from "@ipmat/training-orchestration";
+import { orchestrateNextTrainingAction, toTrainingSystemContext, type TrainingOrchestrationResult } from "@ipmat/training-orchestration";
+import { runTrainingSystem, type TrainingSystemRun } from "@ipmat/training-session";
 import type { ObservationEvidence } from "@ipmat/autopsy";
 import type { AutopsyOutput } from "@ipmat/autopsy";
 import { composeAttemptAutopsyOutput, composeAttemptObservationEvidence } from "./attemptEvidence.js";
@@ -25,6 +26,27 @@ export class TrainingRecommendationService {
   async recommendNextTrainingAction(request: TrainingRecommendationRequest): Promise<TrainingOrchestrationResult> {
     const input = await composeTrainingOrchestrationInput(this.deps, request);
     return orchestrateNextTrainingAction(input);
+  }
+
+  /**
+   * Phase 5 Unit 1 -- runs the named training systems (and ONLY those) against this student's own persisted
+   * state: ONE composition (the same ownership-verified, published-only read every recommendation uses), then
+   * each system's own provider via `runTrainingSystem()`. It deliberately ignores confirmed repair plans and
+   * never consults adaptive selection -- a training system asks "is this dimension worth deliberately training,
+   * and which published question serves it", not "what is globally next". Read-only; outcomes returned unmodified.
+   */
+  async runTrainingSystems(
+    request: TrainingRecommendationRequest,
+    systemIds: readonly string[],
+    options: { excludeQuestionIds?: readonly string[] } = {}
+  ): Promise<TrainingSystemRun[]> {
+    const input = await composeTrainingOrchestrationInput(this.deps, request);
+    const context = toTrainingSystemContext(input);
+    // `excludeQuestionIds` only narrows the already-published candidate POOL (e.g. "not a question this session already used");
+    // it adds no ranking and every provider still decides applicability and selection itself.
+    const excluded = new Set(options.excludeQuestionIds ?? []);
+    const scoped = excluded.size === 0 ? context : { ...context, candidates: context.candidates.filter((candidate) => !excluded.has(candidate.question.questionId)) };
+    return systemIds.map((systemId) => runTrainingSystem(systemId, scoped));
   }
 
   /**

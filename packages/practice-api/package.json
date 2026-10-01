@@ -14,6 +14,7 @@
     "@ipmat/db": "*",
     "@ipmat/practice-loop": "*",
     "@ipmat/training-orchestration": "*",
-    "@ipmat/training-recommendation": "*"
+    "@ipmat/training-recommendation": "*",
+    "@ipmat/training-session": "*"
   }
 }

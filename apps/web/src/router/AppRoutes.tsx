@@ -13,6 +13,9 @@ import { PracticeNextRoute } from "../routes/PracticeNextRoute.js";
 import { PracticeQuestionRoute } from "../routes/PracticeQuestionRoute.js";
 import { PracticeResultRoute } from "../routes/PracticeResultRoute.js";
 import { SignupPage } from "../routes/SignupPage.js";
+import { TrainingHubRoute } from "../routes/TrainingHubRoute.js";
+import { TrainingSessionRoute } from "../routes/TrainingSessionRoute.js";
+import { trainingSessionPath } from "../training/trainingEntry.js";
 import { matchPath } from "./match.js";
 import { ROUTE_TABLE } from "./routeTable.js";
 import { usePathname } from "./router.js";
@@ -102,6 +105,35 @@ const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement
       <OnboardingGate mode="require-complete">
         <EnrollmentGate mode="require-complete">
           <PracticeAutopsyRoute questionId={params.questionId ?? ""} />
+        </EnrollmentGate>
+      </OnboardingGate>
+    </RequireAuth>
+  ),
+  // Phase 5 Unit 1 -- deliberate training. Same gate chain as every other authenticated-shell route.
+  training: () => (
+    <RequireAuth>
+      <OnboardingGate mode="require-complete">
+        <EnrollmentGate mode="require-complete">
+          <TrainingHubRoute />
+        </EnrollmentGate>
+      </OnboardingGate>
+    </RequireAuth>
+  ),
+  "training-session": (params) => (
+    <RequireAuth>
+      <OnboardingGate mode="require-complete">
+        <EnrollmentGate mode="require-complete">
+          <TrainingSessionRoute sessionId={params.sessionId ?? ""} />
+        </EnrollmentGate>
+      </OnboardingGate>
+    </RequireAuth>
+  ),
+  // A training result IS an ordinary attempt result; only where "Continue" goes differs (back into the session).
+  "training-result": (params) => (
+    <RequireAuth>
+      <OnboardingGate mode="require-complete">
+        <EnrollmentGate mode="require-complete">
+          <PracticeResultRoute questionId={params.questionId ?? ""} continueTo={trainingSessionPath(params.sessionId ?? "")} backTo={trainingSessionPath(params.sessionId ?? "")} />
         </EnrollmentGate>
       </OnboardingGate>
     </RequireAuth>
