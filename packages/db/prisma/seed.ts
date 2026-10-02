@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { percentagesConceptGraph, percentagesConceptDepth, ratioConceptDepth } from "@ipmat/concept-graph";
+import { IPMAT_QUANT_CHAPTERS } from "@ipmat/exam-pack";
 import { percentagesLens } from "@ipmat/examiner-lens";
 import { ipmatPrepPhaseTemplate } from "@ipmat/prep-phase";
 import {
@@ -21,32 +22,15 @@ const asJson = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJ
 const prisma = new PrismaClient();
 
 /**
- * The Quant chapter catalog for IPMAT Indore. Only "Percentages" (and its
- * immediate neighborhood) gets a concept graph / taxonomy / questions in
- * this vertical slice — the rest exist as rows because exam structure is
- * data (docs/DATABASE.md), not because they're being built out now (see
- * docs/MASTER_PLAN.md "What should explicitly NOT be built yet").
- * "Mixtures and Alligations" is new in Phase 2 — added because the
- * Percentages neighborhood graph legitimately reaches it (docs/QUESTION_
- * ENGINE.md §1), the same reasoning that justified the original list.
+ * The Quant chapter catalog for IPMAT Indore now lives in the Exam Pack
+ * (`IPMAT_QUANT_CHAPTERS` in `@ipmat/exam-pack`, docs/DECISIONS.md D-082) so
+ * the seeded database and the pack cannot drift apart. Only "Percentages"
+ * (and its immediate neighborhood) gets a concept graph / taxonomy /
+ * questions in this vertical slice - the rest exist as rows because exam
+ * structure is data (docs/DATABASE.md), not because they're being built
+ * out now (see docs/MASTER_PLAN.md "What should explicitly NOT be built yet").
  */
-const QUANT_CHAPTERS = [
-  "Number Systems",
-  "Percentages",
-  "Ratio and Proportion",
-  "Averages",
-  "Profit and Loss",
-  "Simple and Compound Interest",
-  "Mixtures and Alligations",
-  "Time, Speed and Distance",
-  "Time and Work",
-  "Algebra",
-  "Geometry and Mensuration",
-  "Data Interpretation",
-  "Permutation and Combination",
-  "Probability",
-  "Sequences and Series"
-];
+const QUANT_CHAPTERS = IPMAT_QUANT_CHAPTERS;
 
 const INTERNAL_TEST_STUDENT_AUTH_REF = "internal-test-student";
 

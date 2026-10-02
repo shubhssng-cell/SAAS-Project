@@ -67,6 +67,7 @@
 | D-061 | Pressure Training: 5th concrete provider | Accepted | `@ipmat/pressure-training` | See [35_PRESSURE_TRAINING.md](35_PRESSURE_TRAINING.md) |
 | D-062 | All 5 providers wired into orchestration | Accepted | `@ipmat/training-orchestration` | See [36_TRAINING_ORCHESTRATION.md](36_TRAINING_ORCHESTRATION.md) |
 | D-081 | Revision (Phase 5 Unit 7): concept-level re-exposure after a provisional 14-day dormancy; no stages, no stored state | Accepted | `@ipmat/revision-training` | See [38_REVISION_TRAINING.md](38_REVISION_TRAINING.md) |
+| D-082 | Exam Pack abstraction (Product Phase 6 Prompt 1): exam-agnostic pack, validated graph, provenance x review state, IPMAT as data, no migration | Accepted | `@ipmat/exam-pack`, `@ipmat/db` (read-only reader) | See [40_CONCEPT_UNIVERSE.md](40_CONCEPT_UNIVERSE.md) |
 | — | D-039 addendum: RepairPlan/Autopsy persistence fidelity | Accepted (this session) | `@ipmat/autopsy`, `@ipmat/db` | Migration 0007, see [23](23_AUTOPSY.md)/[24](24_REPAIR.md)/[92](92_CURRENT_STATE.md) |
 
 ## Decisions genuinely still open (not resolved anywhere in the repository)

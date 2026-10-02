@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-02 (Product Phase 6 Prompt 1)
+
+Phase 6 Prompt 1 (Exam Pack + Concept Universe, D-082) is done: `@ipmat/exam-pack` + `PrismaExamPackRepository`, no migration/route/UI. **Next is Phase 6 Prompt 2 (Historical Examiner Intelligence + Question DNA) — NOT started; wait for the owner's prompt.** Ground rules carried forward: the pack is a knowledge space (no student state); IPMAT data stays `authored`+`unvalidated` until a real source and reviewer exist; do not invent syllabus structure; the integration suite needs `IPMAT_TEST_DATABASE_URL` pointing at a disposable `*test*` Postgres on 55432 (never 5432).
+
 ## Update — 2026-09-24
 
 **The Training Recommendation Composition layer is now implemented (uncommitted)** — `packages/training-recommendation` plus six read methods in `@ipmat/db`; 1189/1189 tests, typecheck/lint/build clean. The "Exact next work unit (if backend progression resumes)" section below is therefore DONE; see [37_TRAINING_RECOMMENDATION.md §23](37_TRAINING_RECOMMENDATION.md) for what was built and why it deviates from the design in seven named places. Still deferred from that unit: PrepPhase/CatchUp assembly (`prepPhase: null`), `errorTaxonomy`, persisting computed mastery, any API route/UI wiring (including swapping `apps/web`'s fixture adapter), auth. Two new issues were surfaced — see [91_OPEN_BLOCKERS.md](91_OPEN_BLOCKERS.md) §A.6/§A.7. **Next step is the user's call** (commit this unit first; then e.g. an API layer, the `apps/web` adapter swap, or the live-DB/live-AI blockers) — do not pick one silently.

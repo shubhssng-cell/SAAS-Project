@@ -2,6 +2,16 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Source: `docs/QUESTION_ENGINE.md` §1/§1a, `docs/DECISIONS.md` D-013 (read in full).
 
+## Exam Pack layer (Product Phase 6 Prompt 1, D-082) — `@ipmat/exam-pack`
+
+The Concept Universe above is now wrapped by an exam-agnostic **Exam Pack**: sections, a syllabus hierarchy, concepts located at a node, the same eight typed relations, terminology, and a provenance (`kind` x `reviewState`) on every artifact. It describes the exam's KNOWLEDGE SPACE only — never a student; a concept existing in a pack never implies mastery.
+
+- **Validated, fail-closed.** `validateExamPack()` rejects duplicate keys/concepts (after `normalizeConceptNameKey`), unknown/dangling references, self-relations, duplicate/reversed-symmetric edges, malformed relations, invalid hierarchy and syllabus cycles, cross-exam relations, and ordering-relation cycles. `ExamPackService` refuses to answer from an invalid pack.
+- **Relation semantics.** Ordering (acyclic): `prerequisite`, `foundational`, `advanced_extension` — checked per type, then on their union, never across all types. Symmetric: `directly_related`, `commonly_combined`, `related_but_distinct`. Directional, may be cyclic: `application`, `dependent`. "Unlocks" = inverse of `prerequisite`, not a ninth type.
+- **IPMAT pack = what the repo holds, labelled honestly.** Quant only; 15 chapters, 12 concepts, 16 relations; all `authored` + `unvalidated` (no official syllabus exists in the repo). Terminology/skills/pattern refs/importance are empty on purpose.
+- **Persistence.** No migration; `PrismaExamPackRepository` (read-only) assembles a pack from existing tables and reports it `unvalidated`; a cross-exam relation row is detected on read (the DB cannot forbid it).
+- **No HTTP route / no UI.** `toPublicExamPackView()` is the student-safe projection for a later step.
+
 ## What it is
 
 A directed graph. `Concept` nodes belong to a `Chapter`; `ConceptRelation` edges are typed and carry rich metadata, never just a strength score.

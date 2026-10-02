@@ -15,6 +15,7 @@ Apps (`apps/training-playground`, `apps/web`) are consumers only — never a dec
 | Package | Purpose | Depends on | Never depends on |
 |---|---|---|---|
 | `@ipmat/concept-graph` | Concept Universe graph | (leaf) | anything |
+| `@ipmat/exam-pack` | Exam-agnostic Exam Pack + validated Concept Universe, provenance, traversal (D-082); IPMAT as data | `@ipmat/concept-graph` | Prisma, `@ipmat/db`, AI, mastery, attempt |
 | `@ipmat/examiner-lens` | Structured "what is tested" analysis | `@ipmat/concept-graph` | `@ipmat/ai` |
 | `@ipmat/question-engine` | Pattern families, taxonomy, DNA, generation pipeline, publication/import decisions | `@ipmat/concept-graph`, `@ipmat/examiner-lens`, `@ipmat/ai` | `@ipmat/db` |
 | `@ipmat/validation` | Independent computation verification, quality checks | `@ipmat/question-engine` (types) | `@ipmat/ai` directly for its own calls |
