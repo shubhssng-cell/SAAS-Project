@@ -1,10 +1,12 @@
 # Product Phase 5 — Student-facing Training Systems
 
+> **STATUS: COMPLETE.** Phase 5 is complete with seven implemented items — the Training System Foundation and six student-facing training systems (Calculation Gym, Speed Lab, Trap Lab, Novelty Training, Pressure Training, Revision). **Overtraining is NOT implemented, is NOT part of Phase 5's completion criteria, and is DEFERRED to future product design** (see "Phase 5 closeout" at the end of this file). **Phase 6 is the next product phase and has NOT started.**
+
 ## Phase objective
 
 From the master roadmap: *Calculation Gym / Speed Lab / Trap Lab / Novelty Training / Pressure Training become things a student can see and enter, not just backend providers.* The engineering providers already exist (`@ipmat/calculation-gym`, `speed-lab`, `trap-lab`, `novelty-training`, `pressure-training`, behind `@ipmat/training-systems`). Phase 5 puts a deliberate, student-chosen training flow on top of them, one small unit at a time, without a second selection engine, a second attempt lifecycle, or a new score.
 
-Numbering is **Phase-5-relative** (Unit 1 … Unit 7). It has no relation to the older global unit counts.
+Numbering is **Phase-5-relative**. The table below records the units as they were actually executed; the original working plan (which listed a "Revision Engine" as Unit 5, "Pressure + Overtraining" as Unit 6 and "integration + hardening" as Unit 7) was adjusted as units started, and is superseded by the executed sequence. It has no relation to the older global unit counts.
 
 ## Unit status
 
@@ -13,12 +15,13 @@ Numbering is **Phase-5-relative** (Unit 1 … Unit 7). It has no relation to the
 | Unit 1 | Training System Foundation (common session framework + student entry point) | **COMPLETE** (below) |
 | Unit 2 | Calculation Gym (student-facing) | **COMPLETE** (below; review: [../PHASE_5_UNIT_2_REVIEW.md](../PHASE_5_UNIT_2_REVIEW.md)) |
 | Unit 3 | Speed Lab (student-facing) | **COMPLETE** (below; review: [../PHASE_5_UNIT_3_REVIEW.md](../PHASE_5_UNIT_3_REVIEW.md)) |
-| Unit 4 | Trap + Novelty Training | **Trap Lab COMPLETE** (below; review: [../PHASE_5_UNIT_4_REVIEW.md](../PHASE_5_UNIT_4_REVIEW.md)); **Novelty Training COMPLETE** (delivered as Unit 5 of the executed sequence; review: [../PHASE_5_UNIT_5_REVIEW.md](../PHASE_5_UNIT_5_REVIEW.md)); **Pressure Training COMPLETE** (Unit 6; review: [../PHASE_5_UNIT_6_REVIEW.md](../PHASE_5_UNIT_6_REVIEW.md)) |
-| Unit 5 | Revision Engine | **COMPLETE** (delivered as Unit 7 of the executed sequence; review: [../PHASE_5_UNIT_7_REVIEW.md](../PHASE_5_UNIT_7_REVIEW.md)) |
-| Unit 6 | Pressure + Overtraining | not started |
-| Unit 7 | Training-system integration + hardening | not started |
+| Unit 4 | Trap Lab (student-facing, no stages) | **COMPLETE** (below; review: [../PHASE_5_UNIT_4_REVIEW.md](../PHASE_5_UNIT_4_REVIEW.md)) |
+| Unit 5 | Novelty Training (student-facing, no stages) | **COMPLETE** (below; review: [../PHASE_5_UNIT_5_REVIEW.md](../PHASE_5_UNIT_5_REVIEW.md)) |
+| Unit 6 | Pressure Training (student-facing, timed run, no stages) | **COMPLETE** (below; review: [../PHASE_5_UNIT_6_REVIEW.md](../PHASE_5_UNIT_6_REVIEW.md)) |
+| Unit 7 | Revision (a new provider from the owner-supplied specification; no stages) | **COMPLETE** (below; review: [../PHASE_5_UNIT_7_REVIEW.md](../PHASE_5_UNIT_7_REVIEW.md)) |
+| — | Overtraining | **DEFERRED / FUTURE** — no authoritative student-training specification exists; not implemented; not required for Phase 5 completion |
 
-*(A working plan; later units may be adjusted when they start.)*
+*(The executed sequence. The original plan's separate "integration + hardening" unit was not executed as its own unit; each unit above carried its own real-Postgres and browser verification, and the whole suite was re-run clean at each close.)*
 
 ## Training vs adaptive practice
 
@@ -238,3 +241,21 @@ Delivered in Unit 2 below (it was the planned scope here: Calculation Gym, stude
 **Browser** (real web on Vite + real API in Prisma mode + a throwaway Postgres database, headless Edge over raw CDP): **31/31 checks**, including phone-width layout, API restart, the API-down error, loading and recovery states, no leakage and a restored real seed set.
 
 **Not claimed.** That revisiting improves retention or performance; that 14 days is the right interval; `no_eligible_question` end to end (provider-level only); real-student validation; live-model quality (none is involved).
+
+## Phase 5 closeout
+
+**Phase 5 is COMPLETE.** The student-facing training systems it delivered:
+
+1. **Training System Foundation** — the common, persisted, resumable Training Session framework (a thin row on the existing `PracticeBlock`) and the `/training` entry point (D-075).
+2. **Calculation Gym** — staged (D-076).
+3. **Speed Lab** — staged (D-077).
+4. **Trap Lab** — no stages (D-078).
+5. **Novelty Training** — exposure-first, no stages (D-079).
+6. **Pressure Training** — block evidence, a timed run, no stages (D-080).
+7. **Revision** — concept-level re-exposure after a provisional 14-day dormancy, no stages, no stored state (D-081).
+
+**Overtraining — DEFERRED / FUTURE.** The repository defines Overtraining only as a content principle: `docs/PRODUCT_SPEC.md` §4.6 says the difficulty tiers (Standard, Advanced, Hard, Extreme, Novel) are exposure levels above expected exam difficulty and must stay valid, syllabus-relevant, unambiguous and correct — already implemented as `DifficultyTier` plus the validation gates and the no-auto-publish rule (D-008). No specification exists for a student-chosen Overtraining training system, so none was designed or built: no applicability rule, evidence, threshold, stage, state, time window, difficulty escalation or selection algorithm exists, and none is implied. It stays a catalog entry with no engine (the Training Hub shows it as "Not built yet."). It becomes buildable only once a product specification defines it; until then it is neither required for, nor a blocker of, Phase 5 completion.
+
+**Not claimed by Phase 5.** Outcome calibration; real-student validation; that any provisional threshold (including Revision's 14 days and Pressure's 5 s / 0.40) is calibrated; live-model quality (no training path calls a model). The per-unit "not claimed" notes above stand.
+
+**Next.** Phase 6 (Content Expansion / Question Universe, per [00_PRODUCT_ROADMAP.md](00_PRODUCT_ROADMAP.md)) is the next product phase. **It has not started.**

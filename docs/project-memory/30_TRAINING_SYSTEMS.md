@@ -61,6 +61,8 @@ trap-lab > calculation-gym > speed-lab > pressure-training > novelty-training
 | Novelty Training | EXPOSURE-first (not weakness-first) rotation | [34_NOVELTY_TRAINING.md](34_NOVELTY_TRAINING.md) |
 | Revision | Concept-level re-exposure after a provisional 14-day dormancy; student-chosen, not in the adaptive chain | [38_REVISION_TRAINING.md](38_REVISION_TRAINING.md) |
 
+**Phase 5 status.** Phase 5 is COMPLETE: the Training System Foundation plus six student-facing systems (Calculation Gym, Speed Lab, Trap Lab, Novelty Training, Pressure Training, Revision). Overtraining is DEFERRED — it has no engine, no specification and no provider, and is not part of the completion criteria (see [../product-roadmap/PHASE_5_TRAINING_SYSTEMS.md](../product-roadmap/PHASE_5_TRAINING_SYSTEMS.md) §"Phase 5 closeout").
+
 ## No composite score, no confidence field — enforced at compile time
 
 6 dedicated `@ts-expect-error` regression-guard tests on `TrainingSystemContext`/`TrainingCandidateQuestion`/`TrainingSystemDiagnostics`/`TrainingSystemSelectionOutcome`.

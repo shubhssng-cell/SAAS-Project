@@ -17,6 +17,7 @@
 - Auth (D-004, explicitly open, deferred until before any real external student use).
 - The confirm/correct UI and its wiring into a real practice flow (Phase 5C-3's original full exit criterion).
 - Payments, subscriptions, parent portal, multi-tenant orgs (see [03_MVP_SCOPE.md](03_MVP_SCOPE.md)).
+- Overtraining as a student-chosen training system (DEFERRED at Phase 5 closeout: no authoritative specification; only the difficulty-tier content principle of PRODUCT_SPEC §4.6 exists and is implemented; a product specification must define it before any design or code).
 - Mock Simulation (named, shape deliberately kept provider-agnostic, not designed). Revision was designed and built in Phase 5 Unit 7 (D-081).
 - `packages/jobs` (BullMQ) — the generation pipeline is a plain async function by design until a queue exists.
 - The Training Recommendation Composition layer's own PrepPhase/CatchUp assembly (deliberately deferred pending blocker A.1/A.2 above being resolved separately).
