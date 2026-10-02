@@ -12,6 +12,10 @@ Fields queried frequently are their own normalized, indexed columns — never bu
 
 A `Question` cannot be marked `published` while any DNA field is null or `provenanceId` is unset — enforced by a hand-written DB-level `CHECK` constraint (`questions_published_requires_provenance`, migration `0001_init`), independent of any application-level check.
 
+## Historical Examiner Intelligence (Product Phase 6 Prompt 2, D-083)
+
+**HISTORICAL EVIDENCE IS OBSERVED TESTING EVIDENCE, NOT A PREDICTION OF FUTURE EXAM CONTENT.** `@ipmat/examiner-intelligence` records, per historical question, a CLASSIFICATION (never the question text): locator + source/rights + the EXISTING Question DNA vocabulary (`HistoricalDnaClassification = Omit<QuestionDnaData, provenanceSourceType | validationState | examRelevance>`; six difficulty dimensions and four novelty levels unchanged; "transformations" = existing `testingModes`). Pattern family (structure) is named, the record is the instance. States: `raw_imported` -> `candidate_annotation` (human or ai_assisted proposal; not authoritative) -> `reviewed_validated` (named reviewer required). Origin: `real_source` vs labelled `fixture` (default queries = reviewed + real-source only). `examRelevance` core/peripheral/stretch is an EDITORIAL label, carried only as `editorialRelevance` with a rationale. Validation is against the record's OWN exam's Exam Pack (`validateDnaClassification`); queries are exam-scoped and deterministic. **Real data populated: none** (no authorized historical IPMAT material exists in the repo; only labelled test fixtures). Table `historical_question_records` (migration 0013) is empty everywhere.
+
 ## `validateQuestionDna()`
 
 Checks `conceptName`/`subconcepts`/`prerequisites`/`combinesWithConcepts` all reference real graph concepts, and that `patternFamilyName` names a family that actually exists for that concept.

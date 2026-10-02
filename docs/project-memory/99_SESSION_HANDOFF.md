@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-02 (Product Phase 6 Prompt 2)
+
+Phase 6 Prompt 2 (Historical Examiner Intelligence + Question DNA, D-083) is done. **Next is Phase 6 Prompt 3 (Question Universe + Content Authoring/Validation) - NOT started; wait for the owner prompt.** Carry forward: historical evidence is observed testing evidence, never prediction; a historical record holds NO question content; there is NO real historical data (only labelled fixtures) - never invent PYQs; AI classifications stay candidates until a named reviewer reviews them; default queries are reviewed + real-source only; migration 0013 must be applied (`prisma migrate deploy`) on any real database.
+
 ## Update — 2026-10-02 (Product Phase 6 Prompt 1)
 
 Phase 6 Prompt 1 (Exam Pack + Concept Universe, D-082) is done: `@ipmat/exam-pack` + `PrismaExamPackRepository`, no migration/route/UI. **Next is Phase 6 Prompt 2 (Historical Examiner Intelligence + Question DNA) — NOT started; wait for the owner's prompt.** Ground rules carried forward: the pack is a knowledge space (no student state); IPMAT data stays `authored`+`unvalidated` until a real source and reviewer exist; do not invent syllabus structure; the integration suite needs `IPMAT_TEST_DATABASE_URL` pointing at a disposable `*test*` Postgres on 55432 (never 5432).

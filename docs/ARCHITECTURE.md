@@ -35,6 +35,7 @@ One deployable app, internally organized into domain modules with enforced bound
 /packages
   /domain              Framework-agnostic business logic, split by bounded context:
     /concept-graph        [built, Phase 1-2] Concept Universe: 8-type relationship graph, Concept Depth
+    /examiner-intelligence [built, Product Phase 6 Prompt 2, D-083] Historical Examiner Intelligence: exam-scoped, provenance-carrying classification records of historical questions (NO question content), annotation states (raw -> candidate -> reviewed), pack-aware Question DNA validation, deterministic observed-testing queries. Observed evidence, never prediction. Depends on exam-pack, concept-graph, examiner-lens, question-engine
     /exam-pack            [built, Product Phase 6 Prompt 1, D-082] Exam-agnostic Exam Pack: sections, syllabus hierarchy, concepts, typed relations, provenance, graph validation, deterministic traversal; IPMAT Indore as data. Depends only on concept-graph
     /examiner-lens        [built, Phase 2] Examiner Lens: WhatIsTested, TestingMode, error modes, combination derivation
     /question-engine      [built, Phase 2-3] Pattern families, taxonomy cells, coverage ladder, Question DNA validation, generation pipeline

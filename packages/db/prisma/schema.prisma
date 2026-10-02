@@ -28,6 +28,7 @@ model Exam {
   enrollments        Enrollment[]
   prepPhaseTemplates PrepPhaseTemplate[]
   questions          Question[]
+  historicalRecords  HistoricalQuestionRecord[]
 
   @@map("exams")
 }
@@ -38,9 +39,10 @@ model Section {
   name   String
   order  Int
 
-  exam      Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
-  chapters  Chapter[]
-  questions Question[]
+  exam              Exam                       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  chapters          Chapter[]
+  questions         Question[]
+  historicalRecords HistoricalQuestionRecord[]
 
   @@unique([examId, name])
   @@index([examId])
@@ -53,9 +55,10 @@ model Chapter {
   name      String
   order     Int
 
-  section   Section    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  concepts  Concept[]
-  questions Question[]
+  section           Section                    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  concepts          Concept[]
+  questions         Question[]
+  historicalRecords HistoricalQuestionRecord[]
 
   @@unique([sectionId, name])
   @@index([sectionId])
@@ -80,16 +83,17 @@ model Concept {
   description String?
   status      ConceptStatus @default(draft)
 
-  chapter             Chapter                 @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  relationsFrom       ConceptRelation[]       @relation("RelationFrom")
-  relationsTo         ConceptRelation[]       @relation("RelationTo")
+  chapter             Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  relationsFrom       ConceptRelation[]          @relation("RelationFrom")
+  relationsTo         ConceptRelation[]          @relation("RelationTo")
   depth               ConceptDepth?
   lensAnalyses        ExaminerLensAnalysis[]
-  lensPrerequisiteFor ExaminerLensAnalysis[]  @relation("LensPrerequisite")
+  lensPrerequisiteFor ExaminerLensAnalysis[]     @relation("LensPrerequisite")
   patternFamilies     QuestionPatternFamily[]
   taxonomyCells       PatternTaxonomyCell[]
-  questionsPrimary    Question[]              @relation("QuestionConcept")
+  questionsPrimary    Question[]                 @relation("QuestionConcept")
   masteryStates       MasteryState[]
+  historicalRecords   HistoricalQuestionRecord[]
 
   @@unique([chapterId, name])
   @@index([chapterId])
@@ -297,9 +301,10 @@ model QuestionPatternFamily {
   status                         PatternFamilyStatus @default(draft)
   createdAt                      DateTime            @default(now()) @map("created_at")
 
-  concept              Concept               @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  examinerLensAnalysis ExaminerLensAnalysis? @relation(fields: [examinerLensAnalysisId], references: [id])
+  concept              Concept                    @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  examinerLensAnalysis ExaminerLensAnalysis?      @relation(fields: [examinerLensAnalysisId], references: [id])
   taxonomyCells        PatternTaxonomyCell[]
+  historicalRecords    HistoricalQuestionRecord[]
 
   @@unique([conceptId, name])
   @@index([conceptId])
@@ -438,6 +443,98 @@ model Question {
 }
 
 // ---------------------------------------------------------------------
+// Historical Examiner Intelligence (docs/DECISIONS.md D-083)
+//
+// HISTORICAL EVIDENCE IS OBSERVED TESTING EVIDENCE, NOT A PREDICTION OF
+// FUTURE EXAM CONTENT. A row is a CLASSIFICATION RECORD about a question that
+// appeared in an exam: it deliberately has NO question text, options, answer
+// key or solution (a copyrighted paper's content is never stored). It holds a
+// locator into the source plus structured Question-DNA metadata, in the SAME
+// vocabularies (and enums) the Question table already uses.
+//
+// Invariants a Prisma schema cannot express are enforced by hand-written CHECK
+// constraints in migration 0013 (same approach as questions_published_requires_
+// provenance): fixture vs real source, annotation-state consistency, review,
+// authorship, rights basis. Cross-table "the concept belongs to THIS exam" is
+// enforced in PrismaHistoricalRecordRepository (and tested against Postgres).
+// ---------------------------------------------------------------------
+
+enum HistoricalDataOrigin {
+  real_source
+  fixture
+}
+
+enum HistoricalAnnotationState {
+  raw_imported
+  candidate_annotation
+  reviewed_validated
+}
+
+enum AnnotationAuthorshipKind {
+  human
+  ai_assisted
+}
+
+model HistoricalQuestionRecord {
+  id            String  @id @default(uuid())
+  examId        String  @map("exam_id")
+  examVersion   String? @map("exam_version")
+  examYear      Int?    @map("exam_year")
+  examSession   String? @map("exam_session")
+  questionLabel String? @map("question_label")
+
+  sourceType   SourceType @map("source_type")
+  sourceRef    String     @map("source_ref")
+  licenseRef   String?    @map("license_ref")
+  attributedTo String?    @map("attributed_to")
+
+  dataOrigin   HistoricalDataOrigin @map("data_origin")
+  fixtureLabel String?              @map("fixture_label")
+
+  annotationState HistoricalAnnotationState @map("annotation_state")
+  authorship      AnnotationAuthorshipKind?
+  proposedBy      String?                   @map("proposed_by")
+  reviewedBy      String?                   @map("reviewed_by")
+  reviewedAt      DateTime?                 @map("reviewed_at")
+
+  // Editorial annotation: NOT evidence, NOT a prediction (all three or none).
+  editorialRelevance   ExamRelevance? @map("editorial_relevance")
+  editorialRationale   String?        @map("editorial_rationale")
+  editorialAnnotatedBy String?        @map("editorial_annotated_by")
+
+  // Classification (Question DNA) - null while raw_imported.
+  sectionId              String?         @map("section_id")
+  chapterId              String?         @map("chapter_id")
+  conceptId              String?         @map("concept_id")
+  patternFamilyId        String?         @map("pattern_family_id")
+  subconceptIds          String[]        @map("subconcept_ids")
+  prerequisiteIds        String[]        @map("prerequisite_ids")
+  combinesWithConceptIds String[]        @map("combines_with_concept_ids")
+  skill                  String?
+  difficultyTier         DifficultyTier? @map("difficulty_tier")
+  difficultyDimensions   Json?           @map("difficulty_dimensions")
+  noveltyLevel           NoveltyLevel?   @map("novelty_level")
+  expectedTimeSeconds    Int?            @map("expected_time_seconds")
+  testingModes           TestingMode[]   @map("testing_modes")
+  trapErrorTaxonomyId    String?         @map("trap_error_taxonomy_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  exam              Exam                   @relation(fields: [examId], references: [id], onDelete: Restrict)
+  section           Section?               @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  chapter           Chapter?               @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  concept           Concept?               @relation(fields: [conceptId], references: [id], onDelete: Restrict)
+  patternFamily     QuestionPatternFamily? @relation(fields: [patternFamilyId], references: [id], onDelete: Restrict)
+  trapErrorTaxonomy ErrorTaxonomy?         @relation(fields: [trapErrorTaxonomyId], references: [id], onDelete: Restrict)
+
+  @@index([examId, annotationState, dataOrigin])
+  @@index([conceptId])
+  @@index([patternFamilyId])
+  @@map("historical_question_records")
+}
+
+// ---------------------------------------------------------------------
 // Student & Enrollment — Phase 1 foundation, not deferred
 // (docs/DATABASE.md "Student & Enrollment (Phase 1 foundation)")
 // ---------------------------------------------------------------------
@@ -534,24 +631,24 @@ enum AttemptStatus {
 }
 
 model Attempt {
-  id                 String             @id @default(uuid())
-  studentId          String             @map("student_id")
-  questionId         String             @map("question_id")
-  enrollmentId       String             @map("enrollment_id")
-  retryOfAttemptId   String?            @map("retry_of_attempt_id")
-  status             AttemptStatus      @default(in_progress)
-  startedAt          DateTime           @map("started_at")
-  submittedAt        DateTime?          @map("submitted_at")
-  finalizedAt        DateTime?          @map("finalized_at")
-  timeSpentSeconds   Int?               @map("time_spent_seconds")
-  chosenAnswer       String?            @map("chosen_answer")
-  isCorrect          Boolean?           @map("is_correct")
-  hintsUsed          Int                @default(0) @map("hints_used")
-  solutionOpenedAt   DateTime?          @map("solution_opened_at")
-  workingSteps       Json?              @map("working_steps")
-  reasoningText      String?            @map("reasoning_text")
-  reasoningInputMode ReasoningInputMode @default(text) @map("reasoning_input_mode")
-  reasoningAudioRef  String?            @map("reasoning_audio_ref")
+  id                  String             @id @default(uuid())
+  studentId           String             @map("student_id")
+  questionId          String             @map("question_id")
+  enrollmentId        String             @map("enrollment_id")
+  retryOfAttemptId    String?            @map("retry_of_attempt_id")
+  status              AttemptStatus      @default(in_progress)
+  startedAt           DateTime           @map("started_at")
+  submittedAt         DateTime?          @map("submitted_at")
+  finalizedAt         DateTime?          @map("finalized_at")
+  timeSpentSeconds    Int?               @map("time_spent_seconds")
+  chosenAnswer        String?            @map("chosen_answer")
+  isCorrect           Boolean?           @map("is_correct")
+  hintsUsed           Int                @default(0) @map("hints_used")
+  solutionOpenedAt    DateTime?          @map("solution_opened_at")
+  workingSteps        Json?              @map("working_steps")
+  reasoningText       String?            @map("reasoning_text")
+  reasoningInputMode  ReasoningInputMode @default(text) @map("reasoning_input_mode")
+  reasoningAudioRef   String?            @map("reasoning_audio_ref")
   // Grouped-practice membership (docs/DECISIONS.md D-060) -- nullable FK
   // pair, the direct precedent being retryOfAttemptId's own nullable
   // self-FK above. blockSequenceNumber is server-assigned (never caller-
@@ -564,9 +661,9 @@ model Attempt {
   // Deliberately NO practiceSessionId column here -- session is derived
   // via practiceBlockId -> PracticeBlock.practiceSessionId, never a second,
   // independently-mutable path to the same fact.
-  practiceBlockId     String?        @map("practice_block_id")
-  blockSequenceNumber Int?           @map("block_sequence_number")
-  createdAt           DateTime       @default(now()) @map("created_at")
+  practiceBlockId     String?            @map("practice_block_id")
+  blockSequenceNumber Int?               @map("block_sequence_number")
+  createdAt           DateTime           @default(now()) @map("created_at")
 
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
   question      Question       @relation(fields: [questionId], references: [id])
@@ -647,7 +744,7 @@ model PracticeBlock {
   blockTimeBudgetSeconds Int?                @map("block_time_budget_seconds")
   createdAt              DateTime            @default(now()) @map("created_at")
 
-  practiceSession PracticeSession @relation(fields: [practiceSessionId], references: [id], onDelete: Restrict)
+  practiceSession PracticeSession  @relation(fields: [practiceSessionId], references: [id], onDelete: Restrict)
   attempts        Attempt[]
   trainingSession TrainingSession?
 
@@ -739,8 +836,9 @@ model ErrorTaxonomy {
 
   autopsies         Autopsy[]
   repairPlans       RepairPlan[]
-  taxonomyCellTraps PatternTaxonomyCell[] @relation("TaxonomyCellTrap")
-  questionTraps     Question[]            @relation("QuestionTrap")
+  taxonomyCellTraps PatternTaxonomyCell[]      @relation("TaxonomyCellTrap")
+  questionTraps     Question[]                 @relation("QuestionTrap")
+  historicalRecords HistoricalQuestionRecord[]
 
   @@map("error_taxonomies")
 }
@@ -750,23 +848,23 @@ model ErrorTaxonomy {
 // ---------------------------------------------------------------------
 
 model Autopsy {
-  id                    String   @id @default(uuid())
-  attemptId             String   @unique @map("attempt_id")
-  hypothesisText        String   @map("hypothesis_text")
-  errorTaxonomyId       String?  @map("error_taxonomy_id")
-  likelyRootCause       String?  @map("likely_root_cause")
-  evidenceUsed          Json     @map("evidence_used")
-  confirmed             Boolean? @map("confirmed")
+  id                    String    @id @default(uuid())
+  attemptId             String    @unique @map("attempt_id")
+  hypothesisText        String    @map("hypothesis_text")
+  errorTaxonomyId       String?   @map("error_taxonomy_id")
+  likelyRootCause       String?   @map("likely_root_cause")
+  evidenceUsed          Json      @map("evidence_used")
+  confirmed             Boolean?  @map("confirmed")
   // docs/DECISIONS.md D-039 addendum -- WHEN `confirmed` became true (or
   // false), distinct from `confirmed` itself (WHETHER). Set from the
   // domain's own hypothesis.respondedAt, never inferred from createdAt or
   // the current time. Permanently nullable (an awaiting/rejected-without-
   // response-time-tracking hypothesis has none), not merely transitional.
   confirmedAt           DateTime? @map("confirmed_at")
-  studentCorrectionText String?  @map("student_correction_text")
-  generatedByProvider   String   @map("generated_by_provider")
-  promptVersion         String   @map("prompt_version")
-  createdAt             DateTime @default(now()) @map("created_at")
+  studentCorrectionText String?   @map("student_correction_text")
+  generatedByProvider   String    @map("generated_by_provider")
+  promptVersion         String    @map("prompt_version")
+  createdAt             DateTime  @default(now()) @map("created_at")
 
   attempt       Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   errorTaxonomy ErrorTaxonomy? @relation(fields: [errorTaxonomyId], references: [id])
@@ -801,14 +899,14 @@ enum RecommendedTrainingMode {
 }
 
 model RepairPlan {
-  id                    String       @id @default(uuid())
-  autopsyId             String       @map("autopsy_id")
-  studentId             String       @map("student_id")
-  targetConceptId       String       @map("target_concept_id")
-  targetErrorTaxonomyId String?      @map("target_error_taxonomy_id")
-  followUpQuestionIds   String[]     @map("follow_up_question_ids")
-  status                RepairStatus @default(pending)
-  createdAt             DateTime     @default(now()) @map("created_at")
+  id                      String                   @id @default(uuid())
+  autopsyId               String                   @map("autopsy_id")
+  studentId               String                   @map("student_id")
+  targetConceptId         String                   @map("target_concept_id")
+  targetErrorTaxonomyId   String?                  @map("target_error_taxonomy_id")
+  followUpQuestionIds     String[]                 @map("follow_up_question_ids")
+  status                  RepairStatus             @default(pending)
+  createdAt               DateTime                 @default(now()) @map("created_at")
   // docs/DECISIONS.md D-039 addendum -- historical snapshot fields (Phase
   // 5B's RepairPlan carries these, but the original persistence mapping
   // silently dropped them; see toRepairPlanPersistenceRecord()). Nullable

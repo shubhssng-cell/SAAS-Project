@@ -23,6 +23,7 @@
     "@ipmat/autopsy": "*",
     "@ipmat/concept-graph": "*",
     "@ipmat/exam-pack": "*",
+    "@ipmat/examiner-intelligence": "*",
     "@ipmat/examiner-lens": "*",
     "@ipmat/mastery": "*",
     "@ipmat/prep-phase": "*",

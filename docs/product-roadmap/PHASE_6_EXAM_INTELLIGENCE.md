@@ -1,13 +1,13 @@
 # Product Phase 6 — Exam Intelligence + Content Depth
 
-> **STATUS: IN PROGRESS — Prompt 1 of 5 complete (Exam Pack + Concept Universe). Prompts 2–5 have NOT started.**
+> **STATUS: IN PROGRESS — Prompts 1 and 2 of 5 complete (Exam Pack + Concept Universe; Historical Examiner Intelligence + Question DNA). Prompts 3–5 have NOT started.**
 
 Phase 6 is deliberately consolidated into five large implementation prompts. Each is built, verified and committed on its own; none begins until the previous is closed.
 
 | # | Prompt | Status |
 |---|---|---|
 | 1 | Exam Pack + Concept Universe | **Complete** (D-082) — see [../PHASE_6_PROMPT_1_REVIEW.md](../PHASE_6_PROMPT_1_REVIEW.md) |
-| 2 | Historical Examiner Intelligence + Question DNA | Not started |
+| 2 | Historical Examiner Intelligence + Question DNA | **Complete** (D-083) — see [../PHASE_6_PROMPT_2_REVIEW.md](../PHASE_6_PROMPT_2_REVIEW.md) |
 | 3 | Question Universe + Content Authoring/Validation | Not started |
 | 4 | Content Intelligence Pipeline + Knowledge Graph | Not started |
 | 5 | Exam Intelligence Integration + Calibration | Not started |
@@ -28,3 +28,11 @@ Overtraining (deferred from Phase 5) is NOT part of Phase 6 Prompt 1 and is stil
 **Honest limits.** The repository holds no official IPMAT syllabus, so the pack is not claimed canonical or reviewed; other IPMAT sections do not exist in it; terminology/skills/pattern references/importance are empty; only chapter-level hierarchy is persistable; cross-exam relation rows are detected on read but not prevented by the database. Full list in D-082.
 
 **What later prompts may rely on.** Pack keys are stable (`slugKey`), relation semantics are explicit (`RELATION_TYPE_SEMANTICS`), an invalid pack is never queried (fail-closed), and provenance + review state are first-class — a future prompt that adds reviewed/canonical data raises the review state through real review records, never by relabelling.
+
+## Prompt 2 — Historical Examiner Intelligence + Question DNA (complete)
+
+**Critical principle: HISTORICAL EVIDENCE IS OBSERVED TESTING EVIDENCE, NOT A PREDICTION OF FUTURE EXAM CONTENT.**
+
+**Built.** `@ipmat/examiner-intelligence` (exam-scoped classification records of historical questions with source/rights, `real_source` vs `fixture`, raw -> candidate -> reviewed annotation states, pack-aware Question DNA validation on the EXISTING vocabulary, deterministic observed-testing queries), migration 0013 (`historical_question_records`, additive, CHECK-enforced invariants) and `PrismaHistoricalRecordRepository`.
+
+**Real data status.** None. The repository holds no authorized historical IPMAT material, so nothing was seeded and nothing was invented; every test record is a labelled fixture. **Not built:** coverage engine, import pipeline, admin UI/route, prediction of any kind, Question Universe, generation. Details and limits: D-083 and [../PHASE_6_PROMPT_2_REVIEW.md](../PHASE_6_PROMPT_2_REVIEW.md).
