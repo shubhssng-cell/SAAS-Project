@@ -29,6 +29,7 @@ model Exam {
   prepPhaseTemplates PrepPhaseTemplate[]
   questions          Question[]
   historicalRecords  HistoricalQuestionRecord[]
+  contentSources     ContentSource[]
 
   @@map("exams")
 }
@@ -549,6 +550,157 @@ model HistoricalQuestionRecord {
   @@index([conceptId])
   @@index([patternFamilyId])
   @@map("historical_question_records")
+}
+
+// ---------------------------------------------------------------------
+// Content Intelligence pipeline (Product Phase 6 Prompt 4, docs/DECISIONS.md D-085)
+//
+// AUTHORIZED source material -> versioned sources -> chunks -> CANDIDATES.
+// Nothing here is authoritative: a candidate is a proposal until a named
+// reviewer accepts it, and accepting never edits the Concept Universe or
+// publishes a question. Raw documents are NOT stored - only a content hash and
+// the extracted chunks. A source that fails the rights rules is refused before
+// anything is written. These tables are INTERNAL (extracted source text): no
+// student reader selects from them. Invariants Prisma cannot express are
+// hand-written CHECK constraints in migration 0015.
+// ---------------------------------------------------------------------
+
+enum ContentIngestionState {
+  registered
+  accepted
+  extracted
+  normalized
+  chunked
+  enriched
+  reviewed
+  available
+  failed
+}
+
+enum ContentChunkValidation {
+  unreviewed
+  accepted
+  rejected
+}
+
+enum ContentCandidateKind {
+  concept_mention
+  relationship
+  question
+}
+
+enum ContentCandidateState {
+  candidate
+  accepted
+  rejected
+}
+
+enum ContentProposerKind {
+  deterministic
+  ai_assisted
+  human
+}
+
+model ContentSource {
+  id           String               @id
+  examId       String               @map("exam_id")
+  sourceKey    String               @map("source_key")
+  title        String
+  sourceType   SourceType           @map("source_type")
+  sourceRef    String?              @map("source_ref")
+  licenseRef   String?              @map("license_ref")
+  attributedTo String?              @map("attributed_to")
+  authority    String?
+  dataOrigin   HistoricalDataOrigin @map("data_origin")
+  fixtureLabel String?              @map("fixture_label")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  exam     Exam                   @relation(fields: [examId], references: [id], onDelete: Restrict)
+  versions ContentSourceVersion[]
+
+  @@unique([examId, sourceKey])
+  @@map("content_sources")
+}
+
+model ContentSourceVersion {
+  id             String                @id
+  sourceId       String                @map("source_id")
+  version        Int
+  contentHash    String                @map("content_hash")
+  format         String
+  byteLength     Int                   @map("byte_length")
+  state          ContentIngestionState
+  failureStage   String?               @map("failure_stage")
+  failureCode    String?               @map("failure_code")
+  failureMessage String?               @map("failure_message")
+  attempts       Int                   @default(0)
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  source     ContentSource      @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  chunks     ContentChunk[]
+  candidates ContentCandidate[]
+
+  @@unique([sourceId, contentHash])
+  @@unique([sourceId, version])
+  @@map("content_source_versions")
+}
+
+model ContentChunk {
+  id              String                 @id
+  sourceVersionId String                 @map("source_version_id")
+  ordinal         Int
+  text            String
+  textHash        String                 @map("text_hash")
+  headingPath     String[]               @map("heading_path")
+  lineStart       Int                    @map("line_start")
+  lineEnd         Int                    @map("line_end")
+  charStart       Int                    @map("char_start")
+  charEnd         Int                    @map("char_end")
+  blockKinds      String[]               @map("block_kinds")
+  validationState ContentChunkValidation @default(unreviewed) @map("validation_state")
+
+  sourceVersion ContentSourceVersion @relation(fields: [sourceVersionId], references: [id], onDelete: Restrict)
+  evidence      ContentCandidateEvidence[]
+
+  @@unique([sourceVersionId, ordinal])
+  @@map("content_chunks")
+}
+
+model ContentCandidate {
+  id              String                @id
+  sourceVersionId String                @map("source_version_id")
+  kind            ContentCandidateKind
+  state           ContentCandidateState @default(candidate)
+  proposerKind    ContentProposerKind   @map("proposer_kind")
+  proposedBy      String                @map("proposed_by")
+  reviewedBy      String?               @map("reviewed_by")
+  reviewedAt      DateTime?             @map("reviewed_at")
+  payload         Json
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  sourceVersion ContentSourceVersion       @relation(fields: [sourceVersionId], references: [id], onDelete: Restrict)
+  evidence      ContentCandidateEvidence[]
+
+  @@index([sourceVersionId, state])
+  @@map("content_candidates")
+}
+
+model ContentCandidateEvidence {
+  id          String @id @default(uuid())
+  candidateId String @map("candidate_id")
+  ordinal     Int
+  chunkId     String @map("chunk_id")
+  quote       String
+  charStart   Int    @map("char_start")
+  charEnd     Int    @map("char_end")
+
+  candidate ContentCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  chunk     ContentChunk     @relation(fields: [chunkId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, ordinal])
+  @@map("content_candidate_evidence")
 }
 
 // ---------------------------------------------------------------------

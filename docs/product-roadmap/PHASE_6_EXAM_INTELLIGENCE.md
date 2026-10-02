@@ -1,6 +1,6 @@
 # Product Phase 6 — Exam Intelligence + Content Depth
 
-> **STATUS: IN PROGRESS — Prompts 1, 2 and 3 of 5 complete (Exam Pack + Concept Universe; Historical Examiner Intelligence + Question DNA; Question Universe + Content Authoring/Validation). Prompts 4–5 have NOT started.**
+> **STATUS: IN PROGRESS — Prompts 1–4 of 5 complete (Exam Pack + Concept Universe; Historical Examiner Intelligence + Question DNA; Question Universe + Content Authoring/Validation; Content Intelligence Pipeline + Knowledge Graph). Prompt 5 has NOT started.**
 
 Phase 6 is deliberately consolidated into five large implementation prompts. Each is built, verified and committed on its own; none begins until the previous is closed.
 
@@ -9,7 +9,7 @@ Phase 6 is deliberately consolidated into five large implementation prompts. Eac
 | 1 | Exam Pack + Concept Universe | **Complete** (D-082) — see [../PHASE_6_PROMPT_1_REVIEW.md](../PHASE_6_PROMPT_1_REVIEW.md) |
 | 2 | Historical Examiner Intelligence + Question DNA | **Complete** (D-083) — see [../PHASE_6_PROMPT_2_REVIEW.md](../PHASE_6_PROMPT_2_REVIEW.md) |
 | 3 | Question Universe + Content Authoring/Validation | **Complete** (D-084) — see [../PHASE_6_PROMPT_3_REVIEW.md](../PHASE_6_PROMPT_3_REVIEW.md) |
-| 4 | Content Intelligence Pipeline + Knowledge Graph | Not started |
+| 4 | Content Intelligence Pipeline + Knowledge Graph | **Complete** (D-085) — see [../PHASE_6_PROMPT_4_REVIEW.md](../PHASE_6_PROMPT_4_REVIEW.md) |
 | 5 | Exam Intelligence Integration + Calibration | Not started |
 
 Overtraining (deferred from Phase 5) is NOT part of Phase 6 Prompt 1 and is still not implemented.
@@ -42,3 +42,9 @@ Overtraining (deferred from Phase 5) is NOT part of Phase 6 Prompt 1 and is stil
 **Built.** `@ipmat/content-authoring`: authored/AI-proposed question INSTANCES (DNA + content as separate parts), 11 layered gates with machine-readable reasons, the authoring/publication lifecycle on the existing `ValidationState` (`recordHumanReview` is the first code path to `human_reviewed`), stable identity (id + content fingerprint; exact duplicate = same question; near-duplicate = human decision, never merged), deterministic answer verification (an AI answer is never trusted on its own word), and the Question Universe (pattern coverage reported separately from question count). Migration 0014 + `PrismaQuestionAuthoringRepository`.
 
 **Real data status.** No real authored question corpus and no historical data were added; every test question is a labelled fixture; nothing was seeded. **Not built:** a generation engine, an admin CMS or authoring route, a review UI, a coverage dashboard, prediction. Details and limits: D-084 and [../PHASE_6_PROMPT_3_REVIEW.md](../PHASE_6_PROMPT_3_REVIEW.md).
+
+## Prompt 4 — Content Intelligence Pipeline + Knowledge Graph (complete)
+
+**Built.** `@ipmat/content-intelligence`: authorized-source registration behind a rights gate (also DB CHECKs), idempotent versioned ingestion with a resumable failure-tolerant lifecycle, deterministic extraction and chunking (text formats), candidate concepts/relationships/questions with VERIFIED evidence, the typed derived knowledge graph with `whyRelated` provenance, provider and embedding abstractions, and a retrieval layer with authorization (lexical baseline + vector behind an interface). Extracted questions enter the existing authoring lifecycle as drafts only. Migration 0015 + `PrismaContentIntelligenceRepository`.
+
+**Real data status.** No real source corpus exists; every test document is a synthetic labelled fixture; nothing was seeded. **Not built:** a model-backed provider, PDF/OCR, a vector database, a route/UI/CMS, a student tutor, relation promotion into the canonical graph, prediction. Details and limits: D-085 and [../PHASE_6_PROMPT_4_REVIEW.md](../PHASE_6_PROMPT_4_REVIEW.md).

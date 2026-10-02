@@ -209,21 +209,34 @@ function identityGate(q: AuthoredQuestion, ctx: GateContext): GateResult {
   return result("identity", []);
 }
 
-function provenanceGate(q: AuthoredQuestion): GateResult {
-  const { source } = q;
+/**
+ * The rights rule for ANY source of content (a question's provenance, or a
+ * registered document source - D-085): original needs no external reference;
+ * anything else needs a traceable `sourceRef`; anything except public domain
+ * also needs a `licenseRef`; and a reference naming a known
+ * unauthorized-distribution channel is refused. Returns reasons; empty = no
+ * rights problem found (NOT a determination that the source is authorized).
+ */
+export function evaluateSourceRights(source: AuthoredQuestion["source"]): GateReason[] {
   const reasons: GateReason[] = [];
-  if (!SOURCE_TYPES[source.sourceType]) {
-    reasons.push(reason("unknown_source_type", "source.sourceType", `unknown source type "${String(source.sourceType)}"`));
-    return result("provenance", reasons);
+  if (!source || !SOURCE_TYPES[source.sourceType]) {
+    reasons.push(reason("unknown_source_type", "source.sourceType", `unknown source type "${String(source?.sourceType)}"`));
+    return reasons;
   }
   if (source.sourceType !== "original") {
     if (blank(source.sourceRef)) reasons.push(reason("source_ref_required", "source.sourceRef", "a non-original source must be traceable: a source reference is required"));
     if (source.sourceType !== "public_domain" && blank(source.licenseRef)) reasons.push(reason("license_ref_required", "source.licenseRef", "a rights basis (license reference) is required unless the source is public domain - free-to-access is not free-to-copy"));
   }
-  if (q.origin === "ai_generated" && blank(source.sourceRef)) reasons.push(reason("ai_generation_reference_required", "source.sourceRef", "AI-generated content must reference its generation record"));
   for (const [field, value] of [["source.sourceRef", source.sourceRef], ["source.licenseRef", source.licenseRef], ["source.attributedTo", source.attributedTo]] as const) {
     if (typeof value === "string" && UNAUTHORIZED_SOURCE_MARKER.test(value)) reasons.push(reason("unauthorized_source_marker", field, "the reference names a known unauthorized-distribution channel; such content must not be ingested"));
   }
+  return reasons;
+}
+
+function provenanceGate(q: AuthoredQuestion): GateResult {
+  const reasons = evaluateSourceRights(q.source);
+  if (reasons.some((r) => r.code === "unknown_source_type")) return result("provenance", reasons);
+  if (q.origin === "ai_generated" && blank(q.source.sourceRef)) reasons.push(reason("ai_generation_reference_required", "source.sourceRef", "AI-generated content must reference its generation record"));
   return result("provenance", reasons);
 }
 
