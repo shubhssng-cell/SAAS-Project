@@ -77,7 +77,7 @@ describe("Trap Lab -- the Training Hub and applicability (the provider's rule, n
       note: "Needs recorded incorrect answers on questions that share a trap pattern first.",
       trains: "Practice a recurring trap pattern: the same kind of trap, in different question formats."
     });
-    expect(systems.find((s) => s.systemId === "revision")!.availability).toBe("not_built");
+    expect(systems.find((s) => s.systemId === "overtraining")!.availability).toBe("not_built");
   });
 
   it("insufficient evidence: no incorrect answer on a trap-tagged question (correct ones, or wrong ones on untagged questions, never count)", async () => {

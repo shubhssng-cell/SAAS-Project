@@ -94,6 +94,7 @@ export async function composeTrainingOrchestrationInput(
     attemptRecords,
     candidates,
     practiceBlocks,
+    now,
     prepPhase: null
   };
 }

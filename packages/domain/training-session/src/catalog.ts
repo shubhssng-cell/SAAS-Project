@@ -152,7 +152,21 @@ export const TRAINING_SYSTEM_CATALOG: readonly TrainingSystemDefinition[] = [
     noLongerApplicableNote: "Your recorded training sessions no longer call for this, so there is nothing more to add right now. You can end the session.",
     focusSentence: "This session is a sustained, timed run of questions."
   },
-  { systemId: "revision", dimension: "revision", label: "Revision", trains: "Revisiting concepts after time has passed.", providerId: null },
+  {
+    systemId: "revision",
+    dimension: "revision",
+    label: "Revision",
+    sessionTitle: "Revision",
+    trains: "Revisit a concept you have practiced before but not attempted for a while.",
+    providerId: "revision-training",
+    // No `stages`: the dormancy rule is an applicability condition only, never a progression ladder (D-081).
+    // The target is the longest-dormant concept; revising it makes it recent, so the target moves on after each attempt.
+    conceptNotInObjective: true,
+    notApplicableNote: "Needs a concept you have practiced several times before and have not attempted for a while.",
+    noEligibleNote: "No published question is available for that concept right now.",
+    noLongerApplicableNote: "That concept has now been revisited, and no other concept is waiting for a revisit right now. You can end the session.",
+    focusSentence: "This session is revisiting a concept you have not practiced for a while."
+  },
   { systemId: "overtraining", dimension: "overtraining", label: "Overtraining", trains: "Keeping repeated practice from over-narrowing.", providerId: null }
 ];
 

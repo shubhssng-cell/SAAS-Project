@@ -108,6 +108,8 @@ export interface TrainingOrchestrationInput {
    * disclosure).
    */
   practiceBlocks?: TrainingPracticeBlockContext[];
+  /** Optional evaluation time (ISO-8601), forwarded to `TrainingSystemContext.now` (D-081). Only Revision reads it. */
+  now?: string;
 }
 
 /**

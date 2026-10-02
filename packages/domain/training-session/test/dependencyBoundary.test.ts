@@ -30,7 +30,8 @@ describe("training-session -- dependency boundary and no duplicate engines", () 
       "@ipmat/speed-lab",
       "@ipmat/trap-lab",
       "@ipmat/novelty-training",
-      "@ipmat/pressure-training"
+      "@ipmat/pressure-training",
+      "@ipmat/revision-training"
     ];
     const importSpecifierPattern = /(?:from\s+|require\()["']([^"']+)["']/g;
     const srcDir = join(packageRoot, "src");

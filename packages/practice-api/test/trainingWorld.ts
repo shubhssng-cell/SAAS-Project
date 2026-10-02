@@ -91,6 +91,8 @@ export class TrainingWorld {
     resolveStudentId: async (enrollmentId) => this.enrollments.find((e) => e.id === enrollmentId)?.studentId ?? null
   });
   readonly attempts = new InMemoryAttemptRepository({ practiceBlocks: this.trainingSessions.blockOwnership, enforceSingleOpenAttempt: true });
+  /** The recommendation clock (seconds after the base instant). Time-aware systems (Revision, D-081) read it; the default is unchanged. */
+  nowSeconds = 100_000;
   readonly historyIds: string[] = [];
   readonly novelIds: string[] = [];
   readonly pool: WorldQuestion[] = [];
@@ -153,7 +155,7 @@ export class TrainingWorld {
       conceptReader: new InMemoryConceptReader(new Map([[EXAM, concepts]])),
       practiceSessionReader: this.trainingSessions.practiceSessions,
       practiceBlockReader: this.trainingSessions.practiceBlocks,
-      now: () => t(100_000)
+      now: () => t(this.nowSeconds)
     });
     const practice = new PracticeApiService({
       trainingRecommendationService: recommendation,

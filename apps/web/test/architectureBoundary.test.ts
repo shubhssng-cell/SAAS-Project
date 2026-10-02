@@ -37,6 +37,7 @@ const BANNED_IMPORT_SPECIFIERS = [
   "@ipmat/trap-lab",
   "@ipmat/novelty-training",
   "@ipmat/pressure-training",
+  "@ipmat/revision-training",
   "@ipmat/practice-loop",
   "@ipmat/training-recommendation",
   "@ipmat/db",

@@ -24,7 +24,7 @@ describe("runTrainingSystem -- the extension point", () => {
   });
 
   it("a system with no engine reports not_built and never runs anything", () => {
-    for (const id of ["revision", "overtraining"]) {
+    for (const id of ["overtraining"]) {
       const run = runTrainingSystem(id, context());
       expect(run.status).toBe("not_built");
       expect(toAvailability(run)).toBe("not_built");

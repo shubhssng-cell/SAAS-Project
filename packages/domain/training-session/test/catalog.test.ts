@@ -25,13 +25,14 @@ describe("training system catalog -- registration and lookup", () => {
     for (const definition of TRAINING_SYSTEM_CATALOG) {
       if (definition.providerId !== null) {
         expect(registry.has(definition.providerId), definition.systemId).toBe(true);
-        expect(definition.providerId).toBe(definition.systemId);
+        if (definition.systemId !== "revision") expect(definition.providerId).toBe(definition.systemId);
+        else expect(definition.providerId).toBe("revision-training"); // Unit 7: the catalog id is the student-facing "revision", the provider id is "revision-training"
       }
     }
   });
 
-  it("Revision and Overtraining are honestly marked as having no engine", () => {
-    expect(findTrainingSystem("revision")?.providerId).toBeNull();
+  it("Overtraining is honestly marked as having no engine (Revision has one since Unit 7)", () => {
+    expect(findTrainingSystem("revision")?.providerId).toBe("revision-training");
     expect(findTrainingSystem("overtraining")?.providerId).toBeNull();
   });
 });
@@ -57,5 +58,23 @@ describe("Pressure Training catalog entry (Phase 5 Unit 6)", () => {
     const copy = [pressure.trains, pressure.sessionTitle, pressure.notApplicableNote, pressure.noEligibleNote, pressure.noLongerApplicableNote, pressure.focusSentence, ...Object.values(pressure.notApplicableByReason ?? {})].join(" ");
     expect(copy).not.toMatch(/insufficient_evidence|sufficient_blocks|within_block|reduced_recovery|budget_consumption|\d+%|threshold/i);
     expect(copy).not.toMatch(/stress|anxi|fatigue|panic|nervous|confidence|motivat|struggle|weak|lack|poor|resilien|crack/i);
+  });
+});
+
+describe("Revision catalog entry (Phase 5 Unit 7)", () => {
+  const revision = findTrainingSystem("revision")!;
+
+  it("is wired to the revision-training provider, with no stages, no completion restriction and no concept in its objective", () => {
+    expect(revision.providerId).toBe("revision-training");
+    expect(revision.dimension).toBe("revision");
+    expect(revision.stages).toBeUndefined();
+    expect(revision.completionKinds).toBeUndefined();
+    expect(revision.conceptNotInObjective).toBe(true);
+  });
+
+  it("its authored copy shows no day count, threshold, reason code, forgetting claim or trait claim", () => {
+    const copy = [revision.trains, revision.sessionTitle, revision.notApplicableNote, revision.noEligibleNote, revision.noLongerApplicableNote, revision.focusSentence].join(" ");
+    expect(copy).not.toMatch(/\d|insufficient_evidence|threshold|dormant|dormancy/i);
+    expect(copy).not.toMatch(/forgot|forget|memory|decay|confiden|motivat|emotion|\bability\b|weak|lazy|careless|struggle|stress|anxi/i);
   });
 });

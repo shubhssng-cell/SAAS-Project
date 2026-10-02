@@ -82,6 +82,12 @@ export interface TrainingSystemContext {
    * concern.
    */
   practiceBlocks?: TrainingPracticeBlockContext[];
+  /**
+   * Optional evaluation time (ISO-8601), supplied by whoever assembles the context (docs/DECISIONS.md D-081) -- a provider NEVER reads a
+   * clock itself, so the same context always yields the same outcome. Only time-aware providers (Revision) read it; absent or unparseable
+   * means "no evaluation time", and such a provider fails closed (not applicable). Additive and optional, exactly like `practiceBlocks`.
+   */
+  now?: string;
 }
 
 /**

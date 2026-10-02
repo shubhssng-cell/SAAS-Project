@@ -14,7 +14,7 @@ Numbering is **Phase-5-relative** (Unit 1 … Unit 7). It has no relation to the
 | Unit 2 | Calculation Gym (student-facing) | **COMPLETE** (below; review: [../PHASE_5_UNIT_2_REVIEW.md](../PHASE_5_UNIT_2_REVIEW.md)) |
 | Unit 3 | Speed Lab (student-facing) | **COMPLETE** (below; review: [../PHASE_5_UNIT_3_REVIEW.md](../PHASE_5_UNIT_3_REVIEW.md)) |
 | Unit 4 | Trap + Novelty Training | **Trap Lab COMPLETE** (below; review: [../PHASE_5_UNIT_4_REVIEW.md](../PHASE_5_UNIT_4_REVIEW.md)); **Novelty Training COMPLETE** (delivered as Unit 5 of the executed sequence; review: [../PHASE_5_UNIT_5_REVIEW.md](../PHASE_5_UNIT_5_REVIEW.md)); **Pressure Training COMPLETE** (Unit 6; review: [../PHASE_5_UNIT_6_REVIEW.md](../PHASE_5_UNIT_6_REVIEW.md)) |
-| Unit 5 | Revision Engine | not started |
+| Unit 5 | Revision Engine | **COMPLETE** (delivered as Unit 7 of the executed sequence; review: [../PHASE_5_UNIT_7_REVIEW.md](../PHASE_5_UNIT_7_REVIEW.md)) |
 | Unit 6 | Pressure + Overtraining | not started |
 | Unit 7 | Training-system integration + hardening | not started |
 
@@ -219,3 +219,22 @@ Delivered in Unit 2 below (it was the planned scope here: Calculation Gym, stude
 **Browser** (real web on Vite + real API in Prisma mode + a throwaway Postgres database, headless Edge over raw CDP): **34/34 checks.** Both not-applicable states with readable explanations; the one startable card with timed-only session lengths; the session with the safe objective, no stage, a live countdown that moves, resume after reload and after an API restart; nine answers through the whole concept pool in provider order; the honest end-of-pool state; completion; time-is-up handling by the server's clock; another student refused; API-down error, loading and recovery states; no leakage; no unexpected console errors; real seeded set restored.
 
 **Not claimed.** That timed runs improve exam-condition performance; pressure mastery; calibration of the provisional thresholds; real-student validation; live-model quality (none is involved).
+
+## Unit 7 — Revision
+
+> **Unit 7 adds a NEW provider, `@ipmat/revision-training`, built from the owner-supplied specification (no Revision design existed before), and makes Revision the sixth student-facing training system. It has NO stages and stores NO state.** Detail, limitations and the definition: [../PHASE_5_UNIT_7_REVIEW.md](../PHASE_5_UNIT_7_REVIEW.md); decision: D-081.
+
+- **Definition:** concept-level re-exposure — a concept is eligible with ≥ 3 graded attempts AND a most recent graded attempt ≥ 14 days old (the 14 days is a PROVISIONAL, deterministic product constant, not a decay model); target = the longest-dormant eligible concept (name breaks ties); questions: published + valid + exact concept, unseen taxonomy cell, least exposure, question id.
+- **Time is supplied, never read:** one additive optional `now` on the training context; a missing/unparseable `now` fails closed.
+- **Reused unchanged:** the whole session framework, attempt lifecycle, composition, Hub / session / result screens. No web or API source changed. Registered in the orchestration registry but not in the adaptive priority order.
+- **Student-facing:** a "Revision" card with honest states; one question per dormant concept, then an authored "nothing more is waiting" state; no stage, no day count, no score.
+
+### Unit 7 validation record
+
+**Tests.** After Unit 6: 2532. After Unit 7: **2610 tests -- 2610/2610 with Postgres (232 files)** and **2492 passed + 118 skipped** without Postgres. Typecheck, lint, `npm run build` and `git diff --check` clean. New coverage: provider tests (applicability, 14-day boundary, targeting, tie-break, selection order, candidate-pool invariance, history, poisoning, architecture, epistemic language, 200-history / 100-pool seeded property tests), 22 session-level tests over the real provider, catalog tests, 8 real-Postgres tests. Regression suites for Calculation, Speed, Trap, Novelty, Pressure and the generic training / orchestration / practice-api / recommendation packages are all green (counts in the Unit 7 final report).
+
+**Real PostgreSQL** (`postgres:16` on `127.0.0.1:55432`; the unrelated Postgres on 5432 untouched). The suite builds its OWN throwaway database (migrate + seed), publishes a labelled synthetic pool (`[TEST DATA phase-5-unit-7] ...`, 12 questions across two seeded concepts and seeded cells; seeded real questions withheld inside that database only), backdates history in the table, and drops the database afterwards. **8/8**: pool provenance; each not-applicable state (none / recent / two old / old skips); the 14-day boundary on persisted times; the full two-instance lifecycle (longest-dormant first, then the next concept, then nothing; ordinary attempts; ownership 403s; no leakage); unpublished exclusion; surface variation without a concept switch; 12-way start / 10-way next concurrency; ordinary evidence, no autopsy/repair/mastery rows and no revision column anywhere.
+
+**Browser** (real web on Vite + real API in Prisma mode + a throwaway Postgres database, headless Edge over raw CDP): **31/31 checks**, including phone-width layout, API restart, the API-down error, loading and recovery states, no leakage and a restored real seed set.
+
+**Not claimed.** That revisiting improves retention or performance; that 14 days is the right interval; `no_eligible_question` end to end (provider-level only); real-student validation; live-model quality (none is involved).

@@ -42,6 +42,7 @@ describe("training-recommendation -- dependency boundary", () => {
       "@ipmat/trap-lab",
       "@ipmat/novelty-training",
       "@ipmat/pressure-training",
+      "@ipmat/revision-training",
       "@ipmat/prep-phase",
       "@ipmat/practice-loop",
       "@ipmat/ai",
@@ -77,7 +78,8 @@ describe("training-recommendation -- dependency boundary", () => {
       "@ipmat/speed-lab",
       "@ipmat/trap-lab",
       "@ipmat/novelty-training",
-      "@ipmat/pressure-training"
+      "@ipmat/pressure-training",
+      "@ipmat/revision-training"
     ]) {
       expect(deps).not.toContain(pkg);
     }

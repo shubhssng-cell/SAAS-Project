@@ -17,6 +17,7 @@
     "@ipmat/novelty-training": "*",
     "@ipmat/prep-phase": "*",
     "@ipmat/pressure-training": "*",
+    "@ipmat/revision-training": "*",
     "@ipmat/question-engine": "*",
     "@ipmat/repair-selection": "*",
     "@ipmat/speed-lab": "*",

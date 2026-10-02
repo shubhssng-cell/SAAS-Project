@@ -28,12 +28,13 @@ async function startedNovelty(config: unknown = COMPLETE_5, novelCount = 4) {
 }
 
 describe("training hub -- registration and honest availability", () => {
-  it("lists all seven dimensions in a fixed order; with no evidence nothing is startable and Revision/Overtraining say not built", async () => {
+  it("lists all seven dimensions in a fixed order; with no evidence nothing is startable, Revision is not applicable and Overtraining says not built", async () => {
     const { training } = new TrainingWorld().boot();
     const hub = await training.getHub(CLAIM, { now: t(0) });
     expect(hub.systems.map((s) => s.label)).toEqual(["Calculation", "Speed", "Traps", "Novelty", "Pressure", "Revision", "Overtraining"]);
     expect(hub.systems.filter((s) => s.availability === "available")).toEqual([]);
-    expect(hub.systems.find((s) => s.systemId === "revision")?.availability).toBe("not_built");
+    expect(hub.systems.find((s) => s.systemId === "revision")?.availability).toBe("not_applicable"); // Unit 7: Revision has an engine now
+    expect(hub.systems.find((s) => s.systemId === "overtraining")?.availability).toBe("not_built");
     expect(hub.systems.find((s) => s.systemId === "novelty-training")?.availability).toBe("not_applicable");
     expect(hub.activeSession).toBeNull();
   });
@@ -66,7 +67,7 @@ describe("starting a session", () => {
     const world = new TrainingWorld();
     const { practice, training } = world.boot();
     expect((await rejection(training.startSession(CLAIM, { systemId: "nope", config: COMPLETE_5 }))).code).toBe("not_found");
-    expect((await rejection(training.startSession(CLAIM, { systemId: "revision", config: COMPLETE_5 }))).code).toBe("invalid_state"); // no engine
+    expect((await rejection(training.startSession(CLAIM, { systemId: "overtraining", config: COMPLETE_5 }))).code).toBe("invalid_state"); // no engine
     expect((await rejection(training.startSession(CLAIM, { systemId: "novelty-training", config: COMPLETE_5 }))).code).toBe("invalid_state"); // no evidence yet
     await world.seedHistory(practice);
     expect((await rejection(training.startSession(CLAIM, { systemId: "speed-lab", config: COMPLETE_5 }))).code).toBe("invalid_state"); // different system, not applicable

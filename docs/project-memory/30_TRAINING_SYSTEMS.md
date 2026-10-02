@@ -59,6 +59,7 @@ trap-lab > calculation-gym > speed-lab > pressure-training > novelty-training
 | Speed Lab | Correct-but-slow evidence, load-independent | [32_SPEED_LAB.md](32_SPEED_LAB.md) |
 | Pressure Training | Block-level sustained-sequence degradation | [35_PRESSURE_TRAINING.md](35_PRESSURE_TRAINING.md) |
 | Novelty Training | EXPOSURE-first (not weakness-first) rotation | [34_NOVELTY_TRAINING.md](34_NOVELTY_TRAINING.md) |
+| Revision | Concept-level re-exposure after a provisional 14-day dormancy; student-chosen, not in the adaptive chain | [38_REVISION_TRAINING.md](38_REVISION_TRAINING.md) |
 
 ## No composite score, no confidence field — enforced at compile time
 

@@ -30,6 +30,7 @@ describe("practice-api -- dependency boundary", () => {
       "@ipmat/trap-lab",
       "@ipmat/novelty-training",
       "@ipmat/pressure-training",
+      "@ipmat/revision-training",
       "@ipmat/mastery",
       "@ipmat/web",
       "@ipmat/ai",

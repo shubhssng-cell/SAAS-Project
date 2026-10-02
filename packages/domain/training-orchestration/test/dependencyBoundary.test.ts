@@ -34,6 +34,7 @@ describe("training-orchestration -- dependency/domain boundary (D-062)", () => {
         "@ipmat/pressure-training",
         "@ipmat/question-engine",
         "@ipmat/repair-selection",
+        "@ipmat/revision-training",
         "@ipmat/speed-lab",
         "@ipmat/trap-lab",
         "@ipmat/training-systems"

@@ -1,6 +1,7 @@
 import { CalculationGymProvider } from "@ipmat/calculation-gym";
 import { NoveltyTrainingProvider } from "@ipmat/novelty-training";
 import { PressureTrainingProvider } from "@ipmat/pressure-training";
+import { RevisionTrainingProvider } from "@ipmat/revision-training";
 import { SpeedLabProvider } from "@ipmat/speed-lab";
 import { TrapLabProvider } from "@ipmat/trap-lab";
 import { runTrainingSystemProvider } from "@ipmat/training-systems";
@@ -41,7 +42,11 @@ function buildProviderRegistry(): Map<string, TrainingSystemProvider> {
     new CalculationGymProvider(),
     new SpeedLabProvider(),
     new PressureTrainingProvider(),
-    new NoveltyTrainingProvider()
+    new NoveltyTrainingProvider(),
+    // Registered so the student-chosen Training Session path can route "revision" by provider id, but DELIBERATELY NOT in
+    // TRAINING_SYSTEM_PROVIDER_PRIORITY_ORDER: Revision is a deliberate, student-chosen re-exposure (D-081), never part of the
+    // adaptive "what next?" chain, so adaptive orchestration behaves exactly as before.
+    new RevisionTrainingProvider()
   ];
   return new Map(providers.map((provider) => [provider.providerId, provider]));
 }
@@ -73,7 +78,8 @@ export function toTrainingSystemContext(input: TrainingOrchestrationInput): Trai
     errorTaxonomy: input.errorTaxonomy,
     prepPhase: input.prepPhase,
     candidates: input.candidates,
-    practiceBlocks: input.practiceBlocks
+    practiceBlocks: input.practiceBlocks,
+    now: input.now
   };
 }
 

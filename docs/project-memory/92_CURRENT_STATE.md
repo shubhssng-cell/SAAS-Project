@@ -85,7 +85,7 @@ A Vite + React SPA (port 5184), fixture-backed, calling **real, unmodified** dom
 - A production UI (**false** — `apps/web` is a first vertical slice, fixture-backed, uncommitted).
 - Payments (**false** — not built, not designed, explicitly out of scope).
 - Full mocks/Mock Simulation (**false** — undesigned).
-- Revision (**false** — undesigned).
+- Revision (**built in Phase 5 Unit 7, D-081** — `@ipmat/revision-training`; the 14-day dormancy is PROVISIONAL and uncalibrated; no real student has used it).
 - Public launch (**false** — the go/no-go gate has not been met; see [03_MVP_SCOPE.md](03_MVP_SCOPE.md)).
 
 **Verified true, as of this checkpoint:**
