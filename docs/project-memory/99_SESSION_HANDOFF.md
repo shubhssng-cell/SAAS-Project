@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-02 (Product Phase 6 Prompt 5)
+
+Phase 6 Prompt 5 (Exam Intelligence Integration + Calibration, D-086) is done and Product Phase 6 is COMPLETE. **Phase 7 is NOT started** and has no prompt yet. Read `docs/PHASE_6_PROMPT_5_REVIEW.md` and `43_EXAM_INTELLIGENCE.md` first.
+
 ## Update — 2026-10-02 (Product Phase 6 Prompt 4)
 
 Phase 6 Prompt 4 (Content Intelligence Pipeline + Knowledge Graph, D-085) is done. **Next is Phase 6 Prompt 5 (Exam Intelligence Integration + Calibration) - NOT started; wait for the owner prompt.** Carry forward: only AUTHORIZED sources enter the pipeline (rights gate + DB CHECKs) and there is NO real source corpus (synthetic fixtures only); everything extracted is a candidate with verified evidence until a named reviewer decides it; accepting never edits the Concept Universe or publishes; structured intelligence is authoritative and embeddings are aids; no model-backed provider or vector DB exists; staff principals are a domain type with no authentication yet; migration 0015 must be applied (`prisma migrate deploy`) on any real database.

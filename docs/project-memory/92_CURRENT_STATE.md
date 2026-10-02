@@ -4,6 +4,7 @@
 
 ## Checkpoint update — 2026-10-02 (Product Phase 6 Prompt 4)
 
+- **Exam Intelligence integration + calibration implemented (D-086), Phase 6 COMPLETE:** pure package `@ipmat/exam-intelligence` (coverage, queries, calibration status, selection bridge) + read-only `PrismaExamIntelligenceSource`/`PrismaOutcomeSource`; no migration, no route. No historical data or calibrated difficulty exists; nothing is calibrated. See `43_EXAM_INTELLIGENCE.md`.
 - **Content Intelligence pipeline + knowledge graph + retrieval abstraction implemented (D-085):** new pure domain package `@ipmat/content-intelligence`, migration 0015 (five new internal tables with rights/shape CHECKs), `PrismaContentIntelligenceRepository`, and `evaluateSourceRights` exported from `@ipmat/content-authoring`. **No route, no UI, no CMS, no tutor, no model-backed provider, no real corpus (synthetic fixtures only); no student-facing change.** Phase 6 Prompt 5 has NOT started. See [../PHASE_6_PROMPT_4_REVIEW.md](../PHASE_6_PROMPT_4_REVIEW.md).
 
 ## Checkpoint update — 2026-10-02 (Product Phase 6 Prompt 3)

@@ -37,6 +37,7 @@ export * from "./prismaExamPackRepository.js";
 export * from "./prismaHistoricalRecordRepository.js";
 export * from "./prismaQuestionAuthoringRepository.js";
 export * from "./prismaContentIntelligenceRepository.js";
+export * from "./prismaExamIntelligenceSource.js";
 export * from "./inMemoryExamReader.js";
 export * from "./prismaPrepPhaseTemplateReader.js";
 export * from "./inMemoryPrepPhaseTemplateReader.js";

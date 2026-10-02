@@ -24,6 +24,7 @@
     "@ipmat/concept-graph": "*",
     "@ipmat/content-authoring": "*",
     "@ipmat/content-intelligence": "*",
+    "@ipmat/exam-intelligence": "*",
     "@ipmat/exam-pack": "*",
     "@ipmat/examiner-intelligence": "*",
     "@ipmat/examiner-lens": "*",
