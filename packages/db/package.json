@@ -22,6 +22,7 @@
     "@ipmat/attempt": "*",
     "@ipmat/autopsy": "*",
     "@ipmat/concept-graph": "*",
+    "@ipmat/content-authoring": "*",
     "@ipmat/exam-pack": "*",
     "@ipmat/examiner-intelligence": "*",
     "@ipmat/examiner-lens": "*",

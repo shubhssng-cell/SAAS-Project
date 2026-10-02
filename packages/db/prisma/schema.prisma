@@ -400,6 +400,12 @@ enum ExamRelevance {
   stretch
 }
 
+// Who produced a question's content (docs/DECISIONS.md D-084). NULL on a row means "pre-dates origin tracking".
+enum QuestionAuthoringOrigin {
+  human_authored
+  ai_generated
+}
+
 model Question {
   id                     String          @id @default(uuid())
   examId                 String          @map("exam_id")
@@ -425,6 +431,17 @@ model Question {
   groundTruthDerivation  Json            @map("ground_truth_derivation")
   validationState        ValidationState @default(draft) @map("validation_state")
   provenanceId           String?         @map("provenance_id")
+  // Content authoring (Product Phase 6 Prompt 3, D-084, migration 0014). All nullable: rows that pre-date the
+  // authoring layer (e.g. generation-pipeline imports) carry NULL, which the domain reads as origin "unknown" -
+  // never guessed to be human-authored. Reviewer data is INTERNAL and is never selected by a student reader.
+  authoringOrigin                 QuestionAuthoringOrigin? @map("authoring_origin")
+  contentFingerprint              String?                  @map("content_fingerprint")
+  reviewedBy                      String?                  @map("reviewed_by")
+  reviewedAt                      DateTime?                @map("reviewed_at")
+  reviewNotes                     String?                  @map("review_notes")
+  answerVerifiedByReviewer        Boolean?                 @map("answer_verified_by_reviewer")
+  reviewedAsDistinct              Boolean?                 @map("reviewed_as_distinct")
+  independentReverificationAnswer String?                  @map("independent_reverification_answer")
   createdAt              DateTime        @default(now()) @map("created_at")
 
   exam                Exam                @relation(fields: [examId], references: [id])

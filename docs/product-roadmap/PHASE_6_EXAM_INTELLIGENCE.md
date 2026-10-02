@@ -1,6 +1,6 @@
 # Product Phase 6 — Exam Intelligence + Content Depth
 
-> **STATUS: IN PROGRESS — Prompts 1 and 2 of 5 complete (Exam Pack + Concept Universe; Historical Examiner Intelligence + Question DNA). Prompts 3–5 have NOT started.**
+> **STATUS: IN PROGRESS — Prompts 1, 2 and 3 of 5 complete (Exam Pack + Concept Universe; Historical Examiner Intelligence + Question DNA; Question Universe + Content Authoring/Validation). Prompts 4–5 have NOT started.**
 
 Phase 6 is deliberately consolidated into five large implementation prompts. Each is built, verified and committed on its own; none begins until the previous is closed.
 
@@ -8,7 +8,7 @@ Phase 6 is deliberately consolidated into five large implementation prompts. Eac
 |---|---|---|
 | 1 | Exam Pack + Concept Universe | **Complete** (D-082) — see [../PHASE_6_PROMPT_1_REVIEW.md](../PHASE_6_PROMPT_1_REVIEW.md) |
 | 2 | Historical Examiner Intelligence + Question DNA | **Complete** (D-083) — see [../PHASE_6_PROMPT_2_REVIEW.md](../PHASE_6_PROMPT_2_REVIEW.md) |
-| 3 | Question Universe + Content Authoring/Validation | Not started |
+| 3 | Question Universe + Content Authoring/Validation | **Complete** (D-084) — see [../PHASE_6_PROMPT_3_REVIEW.md](../PHASE_6_PROMPT_3_REVIEW.md) |
 | 4 | Content Intelligence Pipeline + Knowledge Graph | Not started |
 | 5 | Exam Intelligence Integration + Calibration | Not started |
 
@@ -36,3 +36,9 @@ Overtraining (deferred from Phase 5) is NOT part of Phase 6 Prompt 1 and is stil
 **Built.** `@ipmat/examiner-intelligence` (exam-scoped classification records of historical questions with source/rights, `real_source` vs `fixture`, raw -> candidate -> reviewed annotation states, pack-aware Question DNA validation on the EXISTING vocabulary, deterministic observed-testing queries), migration 0013 (`historical_question_records`, additive, CHECK-enforced invariants) and `PrismaHistoricalRecordRepository`.
 
 **Real data status.** None. The repository holds no authorized historical IPMAT material, so nothing was seeded and nothing was invented; every test record is a labelled fixture. **Not built:** coverage engine, import pipeline, admin UI/route, prediction of any kind, Question Universe, generation. Details and limits: D-083 and [../PHASE_6_PROMPT_2_REVIEW.md](../PHASE_6_PROMPT_2_REVIEW.md).
+
+## Prompt 3 — Question Universe + Content Authoring + Validation (complete)
+
+**Built.** `@ipmat/content-authoring`: authored/AI-proposed question INSTANCES (DNA + content as separate parts), 11 layered gates with machine-readable reasons, the authoring/publication lifecycle on the existing `ValidationState` (`recordHumanReview` is the first code path to `human_reviewed`), stable identity (id + content fingerprint; exact duplicate = same question; near-duplicate = human decision, never merged), deterministic answer verification (an AI answer is never trusted on its own word), and the Question Universe (pattern coverage reported separately from question count). Migration 0014 + `PrismaQuestionAuthoringRepository`.
+
+**Real data status.** No real authored question corpus and no historical data were added; every test question is a labelled fixture; nothing was seeded. **Not built:** a generation engine, an admin CMS or authoring route, a review UI, a coverage dashboard, prediction. Details and limits: D-084 and [../PHASE_6_PROMPT_3_REVIEW.md](../PHASE_6_PROMPT_3_REVIEW.md).
