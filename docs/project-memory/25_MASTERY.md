@@ -43,3 +43,7 @@ Same rule as everywhere else in this codebase (D-005) — mastery measures obser
 `MasteryStateRepository` exists, tested, and has **never been called by any real flow** — see [21_STUDENT_MEMORY.md](21_STUDENT_MEMORY.md). Mastery is meant to always be computed fresh from real attempt history at the point of use, not read back as a cache.
 
 See also: [26_ADAPTIVE_SELECTION.md](26_ADAPTIVE_SELECTION.md) for how mastery measures feed the global "what's next" ranking, [37_TRAINING_RECOMMENDATION.md](37_TRAINING_RECOMMENDATION.md) §9 for the exact assembly pipeline a future composition layer will use.
+
+## Phase 7 Unit 1 - the evidence view (D-087)
+
+`buildMasteryEvidenceView()` (`@ipmat/mastery`) and `readMasteryEvidence()` (`@ipmat/training-recommendation`) add an EVIDENCE-ONLY representation beside the unchanged five-measure computation: attempt counts alongside distinct-question counts, skips separate from graded attempts, evidence by pattern family / novelty level / testing mode, paired observed/expected time, per-question exposure and an audit list of contributing attempt ids. It makes no mastery judgment (no label, threshold, score, unlock, recency, prerequisite, repair, revision or speed rule), is derived from persisted attempts every call, and is not stored or exposed by any route. Full detail: `docs/PHASE_7_UNIT_1_REVIEW.md`.

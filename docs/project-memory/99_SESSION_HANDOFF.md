@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-03 (Product Phase 7 Unit 1)
+
+Phase 7 Unit 1 was built as the approved EVIDENCE-ONLY mastery foundation (D-087): no mastery verdict exists because the repository defines none. **Unit 2 is NOT started.** Read `docs/PHASE_7_UNIT_1_REVIEW.md` and `docs/product-roadmap/PHASE_7_MASTERY_REVISION_EXAM_SIMULATION.md` first.
+
 ## Update — 2026-10-02 (Product Phase 6 Prompt 5)
 
 Phase 6 Prompt 5 (Exam Intelligence Integration + Calibration, D-086) is done and Product Phase 6 is COMPLETE. **Phase 7 is NOT started** and has no prompt yet. Read `docs/PHASE_6_PROMPT_5_REVIEW.md` and `43_EXAM_INTELLIGENCE.md` first.

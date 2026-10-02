@@ -1116,3 +1116,19 @@ The design went through two review passes before implementation. The first desig
 **Known limitations.** No real historical data or calibrated difficulty exists. `CalibrationRecord`s have no persistence or workflow. Fixture detection on DB rows is by a `fixture:` provenance ref or `[TEST DATA` body marker. Duplicate detection is exact-content, not semantic (D-019).
 
 **Not claimed.** That any annotation is calibrated; that coverage means readiness or likelihood of appearing; any prediction; population performance; that mapped means complete.
+
+## D-087 — Product Phase 7 Unit 1: mastery EVIDENCE foundation (evidence-only; no verdict, no persistence, no route)
+
+**Context.** Unit 1 asked for a Mastery Model. The repository defines no mastery verdict: no meaning of "mastered", threshold, category, unlock rule, recency, prerequisite, repair, revision or speed-to-mastery policy (D-040-D-043 define evidence-only component measures and explicitly decline composite scores and decay). The brief forbids inventing those semantics, so the unit stopped and asked; the owner approved the evidence-only default below.
+
+**Decision.** Add a pure, derived evidence view, `buildMasteryEvidenceView()` in `@ipmat/mastery`, and a read-only composer over persisted attempts, `composeMasteryEvidenceView()` / `TrainingRecommendationService.readMasteryEvidence()`. Per concept it reports attempt counts ALONGSIDE distinct-question counts (never substituted), skipped/abandoned/ungraded attempts separate from graded ones, evidence indexed by pattern family, novelty level and testing mode, observed/expected time paired with correctness (no ratio or label), per-question exposure, and an auditable list of contributing attempt ids. It carries `status: "evidence_only"`.
+
+**Rules kept.** No label, category, threshold, unlock rule or hidden/numeric score; no confidence/ability/motivation inference; no prediction; no prerequisite propagation; no recency/decay; no repair/diagnosis weighting; no Revision rule; no speed-to-mastery rule. The existing five-measure `computeMasteryState()` is unchanged and still counts attempts. An attempt id is one piece of evidence (duplicates are counted as excluded). Another student's or exam's records are excluded and counted, never merged.
+
+**Scoping and persistence.** The composer reuses the existing ownership-verified, exam-scoped composition (published, DNA-complete pool; same-concept check) with its one possible write (RepairPlan status sync) disabled. Nothing is stored: no migration, no table, no `mastery_states` write; the view is recomputed from the `attempts` rows (canonical evidence) every call. No HTTP route and no UI exist; a future route must return only intentionally public fields.
+
+**Alternatives rejected.** Substituting distinct-question counts into the existing measures (would silently change D-041); a mastery label with provisional thresholds; storing the view; a route for demonstration.
+
+**Known limitations.** An attempt on a question no longer published drops out; the concept universe is concepts with published questions; mode buckets overlap; all-time unbounded history.
+
+**Not claimed.** That any student has or lacks mastery of anything; that counts imply ability, confidence or readiness; any prediction.

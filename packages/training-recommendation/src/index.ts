@@ -4,3 +4,4 @@ export * from "./readModels.js";
 export * from "./compose.js";
 export * from "./attemptEvidence.js";
 export * from "./service.js";
+export * from "./masteryEvidence.js";

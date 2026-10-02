@@ -4,6 +4,8 @@ import type { ObservationEvidence } from "@ipmat/autopsy";
 import type { AutopsyOutput } from "@ipmat/autopsy";
 import { composeAttemptAutopsyOutput, composeAttemptObservationEvidence } from "./attemptEvidence.js";
 import { composeTrainingOrchestrationInput } from "./compose.js";
+import { composeMasteryEvidenceView } from "./masteryEvidence.js";
+import type { MasteryEvidenceView } from "@ipmat/mastery";
 import type { TrainingRecommendationDependencies, TrainingRecommendationRequest } from "./types.js";
 
 /**
@@ -26,6 +28,14 @@ export class TrainingRecommendationService {
   async recommendNextTrainingAction(request: TrainingRecommendationRequest): Promise<TrainingOrchestrationResult> {
     const input = await composeTrainingOrchestrationInput(this.deps, request);
     return orchestrateNextTrainingAction(input);
+  }
+
+  /**
+   * Phase 7 Unit 1 -- the student's mastery EVIDENCE view (evidence only: no verdict, score or threshold), derived from persisted
+   * attempts through the same ownership-verified composition. Read-only; `null` when the exam has no published question pool.
+   */
+  async readMasteryEvidence(request: TrainingRecommendationRequest): Promise<MasteryEvidenceView | null> {
+    return composeMasteryEvidenceView(this.deps, request);
   }
 
   /**
