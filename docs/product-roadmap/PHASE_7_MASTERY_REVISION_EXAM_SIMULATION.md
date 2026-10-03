@@ -5,7 +5,7 @@ Phase 7 is consolidated into five units, each built, verified and committed on i
 1. Mastery Model — **Unit 1 complete as the evidence-only foundation**
 2. Advanced Revision Intelligence — **complete (evidence-derived signals over the existing providers; no priority/verdict)**
 3. Mastery-Driven Adaptive Curriculum — **complete (composition of the existing orchestration; no new ordering/verdict)**
-4. Full Exam Simulation Engine — not started
+4. Full Exam Simulation Engine — **complete as exam-rule-free mechanics (no exam configuration exists, so nothing can start yet)**
 5. Exam Simulation Intelligence + Readiness — not started
 
 ## Unit 1 — Mastery Evidence Foundation (complete)
@@ -31,3 +31,11 @@ Phase 7 is consolidated into five units, each built, verified and committed on i
 **Built.** `@ipmat/adaptive-curriculum` (pure) and `composeAdaptiveCurriculum()` / `readAdaptiveCurriculum()` in `@ipmat/training-recommendation`: the orchestrator's own next action (verified against the published pool), the chain of every tier with its own outcome, steps in the existing order with Revision outside it, a per-concept view (Unit 1 evidence, Unit 2 signals, repair target facts, optional Phase 6 availability), and preserved conflicts. Derived from persisted attempts; no migration, table, route or UI. See D-089 and [../PHASE_7_UNIT_3_REVIEW.md](../PHASE_7_UNIT_3_REVIEW.md).
 
 **Not built (needs product decisions).** Cross-concept order, a multi-step sequence, Revision's position relative to repair/adaptive, completion/mastery semantics, prep-phase influence.
+
+## Unit 4 — Full Exam Simulation Engine (complete as rule-free mechanics)
+
+**Scope decision.** The repository specifies no IPMAT duration, section structure, question counts, marking/negative marking, navigation or review rule, pause/resume or historical paper, so Unit 4 builds only the mechanics and takes every exam rule as data it does not ship.
+
+**Built.** `@ipmat/exam-simulation` (pure) + Prisma adapters + migration `0016_exam_simulation` (three tables): validated configuration and explicit paper assembly, a server-authoritative state machine (exclusive deadline, deterministic expiry, idempotent finalization, race-safe, recoverable), a raw result with no score, and the explicit finalized-evidence contract for Unit 5. No route, no UI, no score. See D-090 and [../PHASE_7_UNIT_4_REVIEW.md](../PHASE_7_UNIT_4_REVIEW.md).
+
+**Not built (needs exam/product decisions).** The real IPMAT structure, marking scheme, navigation/review rules, pause/accommodations, historical or generated papers, post-finalization review, evidence integration.

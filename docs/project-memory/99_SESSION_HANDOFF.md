@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-03 (Product Phase 7 Unit 4)
+
+Phase 7 Unit 4 (Full Exam Simulation, D-090) is done as exam-rule-free mechanics: no IPMAT duration, section structure, counts, marking or navigation rule is specified, so none was invented and no configuration is shipped. **Unit 5 is NOT started.** Read `docs/PHASE_7_UNIT_4_REVIEW.md` (section 7 lists the unresolved exam decisions) first.
+
 ## Update — 2026-10-03 (Product Phase 7 Unit 3)
 
 Phase 7 Unit 3 (Adaptive Curriculum, D-089) is done as a composition of the existing orchestration, evidence and revision intelligence: no cross-concept order, sequence or verdict was invented. **Unit 4 is NOT started.** Read `docs/PHASE_7_UNIT_3_REVIEW.md` (section 6 lists the unresolved product decisions) first.

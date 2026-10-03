@@ -30,6 +30,7 @@ model Exam {
   questions          Question[]
   historicalRecords  HistoricalQuestionRecord[]
   contentSources     ContentSource[]
+  simulations        ExamSimulation[]
 
   @@map("exams")
 }
@@ -408,30 +409,30 @@ enum QuestionAuthoringOrigin {
 }
 
 model Question {
-  id                     String          @id @default(uuid())
-  examId                 String          @map("exam_id")
-  sectionId              String          @map("section_id")
-  chapterId              String          @map("chapter_id")
-  conceptId              String          @map("concept_id")
-  subconcepts            String[]
-  prerequisites          String[]
-  combinesWithConceptIds String[]        @map("combines_with_concept_ids")
-  patternTaxonomyCellId  String          @map("pattern_taxonomy_cell_id")
-  skill                  String
-  difficultyTier         DifficultyTier  @map("difficulty_tier")
-  difficultyDimensions   Json            @map("difficulty_dimensions")
-  noveltyLevel           NoveltyLevel    @default(standard) @map("novelty_level")
-  examRelevance          ExamRelevance   @default(core) @map("exam_relevance")
-  expectedTimeSeconds    Int             @map("expected_time_seconds")
-  testingModes           TestingMode[]   @map("testing_modes")
-  trapErrorTaxonomyId    String?         @map("trap_error_taxonomy_id")
-  body                   String
-  options                Json
-  correctAnswer          String          @map("correct_answer")
-  solutionSteps          Json            @map("solution_steps")
-  groundTruthDerivation  Json            @map("ground_truth_derivation")
-  validationState        ValidationState @default(draft) @map("validation_state")
-  provenanceId           String?         @map("provenance_id")
+  id                              String                   @id @default(uuid())
+  examId                          String                   @map("exam_id")
+  sectionId                       String                   @map("section_id")
+  chapterId                       String                   @map("chapter_id")
+  conceptId                       String                   @map("concept_id")
+  subconcepts                     String[]
+  prerequisites                   String[]
+  combinesWithConceptIds          String[]                 @map("combines_with_concept_ids")
+  patternTaxonomyCellId           String                   @map("pattern_taxonomy_cell_id")
+  skill                           String
+  difficultyTier                  DifficultyTier           @map("difficulty_tier")
+  difficultyDimensions            Json                     @map("difficulty_dimensions")
+  noveltyLevel                    NoveltyLevel             @default(standard) @map("novelty_level")
+  examRelevance                   ExamRelevance            @default(core) @map("exam_relevance")
+  expectedTimeSeconds             Int                      @map("expected_time_seconds")
+  testingModes                    TestingMode[]            @map("testing_modes")
+  trapErrorTaxonomyId             String?                  @map("trap_error_taxonomy_id")
+  body                            String
+  options                         Json
+  correctAnswer                   String                   @map("correct_answer")
+  solutionSteps                   Json                     @map("solution_steps")
+  groundTruthDerivation           Json                     @map("ground_truth_derivation")
+  validationState                 ValidationState          @default(draft) @map("validation_state")
+  provenanceId                    String?                  @map("provenance_id")
   // Content authoring (Product Phase 6 Prompt 3, D-084, migration 0014). All nullable: rows that pre-date the
   // authoring layer (e.g. generation-pipeline imports) carry NULL, which the domain reads as origin "unknown" -
   // never guessed to be human-authored. Reviewer data is INTERNAL and is never selected by a student reader.
@@ -443,16 +444,17 @@ model Question {
   answerVerifiedByReviewer        Boolean?                 @map("answer_verified_by_reviewer")
   reviewedAsDistinct              Boolean?                 @map("reviewed_as_distinct")
   independentReverificationAnswer String?                  @map("independent_reverification_answer")
-  createdAt              DateTime        @default(now()) @map("created_at")
+  createdAt                       DateTime                 @default(now()) @map("created_at")
 
-  exam                Exam                @relation(fields: [examId], references: [id])
-  section             Section             @relation(fields: [sectionId], references: [id])
-  chapter             Chapter             @relation(fields: [chapterId], references: [id])
-  concept             Concept             @relation("QuestionConcept", fields: [conceptId], references: [id])
-  patternTaxonomyCell PatternTaxonomyCell @relation(fields: [patternTaxonomyCellId], references: [id])
-  trapErrorTaxonomy   ErrorTaxonomy?      @relation("QuestionTrap", fields: [trapErrorTaxonomyId], references: [id])
-  provenance          Provenance?         @relation(fields: [provenanceId], references: [id])
+  exam                Exam                 @relation(fields: [examId], references: [id])
+  section             Section              @relation(fields: [sectionId], references: [id])
+  chapter             Chapter              @relation(fields: [chapterId], references: [id])
+  concept             Concept              @relation("QuestionConcept", fields: [conceptId], references: [id])
+  patternTaxonomyCell PatternTaxonomyCell  @relation(fields: [patternTaxonomyCellId], references: [id])
+  trapErrorTaxonomy   ErrorTaxonomy?       @relation("QuestionTrap", fields: [trapErrorTaxonomyId], references: [id])
+  provenance          Provenance?          @relation(fields: [provenanceId], references: [id])
   attempts            Attempt[]
+  simulationQuestions SimulationQuestion[]
 
   @@index([conceptId])
   @@index([patternTaxonomyCellId])
@@ -661,7 +663,7 @@ model ContentChunk {
   blockKinds      String[]               @map("block_kinds")
   validationState ContentChunkValidation @default(unreviewed) @map("validation_state")
 
-  sourceVersion ContentSourceVersion @relation(fields: [sourceVersionId], references: [id], onDelete: Restrict)
+  sourceVersion ContentSourceVersion       @relation(fields: [sourceVersionId], references: [id], onDelete: Restrict)
   evidence      ContentCandidateEvidence[]
 
   @@unique([sourceVersionId, ordinal])
@@ -728,6 +730,7 @@ model Student {
 
   enrollments   Enrollment[]
   attempts      Attempt[]
+  simulations   ExamSimulation[]
   repairPlans   RepairPlan[]
   masteryStates MasteryState[]
   catchUpPlans  CatchUpPlan[]
@@ -768,6 +771,7 @@ model Enrollment {
   attempts         Attempt[]
   catchUpPlans     CatchUpPlan[]
   practiceSessions PracticeSession[]
+  simulations      ExamSimulation[]
 
   @@unique([studentId, examId])
   @@index([examId])
@@ -1170,4 +1174,86 @@ model CatchUpPlan {
   @@index([studentId])
   @@index([enrollmentId])
   @@map("catch_up_plans")
+}
+
+// ---------------------------------------------------------------------
+// Full Exam Simulation (Product Phase 7 Unit 4, docs/DECISIONS.md D-090). An active simulation HAS state (a deadline,
+// an answer log), so unlike Units 1-3 persistence is genuinely required. Three NEW tables; nothing existing is altered
+// except back-reference relations. Kept apart from practice: no Attempt, PracticeSession or PracticeBlock row is ever
+// written for a simulation, so nothing in training, adaptive, revision, repair or mastery can see an active one.
+// Hand-written CHECK constraints and the partial unique index live in migration 0016 (Prisma's DSL cannot express them).
+// ---------------------------------------------------------------------
+
+enum SimulationStatus {
+  in_progress
+  submitted
+  expired
+}
+
+// One simulation. `config` is the exact configuration used (a snapshot - a later change to a configuration never alters
+// it); `result` is the finalized raw result, written exactly once (an auditable materialization: it records correctness
+// as of finalization, which cannot be re-derived if a question is later edited).
+model ExamSimulation {
+  id             String           @id @default(uuid())
+  studentId      String           @map("student_id")
+  enrollmentId   String           @map("enrollment_id")
+  examId         String           @map("exam_id")
+  configVersion  String           @map("config_version")
+  config         Json
+  paperOrigin    String           @map("paper_origin")
+  paperSourceRef String           @map("paper_source_ref")
+  status         SimulationStatus @default(in_progress)
+  startedAt      DateTime         @map("started_at")
+  deadlineAt     DateTime         @map("deadline_at")
+  finalizedAt    DateTime?        @map("finalized_at")
+  finalizedBy    String?          @map("finalized_by")
+  result         Json?
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  student    Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment Enrollment              @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  exam       Exam                    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  questions  SimulationQuestion[]
+  events     SimulationAnswerEvent[]
+
+  @@index([studentId])
+  @@index([enrollmentId])
+  @@map("exam_simulations")
+}
+
+// The fixed paper: one row per position. `contentFingerprint` identifies the exact content version used.
+model SimulationQuestion {
+  simulationId         String @map("simulation_id")
+  position             Int
+  sectionName          String @map("section_name")
+  questionId           String @map("question_id")
+  contentFingerprint   String @map("content_fingerprint")
+  provenanceSourceType String @map("provenance_source_type")
+
+  simulation ExamSimulation          @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  question   Question                @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  events     SimulationAnswerEvent[]
+
+  @@id([simulationId, position])
+  @@unique([simulationId, questionId])
+  @@index([questionId])
+  @@map("simulation_questions")
+}
+
+// Append-only answer log. `sequence` is the acceptance order within the simulation (assigned under the row lock), so
+// "the current answer" (the last event) never depends on timestamp resolution.
+model SimulationAnswerEvent {
+  id           String   @id @default(uuid())
+  simulationId String   @map("simulation_id")
+  position     Int
+  sequence     Int
+  answer       String
+  occurredAt   DateTime @map("occurred_at")
+
+  simulation ExamSimulation     @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  question   SimulationQuestion @relation(fields: [simulationId, position], references: [simulationId, position], onDelete: Cascade)
+
+  @@unique([simulationId, sequence])
+  @@index([simulationId, position])
+  @@map("simulation_answer_events")
 }

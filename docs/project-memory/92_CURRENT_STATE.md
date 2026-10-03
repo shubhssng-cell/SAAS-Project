@@ -4,6 +4,7 @@
 
 ## Checkpoint update — 2026-10-02 (Product Phase 6 Prompt 4)
 
+- **Full Exam Simulation engine implemented (D-090, Phase 7 Unit 4):** pure `@ipmat/exam-simulation` + Prisma adapters + migration 0016 (3 tables). Exam-rule-free mechanics; no exam configuration is shipped so no IPMAT simulation can start; no score, route or UI. The repository specifies no IPMAT duration, sections, counts, marking or navigation rules. Phase 7 Unit 5 not started.
 - **Adaptive Curriculum implemented (D-089, Phase 7 Unit 3):** pure `@ipmat/adaptive-curriculum` + read-only `readAdaptiveCurriculum()` in `@ipmat/training-recommendation`. Composition only - the orchestrator's own next action, its fixed tier chain, per-concept Unit 1/2 evidence, preserved conflicts; no new ordering/sequence/verdict; no migration, no route. Phase 7 Units 4-5 not started.
 - **Revision Intelligence implemented (D-088, Phase 7 Unit 2):** pure `@ipmat/revision-intelligence` + read-only `readRevisionIntelligence()` in `@ipmat/training-recommendation`. Evidence-derived signals, the existing providers' own outcomes, traced recommendations, preserved conflicts, no priority/verdict; no migration, no route. Phase 7 Units 3-5 not started.
 - **Mastery EVIDENCE foundation implemented (D-087, Phase 7 Unit 1):** pure `buildMasteryEvidenceView()` in `@ipmat/mastery` + read-only `readMasteryEvidence()` in `@ipmat/training-recommendation`. Evidence only - no mastery verdict exists because none is specified; no migration, no route. Phase 7 Units 2-5 not started.

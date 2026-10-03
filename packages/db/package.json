@@ -26,6 +26,7 @@
     "@ipmat/content-intelligence": "*",
     "@ipmat/exam-intelligence": "*",
     "@ipmat/exam-pack": "*",
+    "@ipmat/exam-simulation": "*",
     "@ipmat/examiner-intelligence": "*",
     "@ipmat/examiner-lens": "*",
     "@ipmat/mastery": "*",

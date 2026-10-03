@@ -46,3 +46,4 @@ export * from "./inMemoryAutopsyDecisionRepository.js";
 export * from "./errorTaxonomyReaders.js";
 export * from "./prismaTrainingSessionRepository.js";
 export * from "./inMemoryTrainingSessionRepository.js";
+export * from "./prismaSimulation.js";

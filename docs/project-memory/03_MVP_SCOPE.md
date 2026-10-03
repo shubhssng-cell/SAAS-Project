@@ -55,7 +55,7 @@ Pressure Training was originally deferred (D-059) for lack of a prerequisite (a 
 
 ## Mock Simulation — deliberately shaped for later, not built
 
-The generic `practiceBlocks`/`training_system_practice` shapes (D-061/D-062) were deliberately kept provider-agnostic partly so a future Mock Simulation system could reuse them — but Mock Simulation itself remains entirely undesigned. Do not treat the existence of these generic shapes as an invitation to start designing Mock now.
+The generic `practiceBlocks`/`training_system_practice` shapes (D-061/D-062) were deliberately kept provider-agnostic partly so a future Mock Simulation system could reuse them — but Mock Simulation itself remains entirely undesigned. Do not treat the existence of these generic shapes as an invitation to start designing Mock now. (Update, Phase 7 Unit 4, D-090: at the explicit request of the owner, an exam-rule-FREE simulation engine was built - mechanics only, no exam configuration shipped, no score, separate from these generic practice shapes. The real exam rules remain unspecified; see 44_EXAM_SIMULATION.md.)
 
 ## The explicit go/no-go gate before starting chapter two (verbatim)
 

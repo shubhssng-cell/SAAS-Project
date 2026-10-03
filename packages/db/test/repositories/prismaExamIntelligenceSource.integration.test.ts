@@ -224,7 +224,8 @@ describe.skipIf(!DATABASE_URL)("PrismaExamIntelligenceSource - real Postgres", (
   });
 
   it("this unit changed no schema: the latest migration is still the Content Intelligence one", async () => {
-    const rows = await prisma.$queryRaw<Array<{ migration_name: string }>>`select migration_name from _prisma_migrations order by migration_name desc limit 1`;
-    expect(rows[0]!.migration_name).toBe("0015_content_intelligence");
+    const rows = await prisma.$queryRaw<Array<{ migration_name: string }>>`select migration_name from _prisma_migrations where migration_name > '0015_content_intelligence' order by migration_name`;
+    // this unit added no migration: the only one after Content Intelligence (0015) is Phase 7 Unit 4's exam simulation
+    expect(rows.map((r) => r.migration_name)).toEqual(["0016_exam_simulation"]);
   });
 });
