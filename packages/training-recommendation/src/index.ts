@@ -7,3 +7,4 @@ export * from "./service.js";
 export * from "./masteryEvidence.js";
 export * from "./revisionIntelligence.js";
 export * from "./adaptiveCurriculum.js";
+export * from "./examPerformanceIntelligence.js";

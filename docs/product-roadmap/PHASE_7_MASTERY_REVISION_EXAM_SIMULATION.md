@@ -6,7 +6,7 @@ Phase 7 is consolidated into five units, each built, verified and committed on i
 2. Advanced Revision Intelligence — **complete (evidence-derived signals over the existing providers; no priority/verdict)**
 3. Mastery-Driven Adaptive Curriculum — **complete (composition of the existing orchestration; no new ordering/verdict)**
 4. Full Exam Simulation Engine — **complete as exam-rule-free mechanics (no exam configuration exists, so nothing can start yet)**
-5. Exam Simulation Intelligence + Readiness — not started
+5. Exam Simulation Intelligence + Readiness — **complete as readiness EVIDENCE (five separate facts; no score, category or verdict)**
 
 ## Unit 1 — Mastery Evidence Foundation (complete)
 
@@ -39,3 +39,11 @@ Phase 7 is consolidated into five units, each built, verified and committed on i
 **Built.** `@ipmat/exam-simulation` (pure) + Prisma adapters + migration `0016_exam_simulation` (three tables): validated configuration and explicit paper assembly, a server-authoritative state machine (exclusive deadline, deterministic expiry, idempotent finalization, race-safe, recoverable), a raw result with no score, and the explicit finalized-evidence contract for Unit 5. No route, no UI, no score. See D-090 and [../PHASE_7_UNIT_4_REVIEW.md](../PHASE_7_UNIT_4_REVIEW.md).
 
 **Not built (needs exam/product decisions).** The real IPMAT structure, marking scheme, navigation/review rules, pause/accommodations, historical or generated papers, post-finalization review, evidence integration.
+
+## Unit 5 — Exam Simulation Intelligence + Readiness evidence (complete; Phase 7 complete)
+
+**Scope decision.** The repository defines readiness only as five separate observable distinctions, never one number (PRODUCT_SPEC section 3), and no threshold, category, score, probability or simulation-to-practice feed, so Unit 5 builds the evidence report organised around those five distinctions and reports the rest as unresolved.
+
+**Built.** `@ipmat/simulation-intelligence` (pure), `composeExamPerformanceIntelligence()` / `readExamPerformanceIntelligence()` and `PrismaFinalizedSimulationReader`: finalized-only simulation evidence, per-dimension aggregation, comparison only between identical-paper and configuration simulations, traceable observations, read-only bridges to Units 1-3, optional Phase 6 content evidence, and an explicit `readiness: { defined: false }`. No migration, table, route or UI. See D-091 and [../PHASE_7_UNIT_5_REVIEW.md](../PHASE_7_UNIT_5_REVIEW.md).
+
+**Not built (needs product decisions).** Any readiness threshold, category or score; the "above exam difficulty" mapping; pressure classification of a timed simulation; simulation-to-practice feeds; cross-paper comparison; a student-facing surface.

@@ -188,3 +188,27 @@ export class PrismaSimulationQuestionSource implements SimulationQuestionSource 
     return out;
   }
 }
+
+/**
+ * The FINALIZED-ONLY read for downstream intelligence (docs/DECISIONS.md D-091). Returns one student's finalized simulations
+ * (`submitted` or `expired`, with a stored result) in one exam, oldest first. An in-progress simulation is excluded IN THE QUERY, not by
+ * a later filter, so partial answers can never reach a consumer; the consumer additionally re-checks through Unit 4's
+ * `toFinalizedSimulationEvidence`. Scoped by the student id and the exam code; it reads nothing else.
+ */
+export class PrismaFinalizedSimulationReader {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async findFinalizedByStudentAndExam(studentId: string, examCode: string): Promise<SimulationState[]> {
+    const rows = await this.prisma.examSimulation.findMany({
+      where: { studentId, exam: { code: examCode }, status: { in: ["submitted", "expired"] }, finalizedAt: { not: null } },
+      orderBy: [{ finalizedAt: "asc" }, { id: "asc" }],
+      select: { id: true }
+    });
+    const states: SimulationState[] = [];
+    for (const row of rows) {
+      const state = await loadState(this.prisma, row.id);
+      if (state && state.status !== "in_progress" && state.result !== null) states.push(state);
+    }
+    return states;
+  }
+}

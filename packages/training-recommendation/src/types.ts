@@ -1,4 +1,5 @@
 import type { ExamIntelligenceSource } from "@ipmat/exam-intelligence";
+import type { SimulationState } from "@ipmat/exam-simulation";
 import type {
   AttemptHistoryReader,
   ConceptReader,
@@ -39,6 +40,11 @@ export interface TrainingRecommendationDependencies {
   repairPlanStatusWriter?: RepairPlanStatusWriter;
   /** Phase 7 Unit 3 (optional): Phase 6 Exam Intelligence source. When supplied, the curriculum view attaches content availability per concept (availability only); absent -> `null`. Nothing else reads it. */
   examIntelligenceSource?: ExamIntelligenceSource;
+  /**
+   * Phase 7 Unit 5 (optional): the FINALIZED simulations (submitted or expired) of one student in one exam, oldest first. An implementation
+   * must never return an in-progress simulation; the consumer re-checks through Unit 4's `toFinalizedSimulationEvidence`. Absent -> no simulations.
+   */
+  finalizedSimulationReader?: { findFinalizedByStudentAndExam(studentId: string, examCode: string): Promise<SimulationState[]> };
   /** Supplies `computeMasteryState()`'s `now` (pure mastery functions never read the clock themselves). Defaults to the system clock. */
   now?: () => string;
 }

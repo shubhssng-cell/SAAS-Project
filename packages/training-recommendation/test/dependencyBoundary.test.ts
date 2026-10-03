@@ -24,12 +24,15 @@ describe("training-recommendation -- dependency boundary", () => {
         "@ipmat/autopsy",
         "@ipmat/db",
         "@ipmat/exam-intelligence",
+        // Phase 7 Unit 5 (D-091): the finalized-simulation evidence contract and the pure readiness-evidence layer.
+        "@ipmat/exam-simulation",
         "@ipmat/mastery",
         "@ipmat/practice-block",
         "@ipmat/practice-session",
         "@ipmat/question-engine",
         // Phase 7 Unit 2 (D-088): the pure revision-intelligence layer (itself dependent only on mastery, autopsy and two providers' shared pure helpers).
         "@ipmat/revision-intelligence",
+        "@ipmat/simulation-intelligence",
         "@ipmat/training-orchestration",
         "@ipmat/training-session"
       ].sort()

@@ -1,5 +1,5 @@
 {
-  "name": "@ipmat/training-recommendation",
+  "name": "@ipmat/simulation-intelligence",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,17 +11,13 @@
   },
   "dependencies": {
     "@ipmat/adaptive-curriculum": "*",
-    "@ipmat/attempt": "*",
     "@ipmat/autopsy": "*",
-    "@ipmat/db": "*",
-    "@ipmat/exam-intelligence": "*",
     "@ipmat/exam-simulation": "*",
     "@ipmat/mastery": "*",
-    "@ipmat/practice-block": "*",
-    "@ipmat/practice-session": "*",
-    "@ipmat/question-engine": "*",
     "@ipmat/revision-intelligence": "*",
-    "@ipmat/simulation-intelligence": "*",
+    "@ipmat/training-systems": "*"
+  },
+  "devDependencies": {
     "@ipmat/training-orchestration": "*",
     "@ipmat/training-session": "*"
   }

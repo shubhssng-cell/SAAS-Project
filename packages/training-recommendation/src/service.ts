@@ -6,6 +6,8 @@ import { composeAttemptAutopsyOutput, composeAttemptObservationEvidence } from "
 import { composeTrainingOrchestrationInput } from "./compose.js";
 import { composeMasteryEvidenceView } from "./masteryEvidence.js";
 import { composeAdaptiveCurriculum } from "./adaptiveCurriculum.js";
+import { composeExamPerformanceIntelligence } from "./examPerformanceIntelligence.js";
+import type { ExamPerformanceIntelligence } from "@ipmat/simulation-intelligence";
 import type { AdaptiveCurriculum } from "@ipmat/adaptive-curriculum";
 import { composeRevisionIntelligence } from "./revisionIntelligence.js";
 import type { RevisionIntelligence } from "@ipmat/revision-intelligence";
@@ -40,6 +42,15 @@ export class TrainingRecommendationService {
    */
   async readMasteryEvidence(request: TrainingRecommendationRequest): Promise<MasteryEvidenceView | null> {
     return composeMasteryEvidenceView(this.deps, request);
+  }
+
+  /**
+   * Phase 7 Unit 5 -- the student's exam-performance / readiness EVIDENCE: finalized simulations in relation to Units 1-3 and Phase 6 content
+   * evidence, as the five readiness distinctions of PRODUCT_SPEC section 3 (separate facts, never one number). No score, percentage, probability,
+   * category or verdict. Read-only; `null` when the exam has no published pool.
+   */
+  async readExamPerformanceIntelligence(request: TrainingRecommendationRequest): Promise<ExamPerformanceIntelligence | null> {
+    return composeExamPerformanceIntelligence(this.deps, request);
   }
 
   /**

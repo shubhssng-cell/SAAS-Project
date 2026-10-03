@@ -76,6 +76,7 @@
 | D-088 | Revision Intelligence (Phase 7 Unit 2): evidence-derived threshold-free signals (two reuse Revision/Trap Lab rules) over the existing providers, traced recommendations only where a provider selected, preserved conflicts, explicit no-priority; derived not stored, no migration/route |
 | D-089 | Adaptive Curriculum (Phase 7 Unit 3): composition of the existing orchestrator next action + chain + Unit 1/2 + repair facts + optional Phase 6 availability; conflicts preserved (existing rule or unresolved); no new ordering/sequence/score; derived not stored, no migration/route |
 | D-090 | Full Exam Simulation (Phase 7 Unit 4): exam-rule-free mechanics (server-authoritative exclusive deadline, idempotent terminal finalization, recovery, raw result, no score), exam rules as data and NONE shipped, explicit finalized-evidence contract, isolated from practice; migration 0016 |
+| D-091 | Exam Simulation Intelligence + readiness EVIDENCE (Phase 7 Unit 5): five separate readiness distinctions per concept (PRODUCT_SPEC section 3), finalized-only simulation evidence, comparison only between identical papers/configs, read-only bridges to Units 1-3, no score/percentage/probability/category/verdict; derived not stored, no migration/route |
 | — | D-039 addendum: RepairPlan/Autopsy persistence fidelity | Accepted (this session) | `@ipmat/autopsy`, `@ipmat/db` | Migration 0007, see [23](23_AUTOPSY.md)/[24](24_REPAIR.md)/[92](92_CURRENT_STATE.md) |
 
 ## Decisions genuinely still open (not resolved anywhere in the repository)

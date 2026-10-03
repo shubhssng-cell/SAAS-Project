@@ -2,6 +2,10 @@
 
 > Part of the [project memory](00_MASTER_CONTEXT.md). Read this after [00_MASTER_CONTEXT.md](00_MASTER_CONTEXT.md) and [92_CURRENT_STATE.md](92_CURRENT_STATE.md) — this file is the concise "what to do next" briefing; those two files are the full context.
 
+## Update — 2026-10-03 (Product Phase 7 Unit 5 - Phase 7 complete)
+
+Phase 7 Unit 5 (Exam Simulation Intelligence + readiness evidence, D-091) is done and Product Phase 7 is COMPLETE. Readiness exists only as five separate observable facts (PRODUCT_SPEC section 3); no threshold, category, score or verdict is specified, so none exists. **Phase 8 is NOT started.** Read `docs/PHASE_7_UNIT_5_REVIEW.md` (sections 1C and 7 list the unresolved decisions) first.
+
 ## Update — 2026-10-03 (Product Phase 7 Unit 4)
 
 Phase 7 Unit 4 (Full Exam Simulation, D-090) is done as exam-rule-free mechanics: no IPMAT duration, section structure, counts, marking or navigation rule is specified, so none was invented and no configuration is shipped. **Unit 5 is NOT started.** Read `docs/PHASE_7_UNIT_4_REVIEW.md` (section 7 lists the unresolved exam decisions) first.
