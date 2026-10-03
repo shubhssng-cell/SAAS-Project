@@ -6,3 +6,4 @@ export * from "./attemptEvidence.js";
 export * from "./service.js";
 export * from "./masteryEvidence.js";
 export * from "./revisionIntelligence.js";
+export * from "./adaptiveCurriculum.js";

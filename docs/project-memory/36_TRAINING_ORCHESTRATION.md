@@ -60,3 +60,7 @@ Reuses `AutopsyQuestionContext` and each engine's own result type directly — n
 ## Current, honest status
 
 **Nothing calls `orchestrateNextTrainingAction()` from a real, persisted-data flow.** Every real exercise of this function (tests, `apps/training-playground`, and this session's `apps/web` first slice) uses hand-built or fixture-derived input, never data read from `@ipmat/db`. See [37_TRAINING_RECOMMENDATION.md](37_TRAINING_RECOMMENDATION.md) for the design that will close this gap.
+
+## Phase 7 Unit 3 - Adaptive Curriculum (D-089)
+
+`@ipmat/adaptive-curriculum` composes - never re-decides - the orchestrator's single next action (repair, then the five providers in the fixed D-062 order, then adaptive practice), Unit 1 evidence, Unit 2 revision intelligence, active repair target facts and optional Phase 6 content availability. The chain shows every tier with its own outcome; Revision stays outside it. Conflicts are preserved as `existing_rule` or `unresolved_product_decision`. No cross-concept order, multi-step sequence, score or verdict; derived from persisted attempts, not stored, no route. Full detail: `docs/PHASE_7_UNIT_3_REVIEW.md`.

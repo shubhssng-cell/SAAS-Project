@@ -1,5 +1,5 @@
 {
-  "name": "@ipmat/training-recommendation",
+  "name": "@ipmat/adaptive-curriculum",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,17 +10,12 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ipmat/adaptive-curriculum": "*",
-    "@ipmat/attempt": "*",
-    "@ipmat/autopsy": "*",
-    "@ipmat/db": "*",
-    "@ipmat/exam-intelligence": "*",
     "@ipmat/mastery": "*",
-    "@ipmat/practice-block": "*",
-    "@ipmat/practice-session": "*",
-    "@ipmat/question-engine": "*",
     "@ipmat/revision-intelligence": "*",
     "@ipmat/training-orchestration": "*",
+    "@ipmat/training-systems": "*"
+  },
+  "devDependencies": {
     "@ipmat/training-session": "*"
   }
 }

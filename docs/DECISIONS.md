@@ -1150,3 +1150,19 @@ The design went through two review passes before implementation. The first desig
 **Known limitations.** Inherits the existing scoping (a no-longer-published question's attempts drop out; concept universe = concepts with published questions; all-time history). The existing Revision provider does not filter candidates by exam itself - the composer and `scopeContextToExam` guarantee isolation. `evaluatedAt` comes from the service clock.
 
 **Not claimed.** Mastery, readiness, calibration, prediction, or any inference about confidence, ability, motivation or emotion.
+
+## D-089 — Product Phase 7 Unit 3: Adaptive Curriculum (`@ipmat/adaptive-curriculum`); composition of existing orchestration, evidence and revision intelligence, no new ordering, no persistence, no route
+
+**Context.** Unit 3 asked for curriculum orchestration across concepts and training systems. The repository specifies the Phase 5D orchestrator's single next action (D-062: confirmed repair, then the five providers in a fixed order, then adaptive practice) and keeps Revision outside that chain (D-081). It does not specify a "curriculum", a cross-concept order, a multi-step sequence, where Revision sits relative to repair/adaptive, or what "done"/"mastered" means.
+
+**Decision.** A new pure package composes existing results and decides nothing: (1) the next action is `orchestrateNextTrainingAction`'s own result verbatim, re-verified against the exam's published pool (fail closed), with a fixed `whyThisTier` text naming the D-062 rule; (2) the chain lists every tier in the orchestrator's fixed order with that tier's own raw outcome and whether the orchestrator reached it; (3) steps are the selected question per tier in that order, with Revision outside the chain and no position defined for it; (4) a per-concept view carries Unit 1's evidence verbatim, Unit 2's signals and unserved needs, active repair target facts only, who serves the concept and optional Phase 6 content availability - never one number; (5) conflicts are preserved, each naming the existing rule that decides it (`existing_rule`) or marked `unresolved_product_decision`; (6) `sequencing.definedBeyondExistingChain` is false. `composeAdaptiveCurriculum()` / `TrainingRecommendationService.readAdaptiveCurriculum()` derive everything from one ownership-verified, exam-scoped read (RepairPlan status writer off); the Unit 2 composition was extracted behaviourally unchanged (`composeRevisionFromInput`) to share that read. An optional `examIntelligenceSource` dependency attaches Phase 6 availability only.
+
+**Rules kept.** Nothing selects, filters, ranks or re-orders a question or a tier; no score, verdict, confidence, ability, ranking, prediction, randomness or model call; Phase 3 adaptive selection, Phase 5D orchestration, every provider, Unit 1 and Unit 2 are unchanged (tested). No table, migration, route or UI.
+
+**Unresolved (not invented).** Cross-concept order; any multi-step sequence; Revision's position relative to repair/adaptive and whether revision waits for repair; completion/mastery semantics; prep-phase influence; pattern/mode-level needs.
+
+**Alternatives rejected.** A blended priority across concepts; an invented multi-step sequence; ranking concepts by evidence; re-running the orchestrator to show hypothetical alternatives; a stored curriculum-state table.
+
+**Known limitations.** Inherits the existing scoping limits; Pressure Training stays insufficient-evidence here; Phase 6 availability needs a supplied source (not wired into the API); `evaluatedAt` is the service clock.
+
+**Not claimed.** Mastery, readiness, calibration, prediction, or any inference about confidence, ability, motivation or emotion.

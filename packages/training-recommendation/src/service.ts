@@ -5,6 +5,8 @@ import type { AutopsyOutput } from "@ipmat/autopsy";
 import { composeAttemptAutopsyOutput, composeAttemptObservationEvidence } from "./attemptEvidence.js";
 import { composeTrainingOrchestrationInput } from "./compose.js";
 import { composeMasteryEvidenceView } from "./masteryEvidence.js";
+import { composeAdaptiveCurriculum } from "./adaptiveCurriculum.js";
+import type { AdaptiveCurriculum } from "@ipmat/adaptive-curriculum";
 import { composeRevisionIntelligence } from "./revisionIntelligence.js";
 import type { RevisionIntelligence } from "@ipmat/revision-intelligence";
 import type { MasteryEvidenceView } from "@ipmat/mastery";
@@ -38,6 +40,15 @@ export class TrainingRecommendationService {
    */
   async readMasteryEvidence(request: TrainingRecommendationRequest): Promise<MasteryEvidenceView | null> {
     return composeMasteryEvidenceView(this.deps, request);
+  }
+
+  /**
+   * Phase 7 Unit 3 -- the student's adaptive curriculum view: the existing orchestrator's own next action, every tier of its fixed
+   * consideration order with that tier's own outcome, Unit 1 evidence and Unit 2 revision intelligence per concept, and preserved
+   * conflicts (no verdict, score, ranking or invented sequence). Read-only; `null` when the exam has no published pool.
+   */
+  async readAdaptiveCurriculum(request: TrainingRecommendationRequest): Promise<AdaptiveCurriculum | null> {
+    return composeAdaptiveCurriculum(this.deps, request);
   }
 
   /**

@@ -18,9 +18,12 @@ describe("training-recommendation -- dependency boundary", () => {
     const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf-8")) as { dependencies?: Record<string, string> };
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(
       [
+        // Phase 7 Unit 3 (D-089): the pure curriculum composition layer, and the Phase 6 source interface it optionally reads for content availability.
+        "@ipmat/adaptive-curriculum",
         "@ipmat/attempt",
         "@ipmat/autopsy",
         "@ipmat/db",
+        "@ipmat/exam-intelligence",
         "@ipmat/mastery",
         "@ipmat/practice-block",
         "@ipmat/practice-session",

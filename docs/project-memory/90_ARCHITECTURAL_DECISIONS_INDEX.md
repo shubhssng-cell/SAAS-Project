@@ -74,6 +74,7 @@
 | D-086 | Exam Intelligence integration + calibration (Phase 6 Prompt 5): coverage = mapped-universe fraction with explicit denominators (no overall number); content tiers and historical basis separate; data-quality dispositions; calibrated only via an explicit sufficient record; selection bridge never rewrites providers; no migration/route |
 | D-087 | Mastery EVIDENCE foundation (Phase 7 Unit 1): evidence-only view (attempt + distinct-question counts, skips separate, pattern/novelty/mode index, audit trail), derived not stored, no verdict/threshold/score, no migration/route |
 | D-088 | Revision Intelligence (Phase 7 Unit 2): evidence-derived threshold-free signals (two reuse Revision/Trap Lab rules) over the existing providers, traced recommendations only where a provider selected, preserved conflicts, explicit no-priority; derived not stored, no migration/route |
+| D-089 | Adaptive Curriculum (Phase 7 Unit 3): composition of the existing orchestrator next action + chain + Unit 1/2 + repair facts + optional Phase 6 availability; conflicts preserved (existing rule or unresolved); no new ordering/sequence/score; derived not stored, no migration/route |
 | — | D-039 addendum: RepairPlan/Autopsy persistence fidelity | Accepted (this session) | `@ipmat/autopsy`, `@ipmat/db` | Migration 0007, see [23](23_AUTOPSY.md)/[24](24_REPAIR.md)/[92](92_CURRENT_STATE.md) |
 
 ## Decisions genuinely still open (not resolved anywhere in the repository)

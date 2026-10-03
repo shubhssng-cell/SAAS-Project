@@ -1,3 +1,4 @@
+import type { ExamIntelligenceSource } from "@ipmat/exam-intelligence";
 import type {
   AttemptHistoryReader,
   ConceptReader,
@@ -36,6 +37,8 @@ export interface TrainingRecommendationDependencies {
   errorTaxonomyReader?: ErrorTaxonomyReader;
   /** Phase 4 Unit 4 (optional): keeps the stored RepairPlan status in step with the status derived from attempts (forward-only, idempotent). Decisions never depend on it succeeding. */
   repairPlanStatusWriter?: RepairPlanStatusWriter;
+  /** Phase 7 Unit 3 (optional): Phase 6 Exam Intelligence source. When supplied, the curriculum view attaches content availability per concept (availability only); absent -> `null`. Nothing else reads it. */
+  examIntelligenceSource?: ExamIntelligenceSource;
   /** Supplies `computeMasteryState()`'s `now` (pure mastery functions never read the clock themselves). Defaults to the system clock. */
   now?: () => string;
 }

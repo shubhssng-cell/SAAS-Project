@@ -4,6 +4,7 @@
 
 ## Checkpoint update — 2026-10-02 (Product Phase 6 Prompt 4)
 
+- **Adaptive Curriculum implemented (D-089, Phase 7 Unit 3):** pure `@ipmat/adaptive-curriculum` + read-only `readAdaptiveCurriculum()` in `@ipmat/training-recommendation`. Composition only - the orchestrator's own next action, its fixed tier chain, per-concept Unit 1/2 evidence, preserved conflicts; no new ordering/sequence/verdict; no migration, no route. Phase 7 Units 4-5 not started.
 - **Revision Intelligence implemented (D-088, Phase 7 Unit 2):** pure `@ipmat/revision-intelligence` + read-only `readRevisionIntelligence()` in `@ipmat/training-recommendation`. Evidence-derived signals, the existing providers' own outcomes, traced recommendations, preserved conflicts, no priority/verdict; no migration, no route. Phase 7 Units 3-5 not started.
 - **Mastery EVIDENCE foundation implemented (D-087, Phase 7 Unit 1):** pure `buildMasteryEvidenceView()` in `@ipmat/mastery` + read-only `readMasteryEvidence()` in `@ipmat/training-recommendation`. Evidence only - no mastery verdict exists because none is specified; no migration, no route. Phase 7 Units 2-5 not started.
 - **Exam Intelligence integration + calibration implemented (D-086), Phase 6 COMPLETE:** pure package `@ipmat/exam-intelligence` (coverage, queries, calibration status, selection bridge) + read-only `PrismaExamIntelligenceSource`/`PrismaOutcomeSource`; no migration, no route. No historical data or calibrated difficulty exists; nothing is calibrated. See `43_EXAM_INTELLIGENCE.md`.
