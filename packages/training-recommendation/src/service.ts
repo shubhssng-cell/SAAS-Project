@@ -5,6 +5,8 @@ import type { AutopsyOutput } from "@ipmat/autopsy";
 import { composeAttemptAutopsyOutput, composeAttemptObservationEvidence } from "./attemptEvidence.js";
 import { composeTrainingOrchestrationInput } from "./compose.js";
 import { composeMasteryEvidenceView } from "./masteryEvidence.js";
+import { composeRevisionIntelligence } from "./revisionIntelligence.js";
+import type { RevisionIntelligence } from "@ipmat/revision-intelligence";
 import type { MasteryEvidenceView } from "@ipmat/mastery";
 import type { TrainingRecommendationDependencies, TrainingRecommendationRequest } from "./types.js";
 
@@ -36,6 +38,14 @@ export class TrainingRecommendationService {
    */
   async readMasteryEvidence(request: TrainingRecommendationRequest): Promise<MasteryEvidenceView | null> {
     return composeMasteryEvidenceView(this.deps, request);
+  }
+
+  /**
+   * Phase 7 Unit 2 -- the student's revision intelligence: evidence-derived signals, the existing training providers' own outcomes,
+   * traced recommendations and preserved conflicts (no verdict, score or priority). Read-only; `null` when the exam has no published pool.
+   */
+  async readRevisionIntelligence(request: TrainingRecommendationRequest): Promise<RevisionIntelligence | null> {
+    return composeRevisionIntelligence(this.deps, request);
   }
 
   /**

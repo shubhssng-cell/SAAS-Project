@@ -25,6 +25,8 @@ describe("training-recommendation -- dependency boundary", () => {
         "@ipmat/practice-block",
         "@ipmat/practice-session",
         "@ipmat/question-engine",
+        // Phase 7 Unit 2 (D-088): the pure revision-intelligence layer (itself dependent only on mastery, autopsy and two providers' shared pure helpers).
+        "@ipmat/revision-intelligence",
         "@ipmat/training-orchestration",
         "@ipmat/training-session"
       ].sort()

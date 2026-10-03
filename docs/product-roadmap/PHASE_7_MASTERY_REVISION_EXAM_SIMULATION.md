@@ -3,7 +3,7 @@
 Phase 7 is consolidated into five units, each built, verified and committed on its own; none begins until the previous is closed. (This is Product Phase 7 and is unrelated to the older "Phase 7 — Vertical slice hardening" item in `MASTER_PLAN`.)
 
 1. Mastery Model — **Unit 1 complete as the evidence-only foundation**
-2. Advanced Revision Intelligence — not started
+2. Advanced Revision Intelligence — **complete (evidence-derived signals over the existing providers; no priority/verdict)**
 3. Mastery-Driven Adaptive Curriculum — not started
 4. Full Exam Simulation Engine — not started
 5. Exam Simulation Intelligence + Readiness — not started
@@ -15,3 +15,11 @@ Phase 7 is consolidated into five units, each built, verified and committed on i
 **Built.** `buildMasteryEvidenceView()` in `@ipmat/mastery` and `composeMasteryEvidenceView()` / `TrainingRecommendationService.readMasteryEvidence()` in `@ipmat/training-recommendation`: attempt counts alongside distinct-question counts, skips separate from graded attempts, evidence indexed by pattern family / novelty level / testing mode, paired observed/expected time, and an audit list of contributing attempts, scoped to the verified student and the exam's published pool. Derived from persisted attempts on every call. See D-087 and [../PHASE_7_UNIT_1_REVIEW.md](../PHASE_7_UNIT_1_REVIEW.md).
 
 **Not built (needs product decisions before any mastery judgment).** What "mastered" means, evidence sufficiency, aggregation, recency, prerequisite handling, novelty/transfer and speed interpretation, repair/revision interaction, conflict handling, thresholds, what mastery unlocks. These belong to a future specification, not to guesswork.
+
+## Unit 2 — Advanced Revision Intelligence (complete)
+
+**Scope decision.** The repository defines Revision (D-081) and each provider's own rules but no revision priority, no pattern- or mode-level revision type, no backlog notion and no strength/weakness verdict, so Unit 2 implements only the evidence-derived, deterministic foundation and reports the rest.
+
+**Built.** `@ipmat/revision-intelligence` (pure) and `composeRevisionIntelligence()` / `readRevisionIntelligence()` in `@ipmat/training-recommendation`: six threshold-free signal kinds (two reuse Revision's and Trap Lab's own rules), the existing providers' raw outcomes, traced recommendations only where a provider selected a published question, unserved signals with reasons, preserved conflicts, and an explicit `priority: { defined: false }`. Derived from persisted attempts; no migration, table, route or UI. See D-088 and [../PHASE_7_UNIT_2_REVIEW.md](../PHASE_7_UNIT_2_REVIEW.md).
+
+**Not built (needs product decisions).** Priority among revision needs, pattern/mode-level revision, backlog, over-concentration, novel-question weakness, strength/weakness, calibration of the provisional constants.

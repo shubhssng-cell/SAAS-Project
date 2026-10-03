@@ -1132,3 +1132,21 @@ The design went through two review passes before implementation. The first desig
 **Known limitations.** An attempt on a question no longer published drops out; the concept universe is concepts with published questions; mode buckets overlap; all-time unbounded history.
 
 **Not claimed.** That any student has or lacks mastery of anything; that counts imply ability, confidence or readiness; any prediction.
+
+## D-088 — Product Phase 7 Unit 2: Revision Intelligence (`@ipmat/revision-intelligence`); evidence-derived signals over the EXISTING providers, no priority, no persistence, no route
+
+**Context.** Unit 2 asked for a layer that says what to revise, when, why and with which exposure type. The repository defines Revision (D-081: concept dormancy, provisional 3 graded attempts and 14 days) and each training provider's own rules, but no revision priority, no pattern- or mode-level revision type, no backlog notion and no strength/weakness verdict.
+
+**Decision.** A new pure package composes: (1) Unit 1's evidence view, unchanged; (2) six threshold-free signal kinds - `dormant_concept` and `recurring_trap_failure` REUSE Revision's and Trap Lab's own rules and constants (never re-implemented), the others are exact facts (`attempts_exceed_distinct_questions`; pattern-family / novelty-level / testing-mode "without graded evidence" relative to the published pool, only for concepts with graded evidence; a skip is not graded evidence); (3) the raw outcome of each existing provider, run through the product's catalog-aware `runTrainingSystem()` on a context scoped to one student and exam (`scopeContextToExam`); (4) traced recommendations, only where a provider returned `selected` - provider explanation verbatim, linked signals, dimensions, contributing attempts, and the selected question re-checked against the exam's published pool (fail closed); (5) unserved signals with reasons; (6) preserved conflicts (`competing_revision_types`, `recurring_trap_with_correct_attempts`); (7) an explicit `priority: { defined: false }`.
+
+**Rules kept.** The layer selects, filters and ranks no question; it adds no training semantics (exposure-type labels merely name what each existing provider does); no score, rank, verdict, confidence, ability, prediction, randomness or model call; no prerequisite propagation, recency weighting or repair weighting. Deterministic: same evidence, context and runs (any order) give the same result.
+
+**Scoping and persistence.** `composeRevisionIntelligence()` / `TrainingRecommendationService.readRevisionIntelligence()` reuse the ownership-verified, exam-scoped composition with its one possible write (RepairPlan status sync) disabled. Nothing is stored: no migration, table or mastery write. No route and no UI.
+
+**Unresolved (not invented).** Priority among revision needs; any pattern- or mode-level revision type; revision backlog, over-concentration, novel-question weakness, strength/weakness; treatment of a recurring trap with correct attempts; what repeated exposure should trigger; gap signals for never-attempted concepts; calibration of the provisional constants.
+
+**Alternatives rejected.** A blended priority score or ranking; a new pattern-level provider; a stored revision-state table; resolving conflicts with an invented precedence rule; re-implementing dormancy/recurrence inside the new package.
+
+**Known limitations.** Inherits the existing scoping (a no-longer-published question's attempts drop out; concept universe = concepts with published questions; all-time history). The existing Revision provider does not filter candidates by exam itself - the composer and `scopeContextToExam` guarantee isolation. `evaluatedAt` comes from the service clock.
+
+**Not claimed.** Mastery, readiness, calibration, prediction, or any inference about confidence, ability, motivation or emotion.

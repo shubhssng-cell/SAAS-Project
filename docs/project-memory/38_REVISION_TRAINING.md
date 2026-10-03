@@ -26,3 +26,7 @@ Not Trap Lab (error recurrence), Novelty (style exposure), Pressure (block evide
 ## Limits
 
 Retention/performance benefit unmeasured; 14 days uncalibrated; `no_eligible_question` not testable end to end through real composition (provider-level only); no real student has used it.
+
+## Phase 7 Unit 2 - Revision Intelligence (D-088)
+
+`@ipmat/revision-intelligence` layers evidence-derived signals over the existing Revision provider and the other providers without changing any of them: `dormant_concept` and `recurring_trap_failure` reuse Revision's and Trap Lab's own rules and constants; the rest are exact, threshold-free facts. Recommendations exist only where a provider returned `selected`; the trace names the signals, attempts, dimensions and the published question. No priority among revision needs, no pattern/mode-level revision type, no verdict - conflicts are preserved as unresolved product decisions. Derived from persisted attempts, not stored, no route. Full detail: `docs/PHASE_7_UNIT_2_REVIEW.md`.
