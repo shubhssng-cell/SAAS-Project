@@ -9,3 +9,4 @@ export * from "./schemas/questionCandidate.js";
 export * from "./schemas/answerReverification.js";
 export * from "./schemas/validationJudge.js";
 export * from "./schemas/autopsyHypothesis.js";
+export * from "./schemas/tutorResponse.js";

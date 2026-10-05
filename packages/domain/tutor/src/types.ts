@@ -1,0 +1,290 @@
+import type { AiResultMetadata, TutorResponseAiOutput } from "@ipmat/ai";
+import type { Certainty, ConceptGraph, RelationType } from "@ipmat/concept-graph";
+
+/**
+ * The AI Tutor's contracts (Phase 8 Unit 1, docs/DECISIONS.md D-092).
+ *
+ * The tutor is a CONSTRAINED layer over structured intelligence the system
+ * already holds - never a chatbot. A request names an explicit INTENT; the
+ * context is assembled deterministically from ports (each result re-verified
+ * here), a model is asked for a structured answer, and a deterministic
+ * validator decides whether that answer may reach the student.
+ *
+ * Every piece of information is one of six epistemic classes and is never
+ * allowed to masquerade as another:
+ *   OBSERVED_DATA     - recorded facts (the student's submitted answer, their working)
+ *   SOURCE_CONTENT    - text of an authorized source chunk, with provenance
+ *   DERIVED_EVIDENCE  - deterministic derivations (concept-graph edges, question DNA)
+ *   AI_EXPLANATION    - the model's explanation text
+ *   AI_HYPOTHESIS     - a hedged proposal about the student's attempt
+ *   UNRESOLVED        - what could not be grounded (insufficient_context)
+ */
+export type EpistemicClass = "OBSERVED_DATA" | "SOURCE_CONTENT" | "DERIVED_EVIDENCE" | "AI_EXPLANATION" | "AI_HYPOTHESIS" | "UNRESOLVED";
+
+/**
+ * Intents are EXTENSIBLE CONTRACTS, not a finished tutoring policy: the
+ * repository specifies no tutoring behaviour (Phase 0 lists a "general-purpose
+ * AI chatbot" and a "voice tutor" as OUT of scope). Each intent's disclosure
+ * rules live in `policy.ts` and are labelled provisional.
+ */
+export const TUTOR_INTENTS = ["explain_question", "explain_concept", "give_hint", "explain_mistake", "clarify_solution"] as const;
+export type TutorIntent = (typeof TUTOR_INTENTS)[number];
+
+export type TutorErrorCode =
+  | "invalid_request"
+  | "unknown_intent"
+  | "ownership_denied"
+  | "question_unavailable"
+  | "concept_unavailable"
+  | "attempt_ownership_violation"
+  | "context_violation";
+
+export class TutorError extends Error {
+  constructor(readonly code: TutorErrorCode, message: string) {
+    super(message);
+    this.name = "TutorError";
+  }
+}
+
+/** What a caller (a future route) hands over. Identity comes from authentication, never from the client. */
+export interface TutorRequest {
+  intent: TutorIntent;
+  studentId: string;
+  enrollmentId: string;
+  /** Required by every intent except `explain_concept`. */
+  questionId?: string;
+  /** Required by `explain_concept`. */
+  conceptName?: string;
+  /** Optional short free text from the student. UNTRUSTED data, quoted to the model as data, never as instructions. */
+  focus?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Ports. The domain never reaches a database, a vendor or the network; every
+// port is injected and every result is RE-VERIFIED by the context builder.
+// ---------------------------------------------------------------------------
+
+export interface TutorEnrollmentScope {
+  studentId: string;
+  enrollmentId: string;
+  examCode: string;
+}
+
+export interface TutorOwnershipPort {
+  /** Returns the enrollment ONLY when it belongs to the student; null otherwise (never says which part failed). */
+  resolveEnrollment(studentId: string, enrollmentId: string): Promise<TutorEnrollmentScope | null>;
+}
+
+/** A question as read from the authoritative store. Carries the internal fields; the context builder decides what the tutor may see. */
+export interface TutorQuestionRecord {
+  questionId: string;
+  examCode: string;
+  validationState: string;
+  conceptName: string;
+  stem: string;
+  options: string[] | null;
+  /** INTERNAL - the answer key. Only ever reaches a prompt when the policy authorizes it. */
+  correctAnswer: string;
+  /** INTERNAL - the authored solution. Same rule as `correctAnswer`. */
+  solutionSteps: string[];
+  patternFamilyName: string;
+  skill: string;
+  difficultyTier: string;
+  noveltyLevel: string;
+  expectedTimeSeconds: number;
+  testingModes: string[];
+  /** A human-readable trap label (never the taxonomy code or id). Null if the question has no designed trap. */
+  trapLabel: string | null;
+  /** INTERNAL identifiers the model must never repeat (taxonomy cell id, trap code, ...). Used only by the leakage check. */
+  internalTokens?: string[];
+}
+
+export interface TutorQuestionPort {
+  getQuestion(examCode: string, questionId: string): Promise<TutorQuestionRecord | null>;
+}
+
+export interface TutorConceptPort {
+  getConceptGraph(examCode: string): Promise<ConceptGraph>;
+}
+
+/** The student's attempt on a question (observable facts only - no confidence, emotion or inferred state). */
+export interface TutorAttemptRecord {
+  attemptId: string;
+  studentId: string;
+  questionId: string;
+  status: "submitted" | "skipped" | "abandoned" | "in_progress";
+  finalAnswer: string | null;
+  isCorrect: boolean | null;
+  hintsUsed: number;
+  answerChanges: number;
+  timeTakenSeconds: number | null;
+  /** The student's own working, if recorded. Never reasoning inferred by the system. */
+  workingSteps: string | null;
+  reasoningText: string | null;
+}
+
+export interface TutorAttemptPort {
+  getLatestAttempt(studentId: string, questionId: string): Promise<TutorAttemptRecord | null>;
+}
+
+/** Already-scoped facts from other intelligence (revision, curriculum, simulation, a CONFIRMED autopsy). */
+export type TutorEvidenceKind = "revision_signal" | "curriculum" | "simulation" | "autopsy_confirmed";
+export interface TutorEvidenceFact {
+  kind: TutorEvidenceKind;
+  studentId: string;
+  examCode: string;
+  /** A factual statement already produced by the owning package. Never a verdict/score. */
+  statement: string;
+}
+export interface TutorEvidencePort {
+  getEvidence(scope: TutorEnrollmentScope, kinds: readonly TutorEvidenceKind[]): Promise<TutorEvidenceFact[]>;
+}
+
+export interface TutorSourceItem {
+  chunkId: string;
+  examCode: string;
+  text: string;
+  location: string;
+  source: { sourceKey: string; title: string; version: number };
+}
+export type TutorSourceResult = { status: "ok"; items: TutorSourceItem[] } | { status: "denied" };
+export interface TutorSourcePort {
+  retrieve(query: { examCode: string; text: string; limit: number }): Promise<TutorSourceResult>;
+}
+
+export type TutorOutcome = "answered" | "insufficient_context" | "rejected_ungrounded" | "provider_failure";
+export type TutorFailureKind = "timeout" | "malformed_output" | "provider_error";
+
+export interface TutorAuditEntry {
+  at: string;
+  requestId: string;
+  intent: TutorIntent;
+  studentId: string;
+  enrollmentId: string;
+  examCode: string | null;
+  questionId: string | null;
+  conceptName: string | null;
+  outcome: TutorOutcome;
+  /** A digest of what the context contained - never its text. */
+  contextDigest: string | null;
+  includedSections: string[];
+  withheldSections: string[];
+  violationCodes: string[];
+  generationAttempts: number;
+  model: Pick<AiResultMetadata, "provider" | "model" | "promptVersion" | "latencyMs" | "tokenUsage" | "estimatedCostUsd" | "attempts"> | null;
+  failure: TutorFailureKind | null;
+}
+/** Receives metadata ONLY: no prompt, no response text, no student free text. */
+export interface TutorAuditSink {
+  record(entry: TutorAuditEntry): void | Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+export interface ContextRef {
+  /** Stable id a response may cite (`question`, `concept:<name>`, `edge:<from>|<type>|<to>`, `attempt`, `answer_key`, `source:<n>`, `dna`, `evidence:<kind>:<n>`; opaque - never a database id). */
+  ref: string;
+  epistemic: EpistemicClass;
+  label: string;
+}
+
+export interface TutorGraphEdge {
+  ref: string;
+  from: string;
+  to: string;
+  type: RelationType;
+  rationale: string;
+  certainty: Certainty;
+}
+
+export interface TutorContext {
+  intent: TutorIntent;
+  exam: { examCode: string };
+  student: { studentId: string; enrollmentId: string };
+  question: { ref: string; stem: string; options: string[] | null } | null;
+  concept: { ref: string; name: string; description: string } | null;
+  graph: { edges: TutorGraphEdge[]; truncated: boolean } | null;
+  dna: { ref: string; patternFamilyName: string; skill: string; difficultyTier: string; noveltyLevel: string; expectedTimeSeconds: number; testingModes: string[] | null; trapLabel: string | null } | null;
+  attempt: { ref: string; submittedAnswer: string | null; isCorrect: boolean | null; hintsUsed: number; answerChanges: number; timeTakenSeconds: number | null; workingSteps: string | null; reasoningText: string | null } | null;
+  /** Non-null ONLY when the intent's policy authorizes it for this moment. */
+  answerKey: { ref: string; correctAnswer: string; solutionSteps: string[] } | null;
+  evidence: Array<{ ref: string; kind: TutorEvidenceKind; statement: string }>;
+  sources: Array<{ ref: string; chunkId: string; text: string; location: string; title: string; sourceKey: string; version: number }>;
+  sourceAccess: "not_requested" | "ok" | "denied";
+  focus: string | null;
+  /** Everything citable, with its epistemic class. */
+  refs: ContextRef[];
+  includedSections: string[];
+  withheldSections: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Response
+// ---------------------------------------------------------------------------
+
+export type GroundingViolationCode =
+  | "unknown_reference"
+  | "missing_citation"
+  | "answer_key_leakage"
+  | "solution_leakage"
+  | "internal_identifier_leakage"
+  | "cross_exam_content"
+  | "psychological_claim"
+  | "unsupported_mastery_readiness_claim"
+  | "invented_exam_rule"
+  | "unsupported_relation"
+  | "unverifiable_quote"
+  | "misreported_attempt"
+  | "unhedged_hypothesis"
+  | "hypothesis_not_permitted"
+  | "disallowed_response_type";
+
+export interface GroundingViolation {
+  code: GroundingViolationCode;
+  detail: string;
+}
+
+export interface GroundingReport {
+  /** Which checks ran. */
+  checksRun: string[];
+  violations: GroundingViolation[];
+  passed: boolean;
+}
+
+export interface TutorSourceReference {
+  ref: string;
+  chunkId: string;
+  title: string;
+  location: string;
+  version: number;
+  epistemic: "SOURCE_CONTENT";
+}
+
+export interface TutorEvidenceReference {
+  ref: string;
+  label: string;
+  epistemic: EpistemicClass;
+}
+
+export interface TutorHypothesis {
+  epistemic: "AI_HYPOTHESIS";
+  text: string;
+  evidenceRefs: string[];
+}
+
+export interface TutorResponse {
+  outcome: TutorOutcome;
+  responseType: TutorResponseAiOutput["responseType"] | null;
+  /** The explanation (AI_EXPLANATION). Null whenever nothing groundable may be shown. */
+  text: string | null;
+  /** Fixed, model-free text for non-answered outcomes. */
+  fallbackMessage: string | null;
+  sourceReferences: TutorSourceReference[];
+  evidenceReferences: TutorEvidenceReference[];
+  hypotheses: TutorHypothesis[];
+  uncertainty: { insufficientContext: boolean; missing: string[] };
+  grounding: GroundingReport;
+  audit: TutorAuditEntry;
+}

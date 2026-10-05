@@ -18,7 +18,7 @@ No call site outside `@ipmat/ai/src/providers/` talks to a concrete SDK directly
 
 Call provider with a typed-function-built prompt → parse JSON (stripping stray markdown fences) → validate against the task's Zod schema → retry with the specific error fed back on failure → throw `AiGenerationError` after exhausting retries, **never** falling back to unvalidated output.
 
-## The five task types (as of the current checkpoint)
+## The six task types (as of the current checkpoint)
 
 | Task | Purpose |
 |---|---|
@@ -27,6 +27,7 @@ Call provider with a typed-function-built prompt → parse JSON (stripping stray
 | `answer-reverification` | A second, independent answer re-derivation, given only `PresentedQuestionView` |
 | `validation-judge` | Ambiguity/contradiction catch, given only `JudgeView` |
 | `autopsy-hypothesis` | Propose ONE hypothesis from deterministic `AutopsyOutput` — never auto-confirmed |
+| `tutor-response` | The AI Tutor's one structured answer (Phase 8 Unit 1, D-092) — conclusions only, validated by `@ipmat/tutor`'s deterministic grounding before a student can see it |
 
 ## Cost/failure control
 
