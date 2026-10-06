@@ -1,0 +1,24 @@
+{
+  "name": "@ipmat/ai-orchestration",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ipmat/personalization": "*",
+    "@ipmat/question-generation": "*",
+    "@ipmat/tutor": "*"
+  },
+  "devDependencies": {
+    "@ipmat/ai": "*",
+    "@ipmat/concept-graph": "*",
+    "@ipmat/content-authoring": "*",
+    "@ipmat/exam-pack": "*",
+    "@ipmat/question-engine": "*"
+  }
+}
