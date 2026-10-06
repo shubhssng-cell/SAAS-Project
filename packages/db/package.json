@@ -34,6 +34,7 @@
     "@ipmat/practice-block": "*",
     "@ipmat/practice-session": "*",
     "@ipmat/question-engine": "*",
+    "@ipmat/question-generation": "*",
     "@prisma/client": "^5.20.0"
   },
   "devDependencies": {

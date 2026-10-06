@@ -41,6 +41,14 @@ export interface GenerationPipelineInput {
   provenanceSourceType: string | null;
   /** Defaults to DEFAULT_SINGLE_RUN_LIMITS (one blueprint, one candidate) — validated before any AI call is made (Phase 3.1 §9). */
   limits?: GenerationLimits;
+  /**
+   * Metadata a blueprint does not carry but a caller has requested (Phase 8 Unit 3, D-094). When given it is
+   * stated in the generation prompt, and the prompt version changes so the trace says which prompt ran.
+   * The pipeline does NOT validate these against the candidate - the caller's compliance check does.
+   */
+  requested?: { noveltyLevel: string; examRelevance: string };
+  /** Per-call timeout; defaults to 30 s. Exposed so a caller (and a test) can bound a hung provider. */
+  timeoutMs?: number;
 }
 
 export interface GenerationPipelineResult {
@@ -51,6 +59,8 @@ export interface GenerationPipelineResult {
     reverification: AiResultMetadata | null;
     judge: AiResultMetadata | null;
   };
+  /** The independent re-derivation's own answer (never the generator's), or null if that call did not produce one. Needed by the authoring `answer` gate. */
+  reDerivedAnswer: string | null;
   checks: {
     structural: ValidationResult;
     computation: ValidationResult;
@@ -73,6 +83,7 @@ export interface GenerationPipelineResult {
  */
 export async function runGenerationPipeline(input: GenerationPipelineInput): Promise<GenerationPipelineResult> {
   const limits = input.limits ?? DEFAULT_SINGLE_RUN_LIMITS;
+  const timeoutMs = input.timeoutMs ?? 30_000;
   validateGenerationLimits(limits); // throws before any AI call if the limits themselves are unsafe
 
   // Fail closed on unpriced models (Phase 3.1.1 §1 / docs/DECISIONS.md
@@ -95,6 +106,7 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
       blueprint: input.blueprint,
       candidate: null,
       metadata: { generation: null, reverification: null, judge: null },
+      reDerivedAnswer: null,
       checks: { structural: failure, computation: failure, reverification: failure, duplicateRisk: failure, judge: failure },
       status: "rejected",
       rejectionReasons: failure.issues
@@ -132,11 +144,11 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
   try {
     const result = await generateStructured(input.aiProvider, {
       task: "question-generation",
-      promptVersion: "question-generation-v1",
+      promptVersion: input.requested ? "question-generation-v2" : "question-generation-v1",
       systemPrompt: buildGenerationSystemPrompt(),
-      userPrompt: buildGenerationUserPrompt(input.blueprint),
+      userPrompt: buildGenerationUserPrompt(input.blueprint, input.requested),
       schema: questionCandidateAiSchema,
-      options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
+      options: { maxRetries: limits.maxRetries, timeoutMs }
     });
     candidate = result.data;
     generationMetadata = result.metadata;
@@ -148,6 +160,7 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
       blueprint: input.blueprint,
       candidate: null,
       metadata: { generation: aiError?.metadata ?? null, reverification: null, judge: null },
+      reDerivedAnswer: null,
       checks: { structural: failure, computation: failure, reverification: failure, duplicateRisk: failure, judge: failure },
       status: "rejected",
       rejectionReasons: failure.issues
@@ -164,6 +177,7 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
 
   let reverification: ValidationResult;
   let reverificationMetadata: AiResultMetadata | null;
+  let reDerivedAnswer: string | null = null;
   if (overBudget()) {
     reverificationMetadata = null;
     reverification = fail(
@@ -179,10 +193,11 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
         systemPrompt: buildReverificationSystemPrompt(),
         userPrompt: buildReverificationUserPrompt(toPresentedQuestionView(candidate)),
         schema: answerReverificationAiSchema,
-        options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
+        options: { maxRetries: limits.maxRetries, timeoutMs }
       });
       reverificationMetadata = result.metadata;
       trackCost(reverificationMetadata);
+      reDerivedAnswer = result.data.derivedAnswer;
       reverification = compareReverification({ candidateAnswer: candidate.correctAnswer, reDerivedAnswer: result.data.derivedAnswer });
     } catch (error) {
       const aiError = error instanceof AiGenerationError ? error : null;
@@ -211,7 +226,7 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
         systemPrompt: buildJudgeSystemPrompt(),
         userPrompt: buildJudgeUserPrompt(toJudgeView(candidate)),
         schema: validationJudgeAiSchema,
-        options: { maxRetries: limits.maxRetries, timeoutMs: 30_000 }
+        options: { maxRetries: limits.maxRetries, timeoutMs }
       });
       judgeMetadata = result.metadata;
       trackCost(judgeMetadata);
@@ -232,6 +247,7 @@ export async function runGenerationPipeline(input: GenerationPipelineInput): Pro
     blueprint: input.blueprint,
     candidate,
     metadata: { generation: generationMetadata, reverification: reverificationMetadata, judge: judgeMetadata },
+    reDerivedAnswer,
     checks,
     status,
     rejectionReasons: Object.values(checks).flatMap((result) => result.issues)

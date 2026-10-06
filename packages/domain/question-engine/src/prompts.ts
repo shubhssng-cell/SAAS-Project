@@ -49,7 +49,7 @@ export function buildGenerationSystemPrompt(): string {
   ].join(" ");
 }
 
-export function buildGenerationUserPrompt(blueprint: QuestionBlueprint): string {
+export function buildGenerationUserPrompt(blueprint: QuestionBlueprint, requested?: { noveltyLevel: string; examRelevance: string }): string {
   return [
     `Blueprint id (echo this back exactly as blueprintId): ${blueprint.id}`,
     `Concept: ${blueprint.conceptName}`,
@@ -62,6 +62,8 @@ export function buildGenerationUserPrompt(blueprint: QuestionBlueprint): string 
     blueprint.trapErrorTaxonomyCode ? `Trap to build in: ${blueprint.trapErrorTaxonomyCode}` : "",
     `Expected solving time: ${blueprint.expectedTimeSeconds} seconds`,
     `Answer format: ${blueprint.answerFormat}`,
+    requested ? `Novelty level (echo exactly as questionDna.noveltyLevel): ${requested.noveltyLevel}` : "",
+    requested ? `Exam relevance (echo exactly as questionDna.examRelevance): ${requested.examRelevance}` : "",
     "",
     "Generate exactly one candidate question matching this blueprint."
   ]
