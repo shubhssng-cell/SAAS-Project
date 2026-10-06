@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tutorResponseAiSchema } from "@ipmat/ai";
 import { PSYCHOLOGICAL_PATTERNS, TUTOR_INTENTS, buildTutorContext, buildTutorUserPrompt, validateTutorGrounding } from "../src/index.js";
-import { ENROLL_A, EXAM, STUDENT_A, attempt, modelJson, ports, question, request, world } from "./fixtures.js";
+import { contractParts, ENROLL_A, EXAM, STUDENT_A, attempt, modelJson, ports, question, request, world } from "./fixtures.js";
 
 function rng(seed: number): () => number {
   let a = seed >>> 0;
@@ -62,7 +62,7 @@ describe("properties (seeded, deterministic)", () => {
     const b = await buildTutorContext(ports(), request());
     if (b.kind !== "context") throw new Error("ctx");
     for (let i = 0; i < 80; i++) {
-      const out = tutorResponseAiSchema.parse(JSON.parse(modelJson({ responseType: "mistake_explanation", text: `${phrase(r, 10)}.`, citations: ["attempt"] })));
+      const out = tutorResponseAiSchema.parse(JSON.parse(modelJson({ responseType: "mistake_explanation", text: `${phrase(r, 10)}.`, citations: ["attempt"], parts: contractParts("explain_mistake", true) })));
       expect(validateTutorGrounding(b.context, out, { protectedKey: b.protectedKey, internalTokens: b.internalTokens }).passed).toBe(true);
     }
   });

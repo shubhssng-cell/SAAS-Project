@@ -114,11 +114,13 @@ describe("answer-key policy: the key is not merely hidden, it is never in the co
     expect(prompt).not.toContain(STEP_1);
     if (intent === "give_hint") expect(protectedKey?.correctAnswer).toBe(KEY);
   });
-  it("explain_question withholds the key until THIS student has a finalized attempt", async () => {
+  it("explain_question withholds the key until THIS student has a SUBMITTED attempt", async () => {
     const before = await ctx(request({ intent: "explain_question" }), world({ attempts: [] }));
     expect(before.context.answerKey).toBeNull();
     expect(buildTutorUserPrompt(before.context)).not.toContain("AUTHORED KEY");
     expect(before.protectedKey).not.toBeNull();
+    const skipped = await ctx(request({ intent: "explain_question" }), world({ attempts: [attempt({ status: "skipped", finalAnswer: null, isCorrect: null })] }));
+    expect(skipped.context.answerKey).toBeNull(); // the practice result screen reveals the key for submitted attempts only
     const inProgress = await ctx(request({ intent: "explain_question" }), world({ attempts: [attempt({ status: "in_progress", finalAnswer: null, isCorrect: null })] }));
     expect(inProgress.context.answerKey).toBeNull();
     const after = await ctx(request({ intent: "explain_question" }));
@@ -145,10 +147,12 @@ describe("answer-key policy: the key is not merely hidden, it is never in the co
 
 describe("insufficient context is decided BEFORE any model call", () => {
   it.each([
-    ["explain_mistake", "no attempt", { attempts: [] }, "finalized_attempt"],
+    ["explain_mistake", "no attempt", { attempts: [] }, "submitted_attempt"],
     ["explain_mistake", "a correct attempt", { attempts: [attempt({ isCorrect: true, finalAnswer: KEY })] }, "incorrect_submitted_answer"],
-    ["explain_mistake", "a skipped attempt", { attempts: [attempt({ status: "skipped", finalAnswer: null, isCorrect: null })] }, "incorrect_submitted_answer"],
-    ["clarify_solution", "no attempt", { attempts: [] }, "finalized_attempt"],
+    ["explain_mistake", "a skipped attempt (a skip never entitles the student to the key)", { attempts: [attempt({ status: "skipped", finalAnswer: null, isCorrect: null })] }, "submitted_attempt"],
+    ["explain_mistake", "an abandoned attempt", { attempts: [attempt({ status: "abandoned", finalAnswer: null, isCorrect: null })] }, "submitted_attempt"],
+    ["clarify_solution", "no attempt", { attempts: [] }, "submitted_attempt"],
+    ["clarify_solution", "a skipped attempt", { attempts: [attempt({ status: "skipped", finalAnswer: null, isCorrect: null })] }, "submitted_attempt"],
     ["clarify_solution", "no authored solution", { questions: [question({ solutionSteps: [] })] }, "authored_solution_steps"]
   ] as const)("%s with %s", async (intent, _label, over, missing) => {
     const r = await buildTutorContext(ports(world(over as never)), request({ intent }));

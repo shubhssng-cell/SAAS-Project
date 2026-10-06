@@ -27,8 +27,32 @@ export type EpistemicClass = "OBSERVED_DATA" | "SOURCE_CONTENT" | "DERIVED_EVIDE
  * AI chatbot" and a "voice tutor" as OUT of scope). Each intent's disclosure
  * rules live in `policy.ts` and are labelled provisional.
  */
-export const TUTOR_INTENTS = ["explain_question", "explain_concept", "give_hint", "explain_mistake", "clarify_solution"] as const;
+export const TUTOR_INTENTS = ["explain_question", "explain_concept", "give_hint", "guide_with_question", "explain_mistake", "clarify_solution"] as const;
 export type TutorIntent = (typeof TUTOR_INTENTS)[number];
+
+/**
+ * TEACHING STATES (Phase 8 Unit 2) - what the tutor is DOING, each with its own
+ * disclosure rule, required/forbidden content and response length contract (see
+ * `policy.ts`); not merely a different prompt. There is deliberately NO ladder
+ * between them: the repository specifies no hint levels or escalation order
+ * (D-093), so a mode is chosen by the intent, never by an invented progression.
+ */
+export const TEACHING_MODES = ["hint", "guided_question", "explanation", "full_solution", "mistake_explanation", "concept_clarification"] as const;
+export type TeachingMode = (typeof TEACHING_MODES)[number];
+
+/**
+ * An earlier tutor action, handed back by the CALLER as explicit context (there
+ * is no hidden memory). Untrusted: it is quoted to the model as data and used
+ * only for continuity and to refuse an identical repeat. It can never widen
+ * what may be disclosed.
+ */
+export interface PriorTeachingAction {
+  mode: TeachingMode;
+  /** What the tutor said (the hint, the question, ...). */
+  text: string;
+  /** The student's reply to it, if any. */
+  studentReply?: string;
+}
 
 export type TutorErrorCode =
   | "invalid_request"
@@ -57,6 +81,8 @@ export interface TutorRequest {
   conceptName?: string;
   /** Optional short free text from the student. UNTRUSTED data, quoted to the model as data, never as instructions. */
   focus?: string;
+  /** Up to `TUTOR_CONTEXT_LIMITS.MAX_PRIOR_ACTIONS` earlier actions of this interaction. Explicit - the tutor stores no conversation. */
+  priorInteraction?: PriorTeachingAction[];
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +178,31 @@ export interface TutorSourcePort {
   retrieve(query: { examCode: string; text: string; limit: number }): Promise<TutorSourceResult>;
 }
 
+/**
+ * The student's own autopsy outcome for THIS attempt, already reduced to
+ * STUDENT-FACING wording by the owning side (the same wording the autopsy
+ * confirmation screen shows). It has no internal rationale, evidence list,
+ * model confidence or taxonomy code field - those never cross this port.
+ */
+export interface TutorDiagnosisRecord {
+  studentId: string;
+  attemptId: string;
+  status: "awaiting_confirmation" | "confirmed" | "rejected" | "corrected";
+  /** Student-facing label of the proposed category. */
+  label: string | null;
+  /** The hypothesis as worded to the student. */
+  hypothesisText: string | null;
+  /** The student's own correction, as typed. */
+  correctionText: string | null;
+  /** Student-facing label of a CONFIRMED, active repair target. Re-checked: ignored unless status is "confirmed". */
+  repairTargetLabel: string | null;
+  /** Internal codes the model must never repeat (e.g. an error-taxonomy code). Leak-check only. */
+  internalTokens?: string[];
+}
+export interface TutorDiagnosisPort {
+  getDiagnosis(studentId: string, attemptId: string): Promise<TutorDiagnosisRecord | null>;
+}
+
 export type TutorOutcome = "answered" | "insufficient_context" | "rejected_ungrounded" | "provider_failure";
 export type TutorFailureKind = "timeout" | "malformed_output" | "provider_error";
 
@@ -159,6 +210,7 @@ export interface TutorAuditEntry {
   at: string;
   requestId: string;
   intent: TutorIntent;
+  teachingMode: TeachingMode;
   studentId: string;
   enrollmentId: string;
   examCode: string | null;
@@ -213,6 +265,14 @@ export interface TutorContext {
   evidence: Array<{ ref: string; kind: TutorEvidenceKind; statement: string }>;
   sources: Array<{ ref: string; chunkId: string; text: string; location: string; title: string; sourceKey: string; version: number }>;
   sourceAccess: "not_requested" | "ok" | "denied";
+  /** The student's autopsy outcome (explain_mistake only), by status. A rejected/corrected one never carries the rejected wording - that is held by the validator. */
+  diagnosis:
+    | { ref: string; status: "awaiting_confirmation"; hypothesisText: string }
+    | { ref: string; status: "confirmed"; label: string; hypothesisText: string | null; repairTargetLabel: string | null }
+    | { ref: string; status: "rejected" }
+    | { ref: string; status: "corrected"; correctionText: string }
+    | null;
+  prior: PriorTeachingAction[];
   focus: string | null;
   /** Everything citable, with its epistemic class. */
   refs: ContextRef[];
@@ -239,7 +299,16 @@ export type GroundingViolationCode =
   | "misreported_attempt"
   | "unhedged_hypothesis"
   | "hypothesis_not_permitted"
-  | "disallowed_response_type";
+  | "disallowed_response_type"
+  | "missing_explanation_part"
+  | "parts_not_permitted"
+  | "contradicts_key"
+  | "socratic_step_invalid"
+  | "response_too_long"
+  | "repeated_teaching_action"
+  | "unconfirmed_diagnosis_as_fact"
+  | "unconfirmed_diagnosis_not_queried"
+  | "rejected_diagnosis_reused";
 
 export interface GroundingViolation {
   code: GroundingViolationCode;
@@ -274,8 +343,18 @@ export interface TutorHypothesis {
   evidenceRefs: string[];
 }
 
+/** What the tutor DID - the teaching action, never the model's private reasoning. */
+export interface TeachingAction {
+  mode: TeachingMode;
+  /** Whether the answer key/solution was authorized in the context for this response. */
+  answerDisclosure: "withheld" | "authorized";
+  socraticStep: { checks: string; question: string; conceptRef: string; evidenceRefs: string[]; learnsFromReply: string } | null;
+}
+
 export interface TutorResponse {
   outcome: TutorOutcome;
+  teachingAction: TeachingAction;
+  parts: TutorResponseAiOutput["parts"] | null;
   responseType: TutorResponseAiOutput["responseType"] | null;
   /** The explanation (AI_EXPLANATION). Null whenever nothing groundable may be shown. */
   text: string | null;

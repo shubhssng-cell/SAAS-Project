@@ -34,7 +34,7 @@ describe("@ipmat/tutor dependency boundary", () => {
 describe("response contract", () => {
   it("the model schema has no field for reasoning, chain-of-thought, confidence, mastery, readiness or a student diagnosis", () => {
     const keys = Object.keys(tutorResponseAiSchema.shape);
-    expect(keys.sort()).toEqual(["citations", "hypotheses", "missingContext", "questionQuotes", "relationClaims", "responseType", "text"]);
+    expect(keys.sort()).toEqual(["citations", "hypotheses", "missingContext", "parts", "questionQuotes", "relationClaims", "responseType", "socraticStep", "text"]);
     for (const k of keys) expect(/reason|thought|think|confidence|mastery|ready|score|diagnos|ability/i.test(k), k).toBe(false);
   });
   it("a model-supplied extra field is stripped, not carried", () => {
@@ -53,8 +53,8 @@ describe("policy contracts are explicit, conservative and honest about what is u
   it("no intent may carry revision/curriculum/simulation/autopsy evidence in Unit 1 (no spec says which may)", () => {
     for (const i of TUTOR_INTENTS) expect(TUTOR_INTENT_POLICIES[i].allowedEvidenceKinds).toEqual([]);
   });
-  it("only mistake explanation may carry hypotheses", () => {
-    expect(TUTOR_INTENTS.filter((i) => TUTOR_INTENT_POLICIES[i].allowHypotheses)).toEqual(["explain_mistake"]);
+  it("only the guided question and the mistake explanation may carry hypotheses", () => {
+    expect(TUTOR_INTENTS.filter((i) => TUTOR_INTENT_POLICIES[i].allowHypotheses)).toEqual(["guide_with_question", "explain_mistake"]);
   });
   it("the undecided tutor policies are enumerated, not silently decided", () => {
     expect(UNRESOLVED_TUTOR_POLICIES.length).toBeGreaterThanOrEqual(8);

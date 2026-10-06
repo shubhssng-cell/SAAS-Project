@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { EvidenceRetriever, InMemoryContentIntelligenceRepository, LexicalRetrievalIndex } from "@ipmat/content-intelligence";
 import { TUTOR_SERVICE_LIMITS, TutorError, createEvidenceRetrieverSourcePort, toStudentTutorView } from "../src/index.js";
-import { ENROLL_A, ENROLL_B, EXAM, KEY, OTHER_EXAM, QUESTION_ID, STUDENT_A, STUDENT_B, build, modelJson, request, world } from "./fixtures.js";
+import { contractParts, modelFor, ENROLL_A, ENROLL_B, EXAM, KEY, OTHER_EXAM, QUESTION_ID, STUDENT_A, STUDENT_B, build, modelJson, request, world } from "./fixtures.js";
 
 const mistakeAnswer = modelJson({
   responseType: "mistake_explanation",
   text: "Your submitted answer was ₹480, while the keyed answer is ₹500. A 20 percent discount multiplies the marked price by 0.8.",
   citations: ["attempt", "answer_key"],
+  parts: contractParts("explain_mistake", true),
   hypotheses: [{ text: "It looks like you may have subtracted 20 from 625. Is that what you did?", evidenceRefs: ["attempt"] }]
 });
 const leaking = modelJson({ responseType: "hint", text: `The correct answer is ${KEY}.`, citations: ["question"] });
@@ -24,7 +25,7 @@ describe("service: a grounded answer", () => {
     expect(r.grounding.passed).toBe(true);
     expect(r.grounding.checksRun.length).toBeGreaterThan(5);
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ outcome: "answered", intent: "explain_mistake", examCode: EXAM, generationAttempts: 1, model: { provider: "scripted", model: "scripted-v1", promptVersion: "tutor-response-v1" } });
+    expect(audits[0]).toMatchObject({ outcome: "answered", intent: "explain_mistake", examCode: EXAM, generationAttempts: 1, model: { provider: "scripted", model: "scripted-v1", promptVersion: "tutor-response-v2" } });
   });
   it("audit records metadata only: no prompt, no question text, no response text, no student free text", async () => {
     const { service, audits } = build([mistakeAnswer]);
@@ -40,13 +41,13 @@ describe("service: a grounded answer", () => {
 });
 
 describe("service: insufficient context and the firewall make no model call", () => {
-  it("no finalized attempt for a mistake explanation -> insufficient_context, zero provider calls, fixed text", async () => {
+  it("no submitted attempt for a mistake explanation -> insufficient_context, zero provider calls, fixed text", async () => {
     const { service, provider, audits } = build([], { world: world({ attempts: [] }) });
     const r = await service.answer(request());
     expect(r.outcome).toBe("insufficient_context");
     expect(r.text).toBeNull();
     expect(r.fallbackMessage).toBeTruthy();
-    expect(r.uncertainty).toEqual({ insufficientContext: true, missing: ["finalized_attempt"] });
+    expect(r.uncertainty).toEqual({ insufficientContext: true, missing: ["submitted_attempt"] });
     expect(provider.prompts).toHaveLength(0);
     expect(audits[0]!.outcome).toBe("insufficient_context");
   });
@@ -165,7 +166,7 @@ describe("no chain-of-thought is stored or exposed", () => {
 
 describe("source retrieval reuses the Phase 6 abstraction and respects its rights boundary", () => {
   const concept = request({ intent: "explain_concept", conceptName: "Percentages", questionId: undefined });
-  const conceptAnswer = modelJson({ responseType: "concept_explanation", text: "A percentage is a ratio expressed per hundred.", citations: ["concept:Percentages"] });
+  const conceptAnswer = modelFor("explain_concept", { text: "A percentage is a ratio expressed per hundred." });
 
   it("a STUDENT principal is denied by the real EvidenceRetriever: the tutor proceeds on structured context only and records the denial", async () => {
     const retriever = new EvidenceRetriever(new InMemoryContentIntelligenceRepository(), new LexicalRetrievalIndex());
@@ -182,7 +183,7 @@ describe("source retrieval reuses the Phase 6 abstraction and respects its right
       retrieve: async () => [{ chunkId: "chk_internal_1", score: 1, matchedBy: "lexical", text: "A percentage is a number per hundred.", location: { lineStart: 3, lineEnd: 4, charStart: 0, charEnd: 10, page: null, headingPath: ["Notes", "Percentages"] }, source: { sourceKey: "internal-key", title: "Synthetic notes", version: 2 } }]
     } as unknown as EvidenceRetriever;
     const sources = createEvidenceRetrieverSourcePort(fake, { role: "content_reviewer", examCodes: [EXAM] });
-    const cited = modelJson({ responseType: "concept_explanation", text: "A percentage is a number per hundred.", citations: ["concept:Percentages", "source:1"] });
+    const cited = modelFor("explain_concept", { text: "A percentage is a number per hundred.", citations: ["concept:Percentages", "source:1"] });
     const { service, provider } = build([cited], { service: { sources } });
     const r = await service.answer(concept);
     expect(r.outcome).toBe("answered");
@@ -210,7 +211,7 @@ describe("the student view exposes only student-safe fields", () => {
     const view = toStudentTutorView(r);
     const json = JSON.stringify(view);
     for (const hidden of [STUDENT_A, ENROLL_A, QUESTION_ID, "req-1", "scripted", "contextDigest", "checksRun", "violations", "audit", "includedSections"]) expect(json).not.toContain(hidden);
-    expect(Object.keys(view).sort()).toEqual(["basedOn", "hypotheses", "message", "missing", "outcome", "sources"]);
+    expect(Object.keys(view).sort()).toEqual(["basedOn", "hypotheses", "message", "missing", "mode", "outcome", "parts", "question", "sources"]);
     expect(view.hypotheses[0]!.label).toBe("AI hypothesis");
   });
   it("non-answered outcomes show only the fixed message", async () => {
@@ -224,14 +225,17 @@ describe("the student view exposes only student-safe fields", () => {
 
 describe("intent contracts (policy, not a finished tutoring product)", () => {
   it.each([
-    ["give_hint", goodHint, "hint"],
-    ["explain_question", modelJson({ responseType: "explanation", text: "It asks for a price after a percentage decrease.", citations: ["question"] }), "explanation"],
-    ["explain_concept", modelJson({ responseType: "concept_explanation", text: "Percentages express parts per hundred.", citations: ["concept:Percentages"] }), "concept_explanation"],
-    ["explain_mistake", mistakeAnswer, "mistake_explanation"],
-    ["clarify_solution", modelJson({ responseType: "solution_clarification", text: "Step one multiplies the marked price by the remaining fraction.", citations: ["answer_key"] }), "solution_clarification"]
-  ] as const)("%s answers with responseType %s", async (intent, raw, type) => {
+    ["give_hint", "hint"],
+    ["guide_with_question", "guided_question"],
+    ["explain_question", "explanation"],
+    ["explain_concept", "concept_explanation"],
+    ["explain_mistake", "mistake_explanation"],
+    ["clarify_solution", "solution_clarification"]
+  ] as const)("%s answers with responseType %s", async (intent, type) => {
+    const raw = intent === "explain_mistake" ? mistakeAnswer : modelFor(intent);
     const { service } = build([raw]);
     const r = await service.answer(request({ intent, conceptName: "Percentages" }));
+    expect(r.grounding.violations).toEqual([]);
     expect(r.outcome).toBe("answered");
     expect(r.responseType).toBe(type);
   });

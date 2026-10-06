@@ -1,11 +1,13 @@
 import { generateStructured, tutorResponseAiSchema, AiGenerationError, type AiCallOptions, type AiProvider, type AiResultMetadata, type TutorResponseAiOutput } from "@ipmat/ai";
 import { buildTutorContext, digestTutorContext, type TutorContextDeps } from "./context.js";
 import { validateTutorGrounding } from "./grounding.js";
+import { TUTOR_INTENT_POLICIES } from "./policy.js";
 import { TUTOR_PROMPT_VERSION, buildTutorSystemPrompt, buildTutorUserPrompt } from "./prompts.js";
 import type {
   GroundingReport,
   GroundingViolationCode,
   TutorAuditEntry,
+  TeachingAction,
   TutorAuditSink,
   TutorContext,
   TutorFailureKind,
@@ -70,6 +72,7 @@ export function createTutorService(deps: TutorServiceDeps) {
       at: now().toISOString(),
       requestId: newRequestId(),
       intent: request.intent,
+      teachingMode: TUTOR_INTENT_POLICIES[request.intent].teachingMode,
       studentId: request.studentId,
       enrollmentId: request.enrollmentId,
       examCode: null,
@@ -89,16 +92,29 @@ export function createTutorService(deps: TutorServiceDeps) {
   const modelAudit = (m: AiResultMetadata | null): TutorAuditEntry["model"] =>
     m ? { provider: m.provider, model: m.model, promptVersion: m.promptVersion, latencyMs: m.latencyMs, tokenUsage: m.tokenUsage, estimatedCostUsd: m.estimatedCostUsd, attempts: m.attempts } : null;
 
-  async function finish(request: TutorRequest, outcome: TutorOutcome, parts: Omit<TutorResponse, "outcome" | "audit">, audit: Partial<TutorAuditEntry>): Promise<TutorResponse> {
+  type ResponseParts = Omit<TutorResponse, "outcome" | "audit" | "teachingAction" | "parts"> & Partial<Pick<TutorResponse, "teachingAction" | "parts">>;
+
+  /** What the tutor attempted when no model answer was produced: its mode, with nothing disclosed. */
+  const noAction = (request: TutorRequest): TeachingAction => ({ mode: TUTOR_INTENT_POLICIES[request.intent].teachingMode, answerDisclosure: "withheld", socraticStep: null });
+
+  async function finish(request: TutorRequest, outcome: TutorOutcome, parts: ResponseParts, audit: Partial<TutorAuditEntry>): Promise<TutorResponse> {
     const entry = baseAudit(request, { outcome, ...audit });
     await emit(entry);
-    return { outcome, ...parts, audit: entry };
+    return { outcome, teachingAction: noAction(request), parts: null, ...parts, audit: entry };
   }
 
-  function toResponseParts(context: TutorContext, output: TutorResponseAiOutput, grounding: GroundingReport): Omit<TutorResponse, "outcome" | "audit"> {
+  function toResponseParts(context: TutorContext, output: TutorResponseAiOutput, grounding: GroundingReport): ResponseParts {
     const byRef = new Map(context.refs.map((r) => [r.ref, r]));
-    const cited = [...new Set(output.citations)];
+    const step = output.socraticStep ?? null;
+    const cited = [...new Set([...output.citations, ...(step ? [step.conceptRef, ...step.evidenceRefs] : [])])];
     return {
+      teachingAction: {
+        mode: TUTOR_INTENT_POLICIES[context.intent].teachingMode,
+        answerDisclosure: context.answerKey ? "authorized" : "withheld",
+        // The teaching ACTION is recorded (what was checked, the question, what the reply would show) - never the model's private reasoning.
+        socraticStep: step ? { checks: step.checks, question: step.question, conceptRef: step.conceptRef, evidenceRefs: [...step.evidenceRefs], learnsFromReply: step.learnsFromReply } : null
+      },
+      parts: output.parts ?? null,
       responseType: output.responseType,
       text: output.text,
       fallbackMessage: null,
@@ -145,7 +161,7 @@ export function createTutorService(deps: TutorServiceDeps) {
         );
       }
 
-      const { context, scope, protectedKey, internalTokens } = built;
+      const { context, scope, protectedKey, internalTokens, rejectedTerms } = built;
       const contextDigest = digestTutorContext(context);
       const foreign = deps.listOtherExamTerms ? [...(await deps.listOtherExamTerms(scope.examCode))].filter((t) => t.toLowerCase() !== scope.examCode.toLowerCase()) : undefined;
       const common = { examCode: scope.examCode, contextDigest, includedSections: context.includedSections, withheldSections: context.withheldSections };
@@ -188,7 +204,7 @@ export function createTutorService(deps: TutorServiceDeps) {
           );
         }
 
-        const report = validateTutorGrounding(context, output, { protectedKey, internalTokens, foreignExamTerms: foreign });
+        const report = validateTutorGrounding(context, output, { protectedKey, internalTokens, rejectedTerms, foreignExamTerms: foreign });
         lastReport = report;
         if (report.passed) {
           const outcome: TutorOutcome = output.responseType === "insufficient_context" ? "insufficient_context" : "answered";

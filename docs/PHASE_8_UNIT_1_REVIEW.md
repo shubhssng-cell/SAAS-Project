@@ -2,6 +2,8 @@
 
 Decision record: [DECISIONS.md D-092](DECISIONS.md). Code: `packages/domain/tutor` (`@ipmat/tutor`, pure) and the `tutor-response` task/schema in `packages/ai`.
 
+> **Superseded in part by Unit 2 (D-093):** the key is now disclosed only for a SUBMITTED attempt (not any finalized one), the missing-attempt code is `submitted_attempt`, and the prompt version is `tutor-response-v2`. See [PHASE_8_UNIT_2_REVIEW.md](PHASE_8_UNIT_2_REVIEW.md).
+
 ## 1. Specification audit
 
 **A. Explicitly specified about tutoring:** almost nothing. `product-roadmap/PHASE_0_PRODUCT_DEFINITION.md` §8 lists a "general-purpose AI chatbot" and a "voice tutor" as OUT of scope for the initial product. PRODUCT_SPEC / D-005 / D-006 fix the hard rules (no confidence or psychological inference, a diagnosis is a hypothesis until confirmed, no fake AI). `hint_opened` and `solution_opened` exist only as attempt events. Phase 6 Prompt 4 and D-085 record "no tutor" as not built. No document defines hint levels, when an answer may be revealed, a tutoring tone, or conversation memory.

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { tutorResponseAiSchema, type TutorResponseAiOutput } from "@ipmat/ai";
 import { buildTutorContext, validateTutorGrounding, type GroundingViolationCode, type TutorRequest } from "../src/index.js";
-import { CELL_ID, ENROLL_A, EXAM, KEY, OTHER_EXAM, QUESTION_ID, STEP_1, STUDENT_A, TRAP_CODE, modelJson, ports, request, world, type World } from "./fixtures.js";
+import { contractParts, CELL_ID, ENROLL_A, EXAM, KEY, OTHER_EXAM, QUESTION_ID, STEP_1, STUDENT_A, TRAP_CODE, modelJson, ports, request, world, type World } from "./fixtures.js";
 
 async function run(req: TutorRequest, over: Record<string, unknown>, w: World = world()) {
   const built = await buildTutorContext(ports(w), req);
   if (built.kind !== "context") throw new Error("expected context");
-  const output: TutorResponseAiOutput = tutorResponseAiSchema.parse(JSON.parse(modelJson(over)));
+  // Contract-complete parts by default so each test isolates the ONE defect it names; pass `parts: undefined`-free overrides to test the contract itself.
+  const merged = { ...("parts" in over ? {} : { parts: contractParts(req.intent, built.context.answerKey !== null) }), ...over };
+  const output: TutorResponseAiOutput = tutorResponseAiSchema.parse(JSON.parse(modelJson(merged)));
   return validateTutorGrounding(built.context, output, { protectedKey: built.protectedKey, internalTokens: built.internalTokens, foreignExamTerms: [OTHER_EXAM, "CAT"] });
 }
 const codes = (r: { violations: Array<{ code: GroundingViolationCode }> }) => r.violations.map((v) => v.code);

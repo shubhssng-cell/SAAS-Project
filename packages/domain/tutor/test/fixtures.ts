@@ -5,6 +5,7 @@ import {
   type TutorAttemptRecord,
   type TutorAuditEntry,
   type TutorContextDeps,
+  type TutorDiagnosisRecord,
   type TutorQuestionRecord,
   type TutorRequest,
   type TutorServiceDeps,
@@ -69,12 +70,60 @@ export const attempt = (over: Partial<TutorAttemptRecord> = {}): TutorAttemptRec
   ...over
 });
 
+/** Neutral, contract-complete explanation parts per intent (the Unit 2 quality contract). Keyed parts only when the key is authorized. */
+export const contractParts = (intent: string, keyAuthorized: boolean): Record<string, unknown> | undefined => {
+  const asked = "It asks for the selling price after a percentage decrease.";
+  const concept = "A percentage decrease multiplies the price by the remaining fraction.";
+  const takeaway = "Convert the percentage into a multiplier first.";
+  const steps = ["Find the remaining fraction after the decrease.", "Multiply the marked price by that fraction."];
+  const whyCorrect = "Multiplying by the remaining fraction applies the whole decrease once.";
+  const whyIncorrectPathFails = "Subtracting the percentage figure as a flat amount ignores that it applies to the price.";
+  switch (intent) {
+    case "explain_question":
+      return keyAuthorized ? { asked, concept, takeaway, steps, whyCorrect } : { asked, concept, takeaway };
+    case "explain_concept":
+      return { concept, takeaway };
+    case "explain_mistake":
+      return { whyIncorrectPathFails, whyCorrect, takeaway };
+    case "clarify_solution":
+      return { asked, concept, steps, whyCorrect, takeaway };
+    default:
+      return undefined;
+  }
+};
+
+export const RESPONSE_TYPE: Record<string, string> = {
+  explain_question: "explanation",
+  explain_concept: "concept_explanation",
+  give_hint: "hint",
+  guide_with_question: "guided_question",
+  explain_mistake: "mistake_explanation",
+  clarify_solution: "solution_clarification"
+};
+
+/** A contract-complete model output for an intent. Override any field to test a defect. */
+export const modelFor = (intent: string, over: Record<string, unknown> = {}, keyAuthorized = true): string => {
+  const parts = contractParts(intent, keyAuthorized);
+  const guided = intent === "guide_with_question";
+  return modelJson({
+    responseType: RESPONSE_TYPE[intent],
+    text: guided ? "What fraction of the marked price remains after a 20 percent decrease?" : "A short, neutral teaching response.",
+    citations: guided ? ["concept:Percentages", "question"] : intent === "explain_concept" ? ["concept:Percentages"] : intent === "explain_mistake" ? ["attempt", "answer_key"] : intent === "clarify_solution" ? ["answer_key"] : ["question"],
+    ...(parts ? { parts } : {}),
+    ...(guided
+      ? { socraticStep: { checks: "whether the student can name the remaining fraction", question: "What fraction of the marked price remains after a 20 percent decrease?", conceptRef: "concept:Percentages", evidenceRefs: ["question"], learnsFromReply: "whether the student treats the percentage as a multiplier or as a flat amount" } }
+      : {}),
+    ...over
+  });
+};
+
 export interface World {
   enrollments: Array<{ studentId: string; enrollmentId: string; examCode: string }>;
   questions: TutorQuestionRecord[];
   attempts: TutorAttemptRecord[];
   sources: TutorSourceItem[];
   sourceDenied: boolean;
+  diagnosis: TutorDiagnosisRecord | null;
 }
 
 export const world = (over: Partial<World> = {}): World => ({
@@ -87,6 +136,7 @@ export const world = (over: Partial<World> = {}): World => ({
   attempts: [attempt()],
   sources: [],
   sourceDenied: false,
+  diagnosis: null,
   ...over
 });
 
@@ -109,6 +159,7 @@ export function ports(w: World = world()): Required<TutorContextDeps> & { calls:
       }
     },
     evidence: { getEvidence: async () => [] },
+    diagnoses: { getDiagnosis: async () => w.diagnosis },
     sources: {
       retrieve: async (q) => {
         calls.sources++;

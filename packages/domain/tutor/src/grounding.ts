@@ -30,6 +30,8 @@ export interface GroundingOptions {
   protectedKey: ProtectedKey | null;
   /** Own ids and internal tokens that must never appear in a response. */
   internalTokens?: readonly string[];
+  /** Wording the student REJECTED or corrected: it must not be proposed again. */
+  rejectedTerms?: readonly string[];
 }
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
@@ -62,6 +64,10 @@ export const EXAM_RULE_PATTERNS: readonly RegExp[] = [
   /\b(?:the\s+)?(?:ipmat|exam|paper|test)\s+(?:has|contains|consists of|includes|comprises|is divided into)\b/i,
   /\bcut-?offs?\b|\bsyllabus\s+(?:includes|covers|contains)\b|\bnumber of (?:questions|sections)\b|\bsectional\b/i
 ];
+
+/** A causal claim about WHY the student erred, which is only the student's to confirm (D-006). */
+const CAUSAL_CLAIM = /\b(?:the|your|this)\s+(?:reason|cause)\b[^.?]{0,60}\b(?:is|was)\b|\b(?:this|it)\s+(?:happened|went wrong)\s+because\s+you\b|\byou\s+(?:got|answered)\s+(?:this|it)\s+wrong\s+because\b/i;
+const CONFIRMATION_CLAIM = /\byou(?:'ve|\s+have)?\s+(?:confirmed|told us|agreed)\b|\bconfirmed\s+(?:that|diagnosis)\b/i;
 
 const HEDGE = /\b(?:may|might|could|possibly|perhaps|looks like|seems|appears|one possibility|is it that)\b|\?/i;
 const VERDICT_CUE = /\b(?:answer|correct|right|solution|result|equals?|therefore|thus|final|key|gives?|get|choose|select|pick|option)\b|=/i;
@@ -101,6 +107,25 @@ function solutionLeaked(text: string, key: ProtectedKey): boolean {
   });
 }
 
+const trimToken = (t: string): string => t.replace(/[.,;:!?)"”]+$/g, "");
+
+/** The authored key is the one ground truth in a keyed response: a stated correct answer must be it, and another option may not be called correct. */
+function contradictsKey(text: string, context: TutorContext): boolean {
+  const key = context.answerKey?.correctAnswer;
+  if (!key) return false;
+  const nk = norm(key);
+  const stated = /(?<!\byour\s)(?<!\bsubmitted\s)(?<!\bchosen\s)\b(?:(?:correct|right|keyed)\s+(?:answer|option|choice)|answer)\s*(?:is|=|:)\s*["“(]?([^\s"”;]+)/gi;
+  for (const m of text.matchAll(stated)) {
+    const token = norm(trimToken(m[1] ?? ""));
+    if (token.length > 0 && !nk.startsWith(token)) return true;
+  }
+  for (const option of context.question?.options ?? []) {
+    if (norm(option) === nk) continue;
+    if (new RegExp(`(?<![\\p{L}\\p{N}.,])${escapeRe(option.trim())}(?![\\p{L}\\p{N}])\\s+(?:is|would be)\\s+(?:the\\s+)?(?:correct|right)\\b`, "iu").test(text)) return true;
+  }
+  return false;
+}
+
 export function validateTutorGrounding(context: TutorContext, output: TutorResponseAiOutput, options: GroundingOptions): GroundingReport {
   const policy = TUTOR_INTENT_POLICIES[context.intent];
   const violations: GroundingViolation[] = [];
@@ -109,7 +134,16 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
   const refSet = new Set(context.refs.map((r) => r.ref));
   const insufficient = output.responseType === "insufficient_context";
 
-  const allText = [output.text, ...output.hypotheses.map((h) => h.text)].join("\n");
+  const parts = output.parts ?? {};
+  const step = output.socraticStep;
+  const keyAuthorized = context.answerKey !== null;
+  const allText = [
+    output.text,
+    ...output.hypotheses.map((h) => h.text),
+    ...[parts.asked, parts.concept, parts.whyCorrect, parts.whyIncorrectPathFails, parts.takeaway, parts.tryNext].filter((x): x is string => typeof x === "string"),
+    ...(parts.steps ?? []),
+    ...(step ? [step.checks, step.question, step.learnsFromReply] : [])
+  ].join("\n");
 
   checksRun.push("response_type_allowed");
   if (!policy.allowedResponseTypes.includes(output.responseType)) add("disallowed_response_type", `responseType "${output.responseType}" is not permitted for intent "${context.intent}"`);
@@ -117,6 +151,10 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
   checksRun.push("references_exist");
   for (const c of output.citations) if (!refSet.has(c)) add("unknown_reference", `cited reference is not in the supplied context: ${c.slice(0, 60)}`);
   for (const h of output.hypotheses) for (const r of h.evidenceRefs) if (!refSet.has(r)) add("unknown_reference", `hypothesis evidence reference is not in the supplied context: ${r.slice(0, 60)}`);
+
+  if (step) {
+    for (const r of step.evidenceRefs) if (!refSet.has(r)) add("unknown_reference", `Socratic evidence reference is not in the supplied context: ${r.slice(0, 60)}`);
+  }
 
   if (!insufficient) {
     checksRun.push("citation_required");
@@ -127,7 +165,7 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
   if (output.hypotheses.length > 0 && !policy.allowHypotheses) add("hypothesis_not_permitted", `intent "${context.intent}" does not permit hypotheses`);
   for (const h of output.hypotheses) {
     if (!HEDGE.test(h.text)) add("unhedged_hypothesis", "a hypothesis must be phrased as a possibility or a question");
-    if (!h.evidenceRefs.some((r) => r === "attempt" || r.startsWith("evidence:"))) add("unknown_reference", "a hypothesis must rest on the student's recorded attempt or supplied evidence");
+    if (!h.evidenceRefs.some((r) => r === "attempt" || r === "diagnosis" || r.startsWith("evidence:"))) add("unknown_reference", "a hypothesis must rest on the student's recorded attempt, their autopsy outcome or supplied evidence");
   }
 
   checksRun.push("relation_claims");
@@ -142,6 +180,9 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
       ...(context.question?.options ?? []),
       context.attempt?.workingSteps ?? "",
       context.attempt?.reasoningText ?? "",
+      context.diagnosis?.status === "awaiting_confirmation" ? context.diagnosis.hypothesisText : "",
+      context.diagnosis?.status === "corrected" ? context.diagnosis.correctionText : "",
+      ...context.prior.flatMap((a) => [a.text, a.studentReply ?? ""]),
       context.focus ?? "",
       ...context.sources.map((s) => s.text),
       ...(context.answerKey?.solutionSteps ?? [])
@@ -186,6 +227,44 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
     if (a.isCorrect === false && /\byour (?:answer|response)\s+(?:was|is)\s+(?:correct|right)\b/i.test(allText)) add("misreported_attempt", "the response calls an incorrect submission correct");
     if (a.isCorrect === true && /\byour (?:answer|response)\s+(?:was|is)\s+(?:incorrect|wrong)\b/i.test(allText)) add("misreported_attempt", "the response calls a correct submission incorrect");
   }
+
+  checksRun.push("teaching_mode_contract");
+  if (!insufficient) {
+    const present = (name: string): boolean => {
+      const v = (parts as Record<string, unknown>)[name];
+      return Array.isArray(v) ? v.length > 0 : typeof v === "string" && v.length > 0;
+    };
+    const anyPart = Object.values(parts).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined));
+    if (!policy.partsPermitted && anyPart) add("parts_not_permitted", `a ${policy.teachingMode} carries no worked or structured explanation parts`);
+    for (const name of [...policy.requiredParts, ...(keyAuthorized ? policy.requiredPartsWhenKeyAuthorized : [])]) if (!present(name)) add("missing_explanation_part", `the ${policy.teachingMode} contract requires "${name}"`);
+    if (!keyAuthorized && policy.partsPermitted) for (const name of policy.forbiddenPartsWhenKeyWithheld) if (present(name)) add("parts_not_permitted", `"${name}" would solve the question while the answer key is withheld`);
+    if (policy.requiresSocraticStep) {
+      if (!step) add("socratic_step_invalid", "a guided question needs a socraticStep");
+      else {
+        if (!step.conceptRef.startsWith("concept:") || !refSet.has(step.conceptRef)) add("socratic_step_invalid", "the Socratic step must name a concept from the supplied context");
+        const qMarks = (step.question.match(/\?/g) ?? []).length;
+        if (qMarks === 0) add("socratic_step_invalid", "the Socratic step's question must be a question");
+        if (qMarks > 2) add("socratic_step_invalid", "a Socratic step asks one thing at a time");
+        if (!norm(output.text).includes(norm(step.question))) add("socratic_step_invalid", "the shown text must contain the step's question");
+      }
+    } else if (step) add("socratic_step_invalid", `a ${policy.teachingMode} carries no Socratic step`);
+    if (policy.maxTextChars !== null && (output.text.length > policy.maxTextChars || (step?.question.length ?? 0) > policy.maxTextChars)) add("response_too_long", `a ${policy.teachingMode} is limited to ${policy.maxTextChars} characters`);
+    const shown = [norm(output.text), ...(step ? [norm(step.question)] : [])];
+    if (context.prior.some((a) => shown.includes(norm(a.text)))) add("repeated_teaching_action", "this repeats an earlier action of the interaction");
+  }
+
+  checksRun.push("key_consistency");
+  if (contradictsKey(allText, context)) add("contradicts_key", "the response states an answer that differs from the authored key");
+
+  checksRun.push("diagnosis_status");
+  const d = context.diagnosis;
+  if ((!d || d.status !== "confirmed") && CAUSAL_CLAIM.test(allText)) add("unconfirmed_diagnosis_as_fact", "a cause for the student's error is stated without the student having confirmed one");
+  if (d?.status === "awaiting_confirmation") {
+    if (CONFIRMATION_CLAIM.test(allText)) add("unconfirmed_diagnosis_as_fact", "the response treats an unconfirmed hypothesis as confirmed");
+    if (!insufficient && context.intent === "explain_mistake" && output.hypotheses.length === 0) add("unconfirmed_diagnosis_not_queried", "an unconfirmed diagnosis must be put to the student as a hypothesis they can confirm or correct");
+  }
+  const lowered = norm(allText);
+  for (const term of options.rejectedTerms ?? []) if (norm(term).length >= 6 && lowered.includes(norm(term))) add("rejected_diagnosis_reused", "the response repeats wording the student rejected or corrected");
 
   return { checksRun, violations, passed: violations.length === 0 };
 }

@@ -16,6 +16,7 @@ import { z } from "zod";
 export const tutorResponseTypeSchema = z.enum([
   "explanation",
   "hint",
+  "guided_question",
   "mistake_explanation",
   "concept_explanation",
   "solution_clarification",
@@ -32,6 +33,38 @@ export const tutorRelationTypeSchema = z.enum([
   "advanced_extension",
   "related_but_distinct"
 ]);
+
+const part = z.string().trim().min(1).max(800);
+
+/**
+ * The explanation quality contract's named parts (Phase 8 Unit 2). Which parts
+ * a teaching mode REQUIRES, or FORBIDS (a hint or a withheld-key explanation
+ * must not carry worked steps), is decided by `@ipmat/tutor`'s policy - this
+ * schema only fixes their shape. They are concise pedagogical content, never a
+ * reasoning trace.
+ */
+export const tutorExplanationPartsSchema = z.object({
+  asked: part.optional(),
+  concept: part.optional(),
+  steps: z.array(part).max(12).optional(),
+  whyCorrect: part.optional(),
+  whyIncorrectPathFails: part.optional(),
+  takeaway: part.optional(),
+  tryNext: part.optional()
+});
+
+/**
+ * One Socratic step as a TEACHING ACTION: what is being checked, the question,
+ * the concept and evidence it rests on, and what the student's reply would
+ * reveal. It records what the tutor DOES, not why the model thought so.
+ */
+export const tutorSocraticStepSchema = z.object({
+  checks: z.string().trim().min(1).max(300),
+  question: z.string().trim().min(1).max(500),
+  conceptRef: z.string().trim().min(1).max(200),
+  evidenceRefs: z.array(z.string().trim().min(1).max(200)).max(10).default([]),
+  learnsFromReply: z.string().trim().min(1).max(300)
+});
 
 export const tutorResponseAiSchema = z.object({
   responseType: tutorResponseTypeSchema,
@@ -51,6 +84,10 @@ export const tutorResponseAiSchema = z.object({
     .default([]),
   /** Verbatim quotations from the question/the student's working, so they can be checked against the supplied context. */
   questionQuotes: z.array(z.string().trim().min(1).max(300)).max(10).default([]),
+  /** Named explanation parts (explanation / full solution / mistake / concept modes). */
+  parts: tutorExplanationPartsSchema.optional(),
+  /** Required for the guided-question mode, forbidden elsewhere. */
+  socraticStep: tutorSocraticStepSchema.optional(),
   /** What the model could not ground, when it says so. */
   missingContext: z.array(z.string().trim().min(1).max(200)).max(10).default([])
 });
