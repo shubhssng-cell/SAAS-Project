@@ -6,3 +6,4 @@ export * from "./grounding.js";
 export * from "./service.js";
 export * from "./sourcePort.js";
 export * from "./view.js";
+export * from "./localization.js";

@@ -88,6 +88,11 @@ export const tutorResponseAiSchema = z.object({
   parts: tutorExplanationPartsSchema.optional(),
   /** Required for the guided-question mode, forbidden elsewhere. */
   socraticStep: tutorSocraticStepSchema.optional(),
+  /**
+   * The same message in the student's chosen language (Phase 8 Unit 4). `text` stays the canonical, fully
+   * validated English; this is a presentation of it, validated separately and never trusted to add facts.
+   */
+  localizedText: z.string().trim().min(1).max(4000).optional(),
   /** What the model could not ground, when it says so. */
   missingContext: z.array(z.string().trim().min(1).max(200)).max(10).default([])
 });

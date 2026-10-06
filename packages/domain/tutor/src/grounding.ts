@@ -1,6 +1,7 @@
 import type { TutorResponseAiOutput } from "@ipmat/ai";
 import { normalizeConceptNameKey } from "@ipmat/concept-graph";
 import type { ProtectedKey } from "./context.js";
+import { conciseViolations, validateLocalization } from "./localization.js";
 import { TUTOR_INTENT_POLICIES } from "./policy.js";
 import type { GroundingReport, GroundingViolation, TutorContext } from "./types.js";
 
@@ -266,5 +267,18 @@ export function validateTutorGrounding(context: TutorContext, output: TutorRespo
   const lowered = norm(allText);
   for (const term of options.rejectedTerms ?? []) if (norm(term).length >= 6 && lowered.includes(norm(term))) add("rejected_diagnosis_reused", "the response repeats wording the student rejected or corrected");
 
-  return { checksRun, violations, passed: violations.length === 0 };
+  // Presentation checks run ONLY for a non-default presentation, so the default is exactly the pre-Unit-4 behaviour.
+  if (context.presentation.verbosity === "concise") {
+    checksRun.push("verbosity");
+    for (const name of conciseViolations(context, output)) add("verbosity_violation", `a concise response carries only the parts its mode requires; "${name}" is optional`);
+  }
+  if (context.presentation.language !== "english") checksRun.push("localization");
+  const localization = validateLocalization(context, output, {
+    protectedKey: options.protectedKey,
+    internalTokens: options.internalTokens,
+    foreignExamTerms: options.foreignExamTerms,
+    englishLexicons: { psychological: PSYCHOLOGICAL_PATTERNS, masteryReadiness: MASTERY_READINESS_PATTERNS, examRules: EXAM_RULE_PATTERNS }
+  });
+
+  return { checksRun, localization, violations, passed: violations.length === 0 };
 }

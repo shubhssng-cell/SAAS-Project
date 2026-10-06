@@ -1,6 +1,22 @@
-import type { GroundingViolationCode, TutorContext, TutorIntent } from "./types.js";
+import { isDefaultPresentation, type GroundingViolationCode, type TutorContext, type TutorIntent, type TutorPresentation } from "./types.js";
 
 export const TUTOR_PROMPT_VERSION = "tutor-response-v2";
+/** A non-default presentation changes the prompt, so it is named in the audit; the default stays byte-identical (and `v2`). */
+export const TUTOR_PROMPT_VERSION_PRESENTED = "tutor-response-v3";
+export const tutorPromptVersion = (presentation: TutorPresentation): string => (isDefaultPresentation(presentation) ? TUTOR_PROMPT_VERSION : TUTOR_PROMPT_VERSION_PRESENTED);
+
+const LANGUAGE_NAME = { english: "English", hindi: "Hindi in Devanagari script", hinglish: "Hinglish (Hindi written in Roman script, with common English words)" } as const;
+
+/** Style requests only. Each line says what it does NOT change, so no instruction can read as a licence to disclose more. */
+function presentationLines(p: TutorPresentation): string[] {
+  const lines: string[] = [];
+  if (p.language !== "english") {
+    lines.push(`Language: keep "text" and every other field in English exactly as above, AND also return the same message in ${LANGUAGE_NAME[p.language]} as "localizedText". "localizedText" must say the same thing: no extra facts, no extra numbers, and keep concept names and numbers as they appear in the context. It does not change what you may reveal.`);
+  }
+  if (p.verbosity === "concise") lines.push('Length: be as brief as is complete. Fill ONLY the parts this task names as required; do not include optional parts (such as "tryNext"). Brevity never permits omitting a required part.');
+  if (p.verbosity === "detailed") lines.push('Length: you may be fuller, and may add the optional "tryNext" part, but only from the same context and within the same caps. Detail never permits revealing anything the context does not authorize.');
+  return lines;
+}
 
 /**
  * Prompt construction for the one `tutor-response` task. Built field-by-field
@@ -118,6 +134,9 @@ export function buildTutorUserPrompt(context: TutorContext, retryViolations: rea
   for (const ev of context.evidence) parts.push(`[${ev.ref}] EVIDENCE (${ev.kind}): ${ev.statement}`);
   for (const s of context.sources) parts.push(`[${s.ref}] SOURCE "${s.title}" (${s.location}): ${s.text}`);
   if (context.focus) parts.push(`STUDENT NOTE: ${data(context.focus)}`);
+
+  const style = presentationLines(context.presentation);
+  if (style.length > 0) parts.push(["PRESENTATION (a style request; the rules above are unchanged):", ...style.map((l) => `- ${l}`)].join("\n"));
 
   if (retryViolations.length > 0) {
     parts.push(`Your previous answer was rejected for: ${[...new Set(retryViolations)].join(", ")}. Produce a corrected answer that avoids these problems.`);

@@ -27,7 +27,7 @@ Call provider with a typed-function-built prompt → parse JSON (stripping stray
 | `answer-reverification` | A second, independent answer re-derivation, given only `PresentedQuestionView` |
 | `validation-judge` | Ambiguity/contradiction catch, given only `JudgeView` |
 | `autopsy-hypothesis` | Propose ONE hypothesis from deterministic `AutopsyOutput` — never auto-confirmed |
-| `tutor-response` | The AI Tutor's one structured answer (Phase 8 Unit 1, D-092) — conclusions only, validated by `@ipmat/tutor`'s deterministic grounding before a student can see it; prompt `tutor-response-v2` adds the guided-question mode, explanation parts and Socratic step (D-093) |
+| `tutor-response` | The AI Tutor's one structured answer (Phase 8 Unit 1, D-092) — conclusions only, validated by `@ipmat/tutor`'s deterministic grounding before a student can see it; prompt `tutor-response-v2` adds the guided-question mode, explanation parts and Socratic step (D-093); `tutor-response-v3` is used only for a non-default presentation (language/length, D-095) |
 
 ## Cost/failure control
 

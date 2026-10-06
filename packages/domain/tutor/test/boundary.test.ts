@@ -34,7 +34,7 @@ describe("@ipmat/tutor dependency boundary", () => {
 describe("response contract", () => {
   it("the model schema has no field for reasoning, chain-of-thought, confidence, mastery, readiness or a student diagnosis", () => {
     const keys = Object.keys(tutorResponseAiSchema.shape);
-    expect(keys.sort()).toEqual(["citations", "hypotheses", "missingContext", "parts", "questionQuotes", "relationClaims", "responseType", "socraticStep", "text"]);
+    expect(keys.sort()).toEqual(["citations", "hypotheses", "localizedText", "missingContext", "parts", "questionQuotes", "relationClaims", "responseType", "socraticStep", "text"]);
     for (const k of keys) expect(/reason|thought|think|confidence|mastery|ready|score|diagnos|ability/i.test(k), k).toBe(false);
   });
   it("a model-supplied extra field is stripped, not carried", () => {

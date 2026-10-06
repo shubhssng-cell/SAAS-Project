@@ -31,6 +31,23 @@ export const TUTOR_INTENTS = ["explain_question", "explain_concept", "give_hint"
 export type TutorIntent = (typeof TUTOR_INTENTS)[number];
 
 /**
+ * PRESENTATION (Phase 8 Unit 4, D-095): how an answer is worded, never what may be disclosed. It is
+ * set from a student's EXPLICIT preference (see `@ipmat/personalization`) and nothing else; this package
+ * does not know where it came from. It never reaches the answer-key, ownership, exam-scope or context
+ * rules, and the default reproduces the pre-Unit-4 behaviour byte for byte.
+ */
+export const TUTOR_LANGUAGES = ["english", "hindi", "hinglish"] as const;
+export type TutorLanguage = (typeof TUTOR_LANGUAGES)[number];
+export const TUTOR_VERBOSITIES = ["concise", "standard", "detailed"] as const;
+export type TutorVerbosity = (typeof TUTOR_VERBOSITIES)[number];
+export interface TutorPresentation {
+  language: TutorLanguage;
+  verbosity: TutorVerbosity;
+}
+export const DEFAULT_TUTOR_PRESENTATION: Readonly<TutorPresentation> = Object.freeze({ language: "english", verbosity: "standard" });
+export const isDefaultPresentation = (p: TutorPresentation): boolean => p.language === DEFAULT_TUTOR_PRESENTATION.language && p.verbosity === DEFAULT_TUTOR_PRESENTATION.verbosity;
+
+/**
  * TEACHING STATES (Phase 8 Unit 2) - what the tutor is DOING, each with its own
  * disclosure rule, required/forbidden content and response length contract (see
  * `policy.ts`); not merely a different prompt. There is deliberately NO ladder
@@ -83,6 +100,8 @@ export interface TutorRequest {
   focus?: string;
   /** Up to `TUTOR_CONTEXT_LIMITS.MAX_PRIOR_ACTIONS` earlier actions of this interaction. Explicit - the tutor stores no conversation. */
   priorInteraction?: PriorTeachingAction[];
+  /** Style only. Absent = English, standard length (the existing behaviour). */
+  presentation?: TutorPresentation;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +292,7 @@ export interface TutorContext {
     | { ref: string; status: "corrected"; correctionText: string }
     | null;
   prior: PriorTeachingAction[];
+  presentation: TutorPresentation;
   focus: string | null;
   /** Everything citable, with its epistemic class. */
   refs: ContextRef[];
@@ -308,16 +328,28 @@ export type GroundingViolationCode =
   | "repeated_teaching_action"
   | "unconfirmed_diagnosis_as_fact"
   | "unconfirmed_diagnosis_not_queried"
-  | "rejected_diagnosis_reused";
+  | "rejected_diagnosis_reused"
+  | "verbosity_violation";
 
 export interface GroundingViolation {
   code: GroundingViolationCode;
   detail: string;
 }
 
+/**
+ * The localized text is an ADD-ON to the fully validated English `text`: when it fails its own checks it is
+ * dropped and the English is shown. It is never a reason to show anything the English check did not clear.
+ */
+export interface LocalizationReport {
+  requested: TutorLanguage;
+  status: "not_requested" | "validated" | "rejected" | "missing";
+  codes: string[];
+}
+
 export interface GroundingReport {
   /** Which checks ran. */
   checksRun: string[];
+  localization: LocalizationReport;
   violations: GroundingViolation[];
   passed: boolean;
 }
@@ -358,6 +390,9 @@ export interface TutorResponse {
   responseType: TutorResponseAiOutput["responseType"] | null;
   /** The explanation (AI_EXPLANATION). Null whenever nothing groundable may be shown. */
   text: string | null;
+  /** The same message in the requested language, ONLY when it passed its own validation; otherwise null (the English `text` is shown). */
+  localizedText: string | null;
+  presentation: TutorPresentation;
   /** Fixed, model-free text for non-answered outcomes. */
   fallbackMessage: string | null;
   sourceReferences: TutorSourceReference[];

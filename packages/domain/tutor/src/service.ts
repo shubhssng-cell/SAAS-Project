@@ -2,7 +2,8 @@ import { generateStructured, tutorResponseAiSchema, AiGenerationError, type AiCa
 import { buildTutorContext, digestTutorContext, type TutorContextDeps } from "./context.js";
 import { validateTutorGrounding } from "./grounding.js";
 import { TUTOR_INTENT_POLICIES } from "./policy.js";
-import { TUTOR_PROMPT_VERSION, buildTutorSystemPrompt, buildTutorUserPrompt } from "./prompts.js";
+import { DEFAULT_TUTOR_PRESENTATION } from "./types.js";
+import { buildTutorSystemPrompt, buildTutorUserPrompt, tutorPromptVersion } from "./prompts.js";
 import type {
   GroundingReport,
   GroundingViolationCode,
@@ -41,7 +42,7 @@ export interface TutorServiceDeps extends TutorContextDeps {
   aiOptions?: AiCallOptions;
 }
 
-const emptyGrounding = (checksRun: string[] = []): GroundingReport => ({ checksRun, violations: [], passed: true });
+const emptyGrounding = (checksRun: string[] = []): GroundingReport => ({ checksRun, localization: { requested: "english", status: "not_requested", codes: [] }, violations: [], passed: true });
 
 function classifyFailure(error: unknown): { kind: TutorFailureKind; metadata: AiResultMetadata | null } {
   if (error instanceof AiGenerationError) {
@@ -92,7 +93,7 @@ export function createTutorService(deps: TutorServiceDeps) {
   const modelAudit = (m: AiResultMetadata | null): TutorAuditEntry["model"] =>
     m ? { provider: m.provider, model: m.model, promptVersion: m.promptVersion, latencyMs: m.latencyMs, tokenUsage: m.tokenUsage, estimatedCostUsd: m.estimatedCostUsd, attempts: m.attempts } : null;
 
-  type ResponseParts = Omit<TutorResponse, "outcome" | "audit" | "teachingAction" | "parts"> & Partial<Pick<TutorResponse, "teachingAction" | "parts">>;
+  type ResponseParts = Omit<TutorResponse, "outcome" | "audit" | "teachingAction" | "parts" | "localizedText" | "presentation"> & Partial<Pick<TutorResponse, "teachingAction" | "parts" | "localizedText" | "presentation">>;
 
   /** What the tutor attempted when no model answer was produced: its mode, with nothing disclosed. */
   const noAction = (request: TutorRequest): TeachingAction => ({ mode: TUTOR_INTENT_POLICIES[request.intent].teachingMode, answerDisclosure: "withheld", socraticStep: null });
@@ -100,7 +101,7 @@ export function createTutorService(deps: TutorServiceDeps) {
   async function finish(request: TutorRequest, outcome: TutorOutcome, parts: ResponseParts, audit: Partial<TutorAuditEntry>): Promise<TutorResponse> {
     const entry = baseAudit(request, { outcome, ...audit });
     await emit(entry);
-    return { outcome, teachingAction: noAction(request), parts: null, ...parts, audit: entry };
+    return { outcome, teachingAction: noAction(request), parts: null, localizedText: null, presentation: { ...(request.presentation ?? DEFAULT_TUTOR_PRESENTATION) }, ...parts, audit: entry };
   }
 
   function toResponseParts(context: TutorContext, output: TutorResponseAiOutput, grounding: GroundingReport): ResponseParts {
@@ -115,6 +116,9 @@ export function createTutorService(deps: TutorServiceDeps) {
         socraticStep: step ? { checks: step.checks, question: step.question, conceptRef: step.conceptRef, evidenceRefs: [...step.evidenceRefs], learnsFromReply: step.learnsFromReply } : null
       },
       parts: output.parts ?? null,
+      // Shown ONLY if it passed its own validation; otherwise the validated English is what the student sees.
+      localizedText: grounding.localization.status === "validated" ? (output.localizedText ?? null) : null,
+      presentation: { ...context.presentation },
       responseType: output.responseType,
       text: output.text,
       fallbackMessage: null,
@@ -177,7 +181,7 @@ export function createTutorService(deps: TutorServiceDeps) {
         try {
           const result = await generateStructured(deps.provider, {
             task: "tutor-response",
-            promptVersion: TUTOR_PROMPT_VERSION,
+            promptVersion: tutorPromptVersion(context.presentation),
             systemPrompt: buildTutorSystemPrompt(),
             userPrompt: buildTutorUserPrompt(context, lastViolations),
             schema: tutorResponseAiSchema,

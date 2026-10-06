@@ -2,6 +2,8 @@
 
 Decision record: [DECISIONS.md D-093](DECISIONS.md). Builds on [Unit 1](PHASE_8_UNIT_1_REVIEW.md) / D-092. Code: `packages/domain/tutor` (`@ipmat/tutor`, pure; no new package) and the extended `tutor-response` schema in `packages/ai`. No route, no UI, no persistence, no migration, no second provider.
 
+> **Extended by Unit 4 (D-095):** the student view gained a `language` field and the model schema an optional `localizedText`; the default (English, standard) behaviour is byte-identical. See [PHASE_8_UNIT_4_REVIEW.md](PHASE_8_UNIT_4_REVIEW.md).
+
 ## 1. Specification audit (the Unit 1 unresolved list, re-checked against the repository)
 
 Nothing new was specified since Unit 1 (`git log` shows no spec/doc commit after `1a12f4a`). Re-reading the existing specifications:

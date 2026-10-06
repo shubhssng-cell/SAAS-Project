@@ -1,0 +1,25 @@
+{
+  "name": "@ipmat/personalization",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ipmat/adaptive-curriculum": "*",
+    "@ipmat/revision-intelligence": "*",
+    "@ipmat/tutor": "*"
+  },
+  "devDependencies": {
+    "@ipmat/ai": "*",
+    "@ipmat/concept-graph": "*",
+    "@ipmat/mastery": "*",
+    "@ipmat/training-orchestration": "*",
+    "@ipmat/training-session": "*",
+    "@ipmat/training-systems": "*"
+  }
+}

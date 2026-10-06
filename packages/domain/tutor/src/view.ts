@@ -1,4 +1,4 @@
-import type { EpistemicClass, TeachingMode, TutorOutcome, TutorResponse } from "./types.js";
+import type { EpistemicClass, TeachingMode, TutorLanguage, TutorOutcome, TutorResponse } from "./types.js";
 
 /**
  * The ONLY shape a future route/UI may expose. Built field-by-field: no
@@ -16,8 +16,10 @@ export interface StudentTutorView {
   question: string | null;
   /** Named explanation parts, as written for the student. */
   parts: Array<{ label: string; text: string }>;
-  /** Explanation text (AI-generated) or the fixed fallback message. */
+  /** Explanation text (AI-generated) or the fixed fallback message. In the student's language ONLY when that text passed its own validation. */
   message: string;
+  /** The language `message` is in. The structured parts, question and hypotheses stay in English (localization covers the main message). */
+  language: TutorLanguage;
   /** Separately labelled, hedged suggestions about the student's own attempt. */
   hypotheses: Array<{ label: "AI hypothesis"; text: string }>;
   /** What the answer drew on, by human label only. */
@@ -32,7 +34,8 @@ export function toStudentTutorView(response: TutorResponse): StudentTutorView {
     mode: response.teachingAction.mode,
     question: response.teachingAction.socraticStep?.question ?? null,
     parts: orderedParts(response),
-    message: response.text ?? response.fallbackMessage ?? "",
+    message: response.localizedText ?? response.text ?? response.fallbackMessage ?? "",
+    language: response.localizedText ? response.presentation.language : "english",
     hypotheses: response.hypotheses.map((h) => ({ label: "AI hypothesis" as const, text: h.text })),
     basedOn: response.evidenceReferences.map((e) => ({ label: e.label, kind: e.epistemic })),
     sources: response.sourceReferences.map((s) => ({ title: s.title, location: s.location })),

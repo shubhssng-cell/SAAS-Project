@@ -211,7 +211,7 @@ describe("the student view exposes only student-safe fields", () => {
     const view = toStudentTutorView(r);
     const json = JSON.stringify(view);
     for (const hidden of [STUDENT_A, ENROLL_A, QUESTION_ID, "req-1", "scripted", "contextDigest", "checksRun", "violations", "audit", "includedSections"]) expect(json).not.toContain(hidden);
-    expect(Object.keys(view).sort()).toEqual(["basedOn", "hypotheses", "message", "missing", "mode", "outcome", "parts", "question", "sources"]);
+    expect(Object.keys(view).sort()).toEqual(["basedOn", "hypotheses", "language", "message", "missing", "mode", "outcome", "parts", "question", "sources"]);
     expect(view.hypotheses[0]!.label).toBe("AI hypothesis");
   });
   it("non-answered outcomes show only the fixed message", async () => {
