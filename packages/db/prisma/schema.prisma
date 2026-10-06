@@ -736,6 +736,10 @@ model Student {
   catchUpPlans  CatchUpPlan[]
   sessions      Session[]
 
+  // Phase 9 Unit 1 (D-097)
+  preferences         StudentPreference?
+  orchestrationAudits OrchestrationAudit[]
+
   @@map("students")
 }
 
@@ -1256,4 +1260,54 @@ model SimulationAnswerEvent {
   @@unique([simulationId, sequence])
   @@index([simulationId, position])
   @@map("simulation_answer_events")
+}
+
+// ---------------------------------------------------------------------
+// Phase 9 Unit 1 (Production persistence foundation, docs/DECISIONS.md D-097).
+// The only two pieces of state earlier phases left explicitly unpersisted.
+// ---------------------------------------------------------------------
+
+// A student's OWN explicit presentation preferences (D-095): exactly three nullable choices, `null` = "no preference".
+// AUTHORITATIVE (only the student sets it); never derived from evidence and never read by any engine. One row per
+// student (primary key = student id), so one student's row is unreachable through another's key. The value sets are
+// enforced by CHECK constraints in migration 0017 (the vocabularies are owned by @ipmat/tutor / @ipmat/personalization).
+model StudentPreference {
+  studentId     String   @id @map("student_id")
+  language      String?
+  verbosity     String?
+  preferredHelp String?  @map("preferred_help")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @map("updated_at")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("student_preferences")
+}
+
+// One orchestration request's structured EXECUTION FACTS (D-096 audit, made durable here). Append-only: a database
+// trigger rejects every UPDATE except the one the `ON DELETE SET NULL` foreign key performs (detaching a deleted student).
+// Metadata only - no prompt, response, input, output, reasoning or free-text provider message; `steps` holds the audit's
+// own step facts (ids, status, digests, failure kind/code) and nothing else. `requestId` is the correlation identifier and
+// the idempotency key (recording the same request twice stores one row).
+model OrchestrationAudit {
+  id               String   @id @default(uuid())
+  requestId        String   @unique @map("request_id")
+  occurredAt       DateTime @map("occurred_at")
+  task             String
+  workflowId       String?  @map("workflow_id")
+  actorKind        String   @map("actor_kind")
+  studentId        String?  @map("student_id")
+  examCode         String?  @map("exam_code")
+  status           String
+  fallbackOccurred Boolean  @map("fallback_occurred")
+  selectionRule    String   @map("selection_rule")
+  decidedBy        String   @map("decided_by")
+  steps            Json
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, occurredAt])
+  @@index([task, occurredAt])
+  @@map("orchestration_audits")
 }

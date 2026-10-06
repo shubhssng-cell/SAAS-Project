@@ -19,6 +19,7 @@
   "types": "src/index.ts",
   "dependencies": {
     "@ipmat/ai": "*",
+    "@ipmat/ai-orchestration": "*",
     "@ipmat/attempt": "*",
     "@ipmat/autopsy": "*",
     "@ipmat/concept-graph": "*",
@@ -30,6 +31,7 @@
     "@ipmat/examiner-intelligence": "*",
     "@ipmat/examiner-lens": "*",
     "@ipmat/mastery": "*",
+    "@ipmat/personalization": "*",
     "@ipmat/prep-phase": "*",
     "@ipmat/practice-block": "*",
     "@ipmat/practice-session": "*",

@@ -47,3 +47,5 @@ export * from "./errorTaxonomyReaders.js";
 export * from "./prismaTrainingSessionRepository.js";
 export * from "./inMemoryTrainingSessionRepository.js";
 export * from "./prismaSimulation.js";
+export * from "./prismaPreferenceStore.js";
+export * from "./orchestrationAudit.js";

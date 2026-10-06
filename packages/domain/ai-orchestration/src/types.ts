@@ -1,5 +1,5 @@
 /**
- * AI intelligence orchestration (Phase 8 Unit 5, docs/DECISIONS.md D-097).
+ * AI intelligence orchestration (Phase 8 Unit 5, docs/DECISIONS.md D-096).
  *
  * A DETERMINISTIC router over capabilities that already exist. There is no model in the
  * orchestrator, no planner, no loop and no tool use: a task maps by a fixed table to a fixed,

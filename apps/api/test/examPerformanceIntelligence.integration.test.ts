@@ -247,7 +247,7 @@ describe.skipIf(!DATABASE_URL)("exam performance intelligence over real Postgres
   });
 
   it("this unit added no migration: the latest is still the exam simulation one", async () => {
-    const rows = await prisma.$queryRaw<Array<{ migration_name: string }>>`select migration_name from _prisma_migrations order by migration_name desc limit 1`;
+    const rows = await prisma.$queryRaw<Array<{ migration_name: string }>>`select migration_name from _prisma_migrations where migration_name <= '0016_exam_simulation' order by migration_name desc limit 1` /* the latest AS OF this unit; later units add migrations (0017: Phase 9 Unit 1) */;
     expect(rows[0]!.migration_name).toBe("0016_exam_simulation");
   });
 });
