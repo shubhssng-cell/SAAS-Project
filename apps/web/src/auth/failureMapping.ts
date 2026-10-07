@@ -14,6 +14,7 @@ export type AuthFailure =
   | { kind: "invalid_credentials"; message: string }
   | { kind: "email_already_registered"; message: string }
   | { kind: "not_authenticated" }
+  | { kind: "rate_limited"; message: string }
   | { kind: "network_error" }
   | { kind: "unexpected"; message: string };
 
@@ -31,6 +32,9 @@ export function mapAuthApiErrorCode(code: string | undefined, message: string | 
       return { kind: "email_already_registered", message: "An account with this email already exists." };
     case "not_authenticated":
       return { kind: "not_authenticated" };
+    case "rate_limited":
+      // Fixed copy: the server's own wording is never trusted for display.
+      return { kind: "rate_limited", message: "You're going a little fast. Please wait a moment and try again." };
     default:
       return { kind: "unexpected", message: "Something went wrong. Please try again." };
   }

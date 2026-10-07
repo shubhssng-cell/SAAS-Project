@@ -33,3 +33,13 @@ export function requireOnlyKeys(body: Record<string, unknown>, allowed: readonly
     if (!allowed.includes(key)) throw invalidRequest(`The field "${key.slice(0, 40).replace(/[^\w.-]/g, "?")}" is not accepted here.`);
   }
 }
+
+/**
+ * An unexpected failure from a store or service. The database being unreachable or overloaded is a retryable 503 with fixed
+ * wording; anything else is the fixed 500. The original error's message is never used (it can carry SQL, paths or secrets).
+ */
+export function infrastructureError(error: unknown, message: string): AssistantApiError {
+  const e = error as { name?: unknown; code?: unknown } | null;
+  const unavailable = e?.name === "PrismaClientInitializationError" || (typeof e?.code === "string" && ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(e.code));
+  return unavailable ? new AssistantApiError("not_available", "The service is temporarily unavailable. Please try again shortly.", 503) : new AssistantApiError("infrastructure_failure", message, 500);
+}

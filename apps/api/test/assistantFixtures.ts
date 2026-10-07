@@ -127,7 +127,7 @@ export function modelOutput(intent: string, keyAuthorized: boolean, over: Record
   });
 }
 
-export type Mode = "compliant" | "leak_key" | "throw" | "malformed";
+export type Mode = "compliant" | "leak_key" | "throw" | "malformed" | "echo_system_prompt" | "hang" | "throw429" | "throw500" | "throw_timeout" | "extra_fields";
 
 /**
  * A scripted provider that records every prompt. `compliant` answers with a valid output for the intent it can read from the
@@ -141,16 +141,25 @@ export class ScriptedProvider implements AiProvider {
   mode: Mode = "compliant";
   /** The text whose presence in the prompt means "the key was authorized" (the double reacts to policy like a compliant model). */
   keyMarker = KEY;
+  /** Milliseconds every call waits before answering (for concurrency and deadline tests). */
+  delayMs = 0;
   /** What a hostile model puts in its answer in `leak_key` mode (default: the key marker). */
   leakText: string | null = null;
 
   async complete(input: { systemPrompt: string; userPrompt: string }): Promise<AiCompletion> {
     this.prompts.push({ systemPrompt: input.systemPrompt, userPrompt: input.userPrompt });
+    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
+    if (this.mode === "hang") await new Promise(() => undefined);
     if (this.mode === "throw") throw new Error(`upstream said: ${PROVIDER_SECRET}`);
+    if (this.mode === "throw429") throw Object.assign(new Error(`429 rate limited ${PROVIDER_SECRET}`), { status: 429 });
+    if (this.mode === "throw500") throw Object.assign(new Error(`500 upstream ${PROVIDER_SECRET}`), { status: 500 });
+    if (this.mode === "throw_timeout") throw Object.assign(new Error(`timed out ${PROVIDER_SECRET}`), { name: "AiTimeoutError" });
+    if (this.mode === "echo_system_prompt") return { rawText: modelOutput(this.intent, input.userPrompt.includes(this.keyMarker), { text: input.systemPrompt.slice(0, 600) }), usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1 };
     if (this.mode === "malformed") return { rawText: "this is not json", usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1 };
     const intent = this.intent;
     const keyAuthorized = input.userPrompt.includes(this.keyMarker);
-    const out = modelOutput(intent, keyAuthorized, this.mode === "leak_key" ? { text: `The answer is ${this.leakText ?? this.keyMarker}.` } : {});
+    const extra = this.mode === "extra_fields" ? { chainOfThought: "COT-SENTINEL private reasoning", internalPolicy: "POLICY-SENTINEL", systemPrompt: "SYSPROMPT-SENTINEL" } : {};
+    const out = modelOutput(intent, keyAuthorized, this.mode === "leak_key" ? { text: `The answer is ${this.leakText ?? this.keyMarker}.` } : extra);
     return { rawText: out, usage: { inputTokens: 10, outputTokens: 5 }, latencyMs: 1 };
   }
 

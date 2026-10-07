@@ -148,3 +148,24 @@ describe("TutorPanelView states", () => {
     expect(html).not.toMatch(/confidence|level|score|style of learning/i);
   });
 });
+
+describe("rate-limit and session failures (Phase 9 Unit 3)", () => {
+  it("maps a 429 to fixed friendly copy and never echoes the server's wording", async () => {
+    const r = await apiAskTutor("give_hint", "q", fakeFetch(429, { error: { code: "rate_limited", message: "SERVER-WORDING-SENTINEL bucket=tutor" } }));
+    expect(r).toEqual({ ok: false, failure: { kind: "rate_limited", message: "You're going a little fast. Please wait a moment and try again." } });
+    expect(JSON.stringify(r)).not.toMatch(/SENTINEL|bucket/);
+  });
+
+  it("maps 503 and 500 to a generic failure with no server text", async () => {
+    for (const status of [500, 503, 413, 415]) {
+      const r = await apiAskTutor("give_hint", "q", fakeFetch(status, { error: { code: "x", message: "SQL SELECT * /srv/app stack SENTINEL" } }));
+      expect(r.ok).toBe(false);
+      expect(JSON.stringify(r)).not.toMatch(/SQL|srv|stack|SENTINEL/);
+    }
+  });
+
+  it("the panel's error states render fixed copy only", () => {
+    const html = renderToStaticMarkup(createElement(TutorPanelView, { state: { status: "error", message: "Your session has ended. Please log in again to use the tutor." }, preferences: null, preferenceMessage: null, onAsk: () => undefined, onPreference: () => undefined }));
+    expect(html).toContain("session has ended");
+  });
+});

@@ -15,6 +15,7 @@
     "@ipmat/concept-graph": "*",
     "@ipmat/exam-pack": "*",
     "@ipmat/exam-simulation": "*",
+    "@ipmat/observability": "*",
     "@ipmat/personalization": "*",
     "@ipmat/question-generation": "*",
     "@ipmat/tutor": "*"

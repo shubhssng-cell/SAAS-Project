@@ -1,5 +1,6 @@
 import { toPublicOrchestrationView, type FailureKind, type OrchestrationResult, type Orchestrator, type TaskId } from "@ipmat/ai-orchestration";
-import { TUTOR_CONTEXT_LIMITS, type StudentTutorView } from "@ipmat/tutor";
+import { NOOP_LOGGER, NOOP_METRICS, type Logger, type Metrics } from "@ipmat/observability";
+import { TUTOR_CONTEXT_LIMITS, buildTutorSystemPrompt, type StudentTutorView } from "@ipmat/tutor";
 import { AssistantApiError, invalidRequest, isRecord, notAvailable, requireOnlyKeys, type StudentClaim } from "./errors.js";
 
 /**
@@ -58,6 +59,38 @@ export interface TutorApiDependencies {
   orchestrator: Orchestrator;
   /** False when no model provider is configured: the tutor then answers `not_available` instead of pretending. */
   tutorAvailable: boolean;
+  /** Upper bound on one request's wall-clock time (Phase 9 Unit 3). Default 45 s. The underlying provider call is itself bounded by its own timeout/retry budget. */
+  deadlineMs?: number;
+  metrics?: Metrics;
+  logger?: Logger;
+}
+
+export const TUTOR_DEADLINE_MS = 45_000;
+
+/**
+ * Deterministic output guard (Phase 9 Unit 3): the tutor's system prompt is internal policy. A reply that reproduces any
+ * stretch of it (a prompt-extraction success) is rejected before projection, whatever the model was told. It is a backstop,
+ * not a proof: it catches verbatim reproduction of 48+ characters, not a paraphrase.
+ */
+const SHINGLE = 48;
+const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, " ").trim();
+let shingles: Set<string> | null = null;
+function promptShingles(): Set<string> {
+  if (shingles) return shingles;
+  const text = norm(buildTutorSystemPrompt());
+  shingles = new Set<string>();
+  for (let i = 0; i + SHINGLE <= text.length; i += 1) shingles.add(text.slice(i, i + SHINGLE));
+  return shingles;
+}
+export function reproducesSystemPrompt(text: string): boolean {
+  const t = norm(text);
+  const set = promptShingles();
+  for (let i = 0; i + SHINGLE <= t.length; i += 1) if (set.has(t.slice(i, i + SHINGLE))) return true;
+  return false;
+}
+
+function viewTexts(view: StudentTutorView): string[] {
+  return [view.message, view.question ?? "", ...view.parts.map((p) => p.text), ...view.hypotheses.map((h) => h.text), ...view.missing];
 }
 
 function parsePriorInteraction(value: unknown): Array<{ mode: string; text: string; studentReply?: string }> {
@@ -100,13 +133,42 @@ export class TutorApiService {
     if (!this.deps.tutorAvailable) throw notAvailable("The tutor isn't available right now.");
 
     const actor = { kind: "student" as const, studentId: claim.studentId, enrollmentId: claim.enrollmentId };
-    let result: OrchestrationResult;
+    const metrics = this.deps.metrics ?? NOOP_METRICS;
+    const logger = this.deps.logger ?? NOOP_LOGGER;
+    const started = Date.now();
+    const deadlineMs = this.deps.deadlineMs ?? TUTOR_DEADLINE_MS;
+    let result: OrchestrationResult | "deadline";
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      result = await this.deps.orchestrator.run({ task: TASK_FOR_OPERATION[operation as TutorOperation], actor, params });
+      result = await Promise.race([
+        this.deps.orchestrator.run({ task: TASK_FOR_OPERATION[operation as TutorOperation], actor, params }),
+        new Promise<"deadline">((resolve) => {
+          timer = setTimeout(() => resolve("deadline"), deadlineMs);
+        })
+      ]);
     } catch {
+      metrics.inc("tutor_requests_total", { outcome: "internal_error" });
+      logger.error("tutor.internal_error", { operation: String(operation), failureCategory: "handler_error" });
       throw new AssistantApiError("infrastructure_failure", "Something went wrong. Please try again.", 500);
+    } finally {
+      clearTimeout(timer);
     }
-    return this.project(result, actor);
+    const latency = Date.now() - started;
+    metrics.observeMs("tutor_latency_ms", latency, { operation: String(operation) });
+    if (result === "deadline") {
+      metrics.inc("tutor_requests_total", { outcome: "deadline" });
+      logger.warn("tutor.deadline_exceeded", { operation: String(operation), latencyMs: latency, failureCategory: "provider_timeout" });
+      return { status: "not_answered", tutor: null, preferenceNotes: [], failure: { ...SAFE_FAILURE.provider_timeout } };
+    }
+    const dto = this.project(result, actor);
+    if (dto.tutor && dto.status === "answered" && viewTexts(dto.tutor).some(reproducesSystemPrompt)) {
+      metrics.inc("tutor_requests_total", { outcome: "guard_rejected" });
+      logger.warn("tutor.output_guard_rejected", { operation: String(operation), failureCategory: "grounding_failure" });
+      return { status: "not_answered", tutor: null, preferenceNotes: [], failure: { ...SAFE_FAILURE.grounding_failure } };
+    }
+    metrics.inc("tutor_requests_total", { outcome: dto.status });
+    logger.info("tutor.completed", { operation: String(operation), outcome: dto.status, latencyMs: latency, failureCategory: dto.failure?.code ?? null });
+    return dto;
   }
 
   private project(result: OrchestrationResult, actor: { kind: "student"; studentId: string; enrollmentId: string }): TutorAnswerDto {

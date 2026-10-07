@@ -9,7 +9,15 @@ import { AuthApiError } from "./types.js";
  * anything; the `AuthApiError` it builds always carries a hand-authored,
  * generic message, never the original error's own text.
  */
+/** Phase 9 Unit 3 (D-099): the database being unreachable or overloaded is a retryable 503, not a generic 500. Name/code only - never the message. */
+function isDatabaseUnavailable(error: unknown): boolean {
+  const e = error as { name?: unknown; code?: unknown } | null;
+  return e?.name === "PrismaClientInitializationError" || (typeof e?.code === "string" && ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(e.code));
+}
+const UNAVAILABLE_MESSAGE = "The service is temporarily unavailable. Please try again shortly.";
+
 export function toAuthApiError(error: unknown): AuthApiError {
+  if (isDatabaseUnavailable(error)) return new AuthApiError("infrastructure_failure", UNAVAILABLE_MESSAGE, 503);
   if (error instanceof AuthValidationError) {
     return new AuthApiError("invalid_request", error.message, 400);
   }

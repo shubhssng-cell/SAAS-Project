@@ -5,7 +5,8 @@ import { createOrchestrator, generationCapability, type Orchestrator } from "@ip
 import { InMemoryExamPackRepository, ipmatIndoreExamPack } from "@ipmat/exam-pack";
 import { InMemoryPreferenceStore } from "@ipmat/personalization";
 import { describe, expect, it } from "vitest";
-import { AssistantApiError, ContentGenerationApiService, ExamPackTutorConceptPort, PreferencesApiService, TutorApiService, type StaffClaim } from "../src/index.js";
+import { buildTutorSystemPrompt } from "@ipmat/tutor";
+import { AssistantApiError, ContentGenerationApiService, reproducesSystemPrompt, TUTOR_DEADLINE_MS, ExamPackTutorConceptPort, PreferencesApiService, TutorApiService, type StaffClaim } from "../src/index.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const EXAM = "IPMAT_INDORE";
@@ -14,7 +15,7 @@ const code = async (p: Promise<unknown>): Promise<string> => p.then(() => "no er
 describe("dependency boundary", () => {
   it("declares only domain/AI-abstraction dependencies, never Prisma, @ipmat/db, a provider SDK or a web/HTTP framework", () => {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8")) as { dependencies: Record<string, string> };
-    expect(Object.keys(pkg.dependencies).sort()).toEqual(["@ipmat/ai", "@ipmat/ai-orchestration", "@ipmat/concept-graph", "@ipmat/exam-pack", "@ipmat/exam-simulation", "@ipmat/personalization", "@ipmat/question-generation", "@ipmat/tutor"]);
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(["@ipmat/ai", "@ipmat/ai-orchestration", "@ipmat/concept-graph", "@ipmat/exam-pack", "@ipmat/exam-simulation", "@ipmat/observability", "@ipmat/personalization", "@ipmat/question-generation", "@ipmat/tutor"]);
   });
 
   it("no source file imports Prisma, @ipmat/db, a vendor SDK or node:http, and none reads the environment or a key", () => {
@@ -83,6 +84,47 @@ describe("TutorApiService request validation (nothing reaches the orchestrator u
     expect(dto.failure?.code).toBe("could_not_verify");
     const throwing = { run: async () => { throw new Error("boom with /srv/secret/path"); }, workflowFor: () => undefined } as unknown as Orchestrator;
     await expect(new TutorApiService({ orchestrator: throwing, tutorAvailable: true }).ask(claim, { operation: "give_hint", questionId: "q" })).rejects.toMatchObject({ code: "infrastructure_failure", httpStatus: 500, message: "Something went wrong. Please try again." });
+  });
+});
+
+describe("output guard, deadline and instrumentation (Phase 9 Unit 3)", () => {
+  const claim = { studentId: "s", enrollmentId: "e" };
+  const answered = (text: string) => ({
+    requestId: "r", task: "give_hint", workflowId: "w", status: "completed", selection: { rule: "", reason: "" }, ordering: "fixed_by_definition",
+    steps: [{ stepId: "t", capabilityId: "tutor_response", status: "succeeded", skippedBecause: null, failure: null, validation: null, inputDigest: null, startedAt: null, endedAt: null, isFallback: false }],
+    outputs: { t: { outcome: "answered", teachingAction: { mode: "hint", answerDisclosure: "withheld", socraticStep: null }, parts: null, responseType: "hint", text, localizedText: null, presentation: { language: "english", verbosity: "standard" }, fallbackMessage: null, sourceReferences: [], evidenceReferences: [], hypotheses: [], uncertainty: { missing: [] } } },
+    failure: null, fallback: { occurred: false, from: null, to: null }, decidedBy: "", notes: [], audit: {}
+  });
+  const svc = (run: () => Promise<unknown>, extra: Record<string, unknown> = {}) => new TutorApiService({ orchestrator: { run, workflowFor: () => undefined } as unknown as Orchestrator, tutorAvailable: true, ...extra });
+
+  it("rejects a reply that reproduces the system prompt (48+ characters, any whitespace/case), and passes an ordinary reply", async () => {
+    const prompt = buildTutorSystemPrompt();
+    const leaked = prompt.slice(200, 520);
+    expect(reproducesSystemPrompt(leaked)).toBe(true);
+    expect(reproducesSystemPrompt(leaked.toUpperCase().replace(/ /g, "   "))).toBe(true);
+    expect(reproducesSystemPrompt("Try rewriting the percentage as a multiplier first.")).toBe(false);
+    const dto = await svc(async () => answered(`Sure! ${leaked}`)).ask(claim, { operation: "give_hint", questionId: "q" });
+    expect(dto).toMatchObject({ status: "not_answered", tutor: null, failure: { code: "could_not_verify" } });
+    expect(JSON.stringify(dto)).not.toContain(leaked.slice(0, 40));
+    const ok = await svc(async () => answered("Try rewriting the percentage as a multiplier first.")).ask(claim, { operation: "give_hint", questionId: "q" });
+    expect(ok.status).toBe("answered");
+  });
+
+  it("a hung orchestration is cut off at the deadline with a fixed 'temporarily unavailable' result", async () => {
+    const dto = await svc(() => new Promise(() => undefined), { deadlineMs: 50 }).ask(claim, { operation: "give_hint", questionId: "q" });
+    expect(dto).toMatchObject({ status: "not_answered", tutor: null, failure: { code: "temporarily_unavailable" } });
+    expect(TUTOR_DEADLINE_MS).toBe(45_000);
+  });
+
+  it("records metrics and log events without any request content", async () => {
+    const { createLogger, createMetrics } = await import("@ipmat/observability");
+    const lines: string[] = [];
+    const metrics = createMetrics();
+    const dto = await svc(async () => answered("Try rewriting the percentage as a multiplier first."), { metrics, logger: createLogger({ sink: (l) => lines.push(l) }) }).ask(claim, { operation: "give_hint", questionId: "q-secret-id", focus: "PRIVATE FOCUS TEXT" });
+    expect(dto.status).toBe("answered");
+    expect(metrics.snapshot().counters).toEqual([{ name: "tutor_requests_total", labels: { outcome: "answered" }, value: 1 }]);
+    expect(lines.join(" ")).toContain("tutor.completed");
+    expect(lines.join(" ")).not.toMatch(/PRIVATE FOCUS|q-secret-id|Try rewriting/);
   });
 });
 

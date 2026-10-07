@@ -1,5 +1,5 @@
 import { PreferenceError, validatePreferencePatch, type PreferenceStore, type StudentPreferences } from "@ipmat/personalization";
-import { AssistantApiError, invalidRequest, isRecord, type StudentClaim } from "./errors.js";
+import { AssistantApiError, infrastructureError, invalidRequest, isRecord, type StudentClaim } from "./errors.js";
 
 /**
  * A student's own explicit preferences (Phase 9 Unit 2, D-098). The student id is the AUTHENTICATED one; the body can never name
@@ -12,8 +12,8 @@ export class PreferencesApiService {
   async get(claim: StudentClaim): Promise<{ preferences: StudentPreferences }> {
     try {
       return { preferences: await this.store.get(claim.studentId) };
-    } catch {
-      throw new AssistantApiError("infrastructure_failure", "Your preferences couldn't be loaded.", 500);
+    } catch (error) {
+      throw infrastructureError(error, "Your preferences couldn't be loaded.");
     }
   }
 
@@ -27,8 +27,8 @@ export class PreferencesApiService {
     }
     try {
       return { preferences: await this.store.set(claim.studentId, body) };
-    } catch {
-      throw new AssistantApiError("infrastructure_failure", "Your preferences couldn't be saved.", 500);
+    } catch (error) {
+      throw infrastructureError(error, "Your preferences couldn't be saved.");
     }
   }
 }

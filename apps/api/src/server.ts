@@ -1,3 +1,5 @@
+import { newRequestId, runWithContext, studentRef, updateContext, type RequestContext } from "@ipmat/observability";
+import { HttpLimitError, SESSION_TOKEN_SHAPE, checkOrigin, clientAddress, createRuntime, isDatabaseUnavailable, readBoundedBody, routeTemplate, securityHeaders, type ApiRuntime, type RateBucket } from "./hardening.js";
 import { AssistantApiError, type AssistantServices, type StudentClaim as AssistantClaim } from "@ipmat/assistant-api";
 import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
 import { EnrollmentApiError, EnrollmentApiService, type EnrollmentApiDependencies } from "@ipmat/enrollment-api";
@@ -70,24 +72,14 @@ interface RouteParams {
 
 type Handler = (service: PracticeApiService, claim: StudentRequestClaim, body: Record<string, unknown>, query: URLSearchParams, params: RouteParams) => Promise<unknown>;
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf-8").trim();
-      if (raw === "") {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new PracticeApiError("invalid_request", "The request body was not valid JSON.", 400));
-      }
-    });
-    req.on("error", reject);
-  });
+async function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> {
+  const raw = await readBoundedBody(req, maxBytes);
+  if (raw === "") return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new PracticeApiError("invalid_request", "The request body was not valid JSON.", 400);
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -196,25 +188,39 @@ const simulationOf = (s: AssistantServices) => s.simulation ?? (() => { throw no
  * There is deliberately NO route for question generation (no staff identity exists to authorize one) and none for the Phase 7
  * intelligence results (no student-facing presentation is defined).
  */
-const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: AssistantHandler }> = [
-  { method: "POST", pattern: /^\/v1\/tutor\/ask$/, handler: async (s, claim, body) => s.tutor.ask(claim, body) },
+const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: AssistantHandler; limit?: RateBucket; gate?: boolean }> = [
+  { method: "POST", pattern: /^\/v1\/tutor\/ask$/, handler: async (s, claim, body) => s.tutor.ask(claim, body), limit: "tutor", gate: true },
   { method: "GET", pattern: /^\/v1\/preferences$/, handler: async (s, claim) => s.preferences.get(claim) },
-  { method: "PUT", pattern: /^\/v1\/preferences$/, handler: async (s, claim, body) => s.preferences.update(claim, body) },
-  { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim) },
+  { method: "PUT", pattern: /^\/v1\/preferences$/, handler: async (s, claim, body) => s.preferences.update(claim, body), limit: "preferences_write" },
+  { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim), limit: "simulation_write" },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).get(claim, p[0] ?? "") },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)\/questions\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).question(claim, p[0] ?? "", p[1]) },
-  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/answers$/, handler: async (s, claim, body, p) => simulationOf(s).answer(claim, p[0] ?? "", body) },
-  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/submit$/, handler: async (s, claim, _b, p) => simulationOf(s).submit(claim, p[0] ?? "") }
+  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/answers$/, handler: async (s, claim, body, p) => simulationOf(s).answer(claim, p[0] ?? "", body), limit: "simulation_write" },
+  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/submit$/, handler: async (s, claim, _b, p) => simulationOf(s).submit(claim, p[0] ?? ""), limit: "simulation_write" }
 ];
 
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+function sendJson(res: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}): void {
   const json = JSON.stringify(payload);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...extraHeaders });
   res.end(json);
 }
 
 /** E — the transport-level half of safe error mapping: takes whatever `PracticeApiError` the application layer already produced (or wraps an unrecognized throw the same defensive way) and writes it as `{ error: { code, message } }` — never a stack trace, never a raw Node/driver error string. */
 function sendError(res: ServerResponse, error: unknown): void {
+  if (!(error instanceof HttpLimitError) && (error as { httpStatus?: unknown } | null)?.httpStatus === 503) {
+    sendJson(res, 503, { error: { code: (error as { code?: string }).code ?? "service_unavailable", message: (error as Error).message } }, { "retry-after": "5" });
+    return;
+  }
+  if (error instanceof HttpLimitError) {
+    const headers: Record<string, string> = error.retryAfterSeconds !== undefined ? { "retry-after": String(error.retryAfterSeconds) } : {};
+    if (error.httpStatus === 413) headers.connection = "close";
+    sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } }, headers);
+    return;
+  }
+  if (isDatabaseUnavailable(error)) {
+    sendJson(res, 503, { error: { code: "service_unavailable", message: "The service is temporarily unavailable. Please try again shortly." } }, { "retry-after": "5" });
+    return;
+  }
   if (error instanceof AssistantApiError) {
     sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
     return;
@@ -247,7 +253,13 @@ function parseCookies(header: string | undefined): Record<string, string> {
     if (eqIndex === -1) continue;
     const name = part.slice(0, eqIndex).trim();
     const value = part.slice(eqIndex + 1).trim();
-    if (name) cookies[name] = decodeURIComponent(value);
+    if (name) {
+      try {
+        cookies[name] = decodeURIComponent(value);
+      } catch {
+        // a malformed cookie value is simply not a usable credential
+      }
+    }
   }
   return cookies;
 }
@@ -257,6 +269,12 @@ function cookieAttributes(maxAgeSeconds: number): string {
   const attrs = ["HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${maxAgeSeconds}`];
   if (process.env.NODE_ENV === "production") attrs.push("Secure");
   return attrs.join("; ");
+}
+
+/** The session token from the cookies, or `undefined` unless it has the exact shape the server issues (64 hex chars): anything else is rejected without a database lookup. */
+function sessionTokenFrom(cookies: Record<string, string>): string | undefined {
+  const token = cookies[SESSION_COOKIE_NAME];
+  return token !== undefined && SESSION_TOKEN_SHAPE.test(token) ? token : undefined;
 }
 
 function sessionCookieHeader(token: string, expiresAt: string): string {
@@ -304,11 +322,12 @@ function bodyStringField(body: Record<string, unknown>, field: string): string {
  * client-supplied one from the request body.
  */
 async function resolveAuthenticatedStudentId(authService: AuthApiService, cookies: Record<string, string>): Promise<string> {
-  const sessionToken = cookies[SESSION_COOKIE_NAME];
+  const sessionToken = sessionTokenFrom(cookies);
   if (!sessionToken) {
     throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
   }
   const { student } = await authService.getCurrentSession({ sessionToken });
+  updateContext({ actorKind: "student", studentRef: studentRef(student.id) });
   return student.id;
 }
 
@@ -354,7 +373,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
     method: "GET",
     pattern: /^\/v1\/auth\/me$/,
     handler: async (authService, _enrollmentService, _body, cookies) => {
-      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      const sessionToken = sessionTokenFrom(cookies);
       // No cookie at all is the ordinary "not logged in" case -- handled here,
       // before the service, so it never reaches AuthApiService.getCurrentSession()'s
       // own `assertNonEmptyString()` guard (which exists for a malformed/blank
@@ -371,7 +390,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
     method: "POST",
     pattern: /^\/v1\/auth\/logout$/,
     handler: async (authService, _enrollmentService, _body, cookies) => {
-      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      const sessionToken = sessionTokenFrom(cookies);
       // No cookie at all: already logged out, a no-op success -- same principle
       // as logging out an already-invalid token (see AuthApiService.logout()'s
       // own doc comment), just short-circuited before the service since there is
@@ -393,7 +412,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
     method: "POST",
     pattern: /^\/v1\/onboarding\/complete$/,
     handler: async (authService, _enrollmentService, _body, cookies) => {
-      const sessionToken = cookies[SESSION_COOKIE_NAME];
+      const sessionToken = sessionTokenFrom(cookies);
       if (!sessionToken) {
         throw new AuthApiError("not_authenticated", "You are not logged in.", 401);
       }
@@ -445,7 +464,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * `chosenAnswer`, unlike the auth/enrollment table) rather than being
  * folded into `AUTH_ROUTES`.
  */
-export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & { assistant?: AssistantServices | null }) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & { assistant?: AssistantServices | null; runtime?: ApiRuntime }) {
   const service = new PracticeApiService(deps);
   const trainingService = new TrainingApiService({
     trainingRecommendationService: deps.trainingRecommendationService,
@@ -458,62 +477,136 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
   const authService = new AuthApiService(deps);
   const enrollmentService = new EnrollmentApiService(deps);
 
-  return createNodeServer((req, res) => {
-    void (async () => {
-      try {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        const method = req.method ?? "GET";
+  const runtime = deps.runtime ?? createRuntime();
+  const { logger, metrics, limiter, rules, security } = runtime;
 
-        const authRoute = AUTH_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
-        if (authRoute) {
-          const cookies = parseCookies(req.headers.cookie);
-          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
-          const result = await authRoute.handler(authService, enrollmentService, body, cookies);
-          if (result.setCookieHeader) {
-            sendJsonWithCookie(res, result.status, result.body, result.setCookieHeader);
-          } else {
-            sendJson(res, result.status, result.body);
+  /** Counts one request against a server-derived key; throws a 429 (with Retry-After) when over the bucket's limit. */
+  function enforce(bucket: RateBucket, key: string): void {
+    if (!limiter) return;
+    const decision = limiter.hit(bucket, key, rules[bucket]);
+    if (decision.allowed) return;
+    metrics.inc("rate_limited_total", { bucket });
+    logger.warn("http.rate_limited", { bucket, retryAfterSeconds: decision.retryAfterSeconds, failureCategory: "rate_limited" });
+    throw new HttpLimitError("rate_limited", "Too many requests. Please wait a moment and try again.", 429, decision.retryAfterSeconds);
+  }
+
+  const server = createNodeServer((req, res) => {
+    const method = req.method ?? "GET";
+    let pathname = "/";
+    try {
+      pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+    } catch {
+      // an unparsable URL is handled as an unmatched route below
+    }
+    const started = Date.now();
+    const context: RequestContext = { requestId: newRequestId(), method, route: routeTemplate(method, pathname), actorKind: "anonymous", studentRef: null, examCode: null, startedAtMs: started };
+    securityHeaders(res, context.requestId, security.production);
+
+    res.on("finish", () => {
+      const latencyMs = Date.now() - started;
+      metrics.inc("http_requests_total", { route: context.route, status: res.statusCode });
+      metrics.observeMs("http_request_latency_ms", latencyMs, { route: context.route });
+      logger.info("http.request", { requestId: context.requestId, method, route: context.route, status: res.statusCode, actorKind: context.actorKind, studentRef: context.studentRef, latencyMs });
+      if (res.statusCode === 413) req.destroy();
+    });
+
+    runWithContext(context, () => {
+      void (async () => {
+        let releaseGate: (() => void) | null = null;
+        try {
+          if (method === "GET" && pathname === "/healthz") {
+            sendJson(res, 200, { status: "ok" });
+            return;
           }
-          return;
+          if (method === "GET" && pathname === "/readyz") {
+            const ready = await Promise.race([runtime.readiness().catch(() => false), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2000).unref())]);
+            sendJson(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready" });
+            return;
+          }
+
+          checkOrigin(req, security);
+          const ip = clientAddress(req, security.trustProxy);
+          enforce("ip", ip);
+
+          const url = new URL(req.url ?? "/", "http://localhost");
+          const authRoute = AUTH_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+          if (authRoute) {
+            if (/^\/v1\/auth\/(signup|login)$/.test(url.pathname)) enforce("auth", ip);
+            const cookies = parseCookies(req.headers.cookie);
+            const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
+            if (url.pathname === "/v1/auth/login" && typeof body.email === "string") enforce("auth_account", body.email.trim().toLowerCase().slice(0, 200));
+            const result = await authRoute.handler(authService, enrollmentService, body, cookies);
+            if (result.setCookieHeader) {
+              sendJsonWithCookie(res, result.status, result.body, result.setCookieHeader);
+            } else {
+              sendJson(res, result.status, result.body);
+            }
+            return;
+          }
+
+          const assistantRoute = ASSISTANT_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+          if (assistantRoute) {
+            const match = assistantRoute.pattern.exec(url.pathname);
+            const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
+            const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
+            enforce("api", claim.studentId);
+            if (assistantRoute.limit) enforce(assistantRoute.limit, claim.studentId);
+            if (assistantRoute.gate) {
+              releaseGate = runtime.tutorGate.acquire(claim.studentId);
+              if (!releaseGate) {
+                metrics.inc("rate_limited_total", { bucket: "tutor_in_flight" });
+                logger.warn("http.rate_limited", { bucket: "tutor_in_flight", failureCategory: "rate_limited" });
+                throw new HttpLimitError("rate_limited", "Please wait for your previous tutor request to finish.", 429, 2);
+              }
+            }
+            if (!deps.assistant) throw notConfigured("This feature is");
+            sendJson(res, 200, await assistantRoute.handler(deps.assistant, claim, body, match ? match.slice(1).map(safeDecode) : []));
+            return;
+          }
+
+          const trainingRoute = TRAINING_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+          if (trainingRoute) {
+            const match = trainingRoute.pattern.exec(url.pathname);
+            const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
+            const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
+            enforce("api", claim.studentId);
+            sendJson(res, 200, await trainingRoute.handler(trainingService, claim, body, url.searchParams, { id: match?.[1] ?? "" }));
+            return;
+          }
+
+          const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+
+          if (!route) {
+            sendError(res, new PracticeApiError("not_found", "No matching route.", 404));
+            return;
+          }
+
+          const match = route.pattern.exec(url.pathname);
+          const params: RouteParams = { id: match?.[1] ?? "" };
+          const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
+          const cookies = parseCookies(req.headers.cookie);
+          const claim = await resolvePracticeClaim(authService, enrollmentService, cookies);
+          enforce("api", claim.studentId);
+
+          const result = await route.handler(service, claim, body, url.searchParams, params);
+          sendJson(res, 200, result);
+        } catch (error) {
+          const e = error as { name?: unknown; code?: unknown; httpStatus?: unknown } | null;
+          const status = typeof e?.httpStatus === "number" ? e.httpStatus : 500;
+          if (status >= 500 || !(error instanceof Error)) {
+            const category = isDatabaseUnavailable(error) || status === 503 ? "dependency_unavailable" : "unhandled";
+            // Internal diagnostics keep the error's NAME and CODE only - never its message (it can carry SQL, paths or secrets).
+            logger.error("http.error", { errorName: typeof e?.name === "string" ? e.name : "unknown", errorCode: typeof e?.code === "string" ? e.code : null, failureCategory: category });
+            metrics.inc("http_errors_total", { category });
+          }
+          sendError(res, error);
+        } finally {
+          releaseGate?.();
         }
-
-        const assistantRoute = ASSISTANT_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
-        if (assistantRoute) {
-          const match = assistantRoute.pattern.exec(url.pathname);
-          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
-          const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
-          if (!deps.assistant) throw notConfigured("This feature is");
-          sendJson(res, 200, await assistantRoute.handler(deps.assistant, claim, body, match ? match.slice(1).map(safeDecode) : []));
-          return;
-        }
-
-        const trainingRoute = TRAINING_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
-        if (trainingRoute) {
-          const match = trainingRoute.pattern.exec(url.pathname);
-          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
-          const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
-          sendJson(res, 200, await trainingRoute.handler(trainingService, claim, body, url.searchParams, { id: match?.[1] ?? "" }));
-          return;
-        }
-
-        const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
-
-        if (!route) {
-          sendError(res, new PracticeApiError("not_found", "No matching route.", 404));
-          return;
-        }
-
-        const match = route.pattern.exec(url.pathname);
-        const params: RouteParams = { id: match?.[1] ?? "" };
-        const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
-        const cookies = parseCookies(req.headers.cookie);
-        const claim = await resolvePracticeClaim(authService, enrollmentService, cookies);
-
-        const result = await route.handler(service, claim, body, url.searchParams, params);
-        sendJson(res, 200, result);
-      } catch (error) {
-        sendError(res, error);
-      }
-    })();
+      })();
+    });
   });
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 15_000;
+  return server;
 }

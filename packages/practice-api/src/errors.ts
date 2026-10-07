@@ -20,7 +20,15 @@ import { PracticeApiError } from "./types.js";
  * ORIGINAL error server-side (for operators, never for the client) is a
  * transport's own job, not this function's.
  */
+/** Phase 9 Unit 3 (D-099): the database being unreachable or overloaded is a retryable 503, not a generic 500. Name/code only - never the message. */
+function isDatabaseUnavailable(error: unknown): boolean {
+  const e = error as { name?: unknown; code?: unknown } | null;
+  return e?.name === "PrismaClientInitializationError" || (typeof e?.code === "string" && ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(e.code));
+}
+const UNAVAILABLE_MESSAGE = "The service is temporarily unavailable. Please try again shortly.";
+
 export function toPracticeApiError(error: unknown): PracticeApiError {
+  if (isDatabaseUnavailable(error)) return new PracticeApiError("infrastructure_failure", UNAVAILABLE_MESSAGE, 503);
   if (error instanceof TrainingRecommendationError) {
     switch (error.code) {
       case "invalid_request":

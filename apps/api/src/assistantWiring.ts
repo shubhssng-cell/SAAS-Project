@@ -17,6 +17,11 @@ import { SimulationService } from "@ipmat/exam-simulation";
 import { InMemoryPreferenceStore } from "@ipmat/personalization";
 import type { PrismaClient } from "@prisma/client";
 import { resolveAiConfig } from "./hypothesisWiring.js";
+import { observeProvider } from "./providerObservability.js";
+import type { ApiRuntime } from "./hardening.js";
+
+/** Explicit, bounded provider budget for the tutor: one retry, a 20 s per-call timeout, and a 45 s overall request deadline (Phase 9 Unit 3, D-099). */
+export const TUTOR_AI_OPTIONS = { timeoutMs: 20_000, maxRetries: 1 } as const;
 
 /**
  * Phase 9 Unit 2 (D-098) -- the ONE place the tutor / preferences / simulation application services meet concrete
@@ -38,11 +43,15 @@ export function resolveTutorProvider(env: Record<string, string | undefined>): A
   return config.kind === "anthropic" ? new AnthropicProvider(config.model) : null;
 }
 
-export function createPrismaAssistantServices(prisma: PrismaClient, env: Record<string, string | undefined>): AssistantServices {
+export function createPrismaAssistantServices(prisma: PrismaClient, env: Record<string, string | undefined>, runtime?: Pick<ApiRuntime, "logger" | "metrics">): AssistantServices {
+  const raw = resolveTutorProvider(env);
   return createAssistantServices({
     ownership: new PrismaTutorOwnershipPort(prisma),
     tutorPorts: { questions: new PrismaTutorQuestionPort(prisma), concepts: new ExamPackTutorConceptPort(new PrismaExamPackRepository(prisma)), attempts: new PrismaTutorAttemptPort(prisma) },
-    provider: resolveTutorProvider(env),
+    provider: raw ? observeProvider(raw, runtime) : null,
+    aiOptions: TUTOR_AI_OPTIONS,
+    metrics: runtime?.metrics,
+    logger: runtime?.logger,
     preferences: new PrismaPreferenceStore(prisma),
     audit: new PrismaOrchestrationAuditStore(prisma),
     simulation: new SimulationService({

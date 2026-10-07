@@ -1,5 +1,5 @@
 import { SimulationError, type SimulationQuestionView, type SimulationService, type SimulationView } from "@ipmat/exam-simulation";
-import { AssistantApiError, invalidRequest, isRecord, requireOnlyKeys, type StudentClaim } from "./errors.js";
+import { AssistantApiError, infrastructureError, invalidRequest, isRecord, requireOnlyKeys, type StudentClaim } from "./errors.js";
 
 /**
  * The full-exam simulation boundary (Phase 9 Unit 2, D-098) over the EXISTING `SimulationService`, which already verifies
@@ -26,7 +26,7 @@ function mapError(error: unknown): never {
     const mapped = STATUS[error.code];
     if (mapped) throw new AssistantApiError(mapped[0], mapped[2], mapped[1]);
   }
-  throw new AssistantApiError("infrastructure_failure", "Something went wrong. Please try again.", 500);
+  throw infrastructureError(error, "Something went wrong. Please try again.");
 }
 
 export interface SimulationAnswerDto {

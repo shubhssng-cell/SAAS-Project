@@ -1,5 +1,7 @@
 import type { AiProvider } from "@ipmat/ai";
 import { createOrchestrator, generationCapability, personalizationCapability, tutorCapability, type CapabilityHandler, type CapabilityId, type OrchestrationAuditSink, type Orchestrator } from "@ipmat/ai-orchestration";
+import { randomUUID } from "node:crypto";
+import { currentContext, type Logger, type Metrics } from "@ipmat/observability";
 import type { PreferenceStore } from "@ipmat/personalization";
 import type { QuestionGenerationService } from "@ipmat/question-generation";
 import type { SimulationService } from "@ipmat/exam-simulation";
@@ -33,7 +35,14 @@ export interface AssistantDependencies {
   generation?: QuestionGenerationService | null;
   listOtherExamTerms?: (examCode: string) => Promise<readonly string[]> | readonly string[];
   now?: () => Date;
+  /** Defaults to the current HTTP request's correlation id (so the orchestration audit and the logs share it), else a fresh one. */
   newRequestId?: () => string;
+  /** Bounds for one provider call (timeout and explicit retry count), applied to the tutor. */
+  aiOptions?: { timeoutMs?: number; maxRetries?: number };
+  /** Overall wall-clock bound for one tutor request. */
+  tutorDeadlineMs?: number;
+  metrics?: Metrics;
+  logger?: Logger;
 }
 
 export interface AssistantServices {
@@ -45,6 +54,7 @@ export interface AssistantServices {
 }
 
 export function createAssistantServices(deps: AssistantDependencies): AssistantServices {
+  const requestId = deps.newRequestId ?? ((): string => currentContext()?.requestId ?? randomUUID());
   const handlers: Partial<Record<CapabilityId, CapabilityHandler>> = {
     personalization: personalizationCapability({ ownership: deps.ownership, store: deps.preferences })
   };
@@ -56,15 +66,16 @@ export function createAssistantServices(deps: AssistantDependencies): AssistantS
       listOtherExamTerms: deps.listOtherExamTerms,
       audit: deps.tutorAudit,
       now: deps.now,
-      newRequestId: deps.newRequestId
+      newRequestId: requestId,
+      aiOptions: deps.aiOptions
     });
     handlers.tutor_response = tutorCapability(tutor);
   }
   if (deps.generation) handlers.question_generation = generationCapability(deps.generation);
 
-  const orchestrator: Orchestrator = createOrchestrator({ ownership: deps.ownership, handlers, audit: deps.audit, now: deps.now, newRequestId: deps.newRequestId });
+  const orchestrator: Orchestrator = createOrchestrator({ ownership: deps.ownership, handlers, audit: deps.audit, now: deps.now, newRequestId: requestId });
   return {
-    tutor: new TutorApiService({ orchestrator, tutorAvailable: deps.provider !== null }),
+    tutor: new TutorApiService({ orchestrator, tutorAvailable: deps.provider !== null, deadlineMs: deps.tutorDeadlineMs, metrics: deps.metrics, logger: deps.logger }),
     preferences: new PreferencesApiService(deps.preferences),
     simulation: deps.simulation ? new SimulationApiService(deps.simulation) : null,
     generation: deps.generation ? new ContentGenerationApiService(orchestrator) : null

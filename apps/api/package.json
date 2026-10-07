@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ipmat/ai": "*",
+    "@ipmat/observability": "*",
     "@ipmat/assistant-api": "*",
     "@ipmat/auth-api": "*",
     "@ipmat/autopsy": "*",

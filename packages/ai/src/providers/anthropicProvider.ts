@@ -20,6 +20,9 @@ import type { AiCallOptions, AiCompletion, AiProvider } from "../types.js";
  */
 export const ANTHROPIC_MAX_OUTPUT_TOKENS_PER_CALL = 4096;
 
+/** Hard transport ceiling for one Messages API request (Phase 9 Unit 3). `generateStructured`'s per-call timeout (default 30 s) normally fires first. */
+export const ANTHROPIC_TRANSPORT_TIMEOUT_MS = 60_000;
+
 /**
  * The real provider — talks to the Anthropic Messages API. Requires
  * ANTHROPIC_API_KEY in the environment (the SDK reads it directly; this
@@ -39,7 +42,10 @@ export class AnthropicProvider implements AiProvider {
 
   constructor(model: string, client?: Anthropic) {
     this.model = model;
-    this.client = client ?? new Anthropic();
+    // Phase 9 Unit 3 (D-099): the SDK's own defaults (2 silent retries on 429/5xx, a 10-minute timeout) would multiply the
+    // retry budget `generateStructured` already enforces explicitly (and bounds with its own per-call timeout). Retrying is
+    // therefore decided in ONE visible place; the SDK is told not to retry, and its transport timeout is finite.
+    this.client = client ?? new Anthropic({ maxRetries: 0, timeout: ANTHROPIC_TRANSPORT_TIMEOUT_MS });
   }
 
   async complete(input: { systemPrompt: string; userPrompt: string; options?: AiCallOptions }): Promise<AiCompletion> {

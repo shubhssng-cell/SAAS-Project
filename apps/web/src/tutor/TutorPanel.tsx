@@ -126,7 +126,7 @@ export function TutorPanel({ questionId }: { questionId: string }) {
     void apiAskTutor(operation, questionId).then((result) => {
       if (id !== latest.current) return;
       if (result.ok) setState({ status: "shown", answer: result.answer });
-      else setState({ status: "error", message: result.failure.kind === "network_error" ? "We couldn't reach the tutor. Check your connection and try again." : "The tutor isn't available right now. Please try again later." });
+      else setState({ status: "error", message: result.failure.kind === "network_error" ? "We couldn't reach the tutor. Check your connection and try again." : result.failure.kind === "rate_limited" ? result.failure.message : result.failure.kind === "not_authenticated" ? "Your session has ended. Please log in again to use the tutor." : "The tutor isn't available right now. Please try again later." });
     });
   }
 
