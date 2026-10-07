@@ -75,6 +75,7 @@ export function DashboardRoute() {
       prepStatus={prepStatus}
       onStart={() => navigate("/practice/next")}
       onOpenTraining={() => navigate("/training")}
+      onOpenBilling={() => navigate("/billing")}
     />
   );
 }

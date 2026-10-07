@@ -15,6 +15,10 @@ export type AuthFailure =
   | { kind: "email_already_registered"; message: string }
   | { kind: "not_authenticated" }
   | { kind: "rate_limited"; message: string }
+  // Phase 9 Unit 4: commercial refusals. The server's wording is never displayed; the copy below is fixed.
+  | { kind: "not_entitled"; message: string }
+  | { kind: "usage_limit_reached"; message: string }
+  | { kind: "conflict"; message: string }
   | { kind: "network_error" }
   | { kind: "unexpected"; message: string };
 
@@ -35,6 +39,12 @@ export function mapAuthApiErrorCode(code: string | undefined, message: string | 
     case "rate_limited":
       // Fixed copy: the server's own wording is never trusted for display.
       return { kind: "rate_limited", message: "You're going a little fast. Please wait a moment and try again." };
+    case "not_entitled":
+      return { kind: "not_entitled", message: "Your current access doesn't include this. You can see your plan and what it includes on the billing page." };
+    case "usage_limit_reached":
+      return { kind: "usage_limit_reached", message: "You've reached your limit for this feature for now. You can see your usage on the billing page." };
+    case "conflict":
+      return { kind: "conflict", message: "That is already in place." };
     default:
       return { kind: "unexpected", message: "Something went wrong. Please try again." };
   }

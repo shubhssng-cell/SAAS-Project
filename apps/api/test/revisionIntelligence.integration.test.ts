@@ -155,6 +155,6 @@ describe.skipIf(!DATABASE_URL)("revision intelligence over real Postgres", () =>
   it("this unit added no migration: the latest migration is still Content Intelligence", async () => {
     const rows = await prisma.$queryRaw<Array<{ migration_name: string }>>`select migration_name from _prisma_migrations where migration_name > '0015_content_intelligence' order by migration_name`;
     // this unit added no migration: the only one after Content Intelligence (0015) is Phase 7 Unit 4's exam simulation
-    expect(rows.map((r) => r.migration_name)).toEqual(["0016_exam_simulation", "0017_production_persistence_foundation"]); // 0017 is Phase 9 Unit 1 (D-097); history-stable: this unit still added none
+    expect(rows.map((r) => r.migration_name)).toEqual(["0016_exam_simulation", "0017_production_persistence_foundation", "0018_monetization_entitlements"]); // 0017 is Phase 9 Unit 1 (D-097), 0018 Phase 9 Unit 4 (D-100); history-stable: this unit still added none
   });
 });

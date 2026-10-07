@@ -93,10 +93,10 @@ export function createHypothesisSealer(secret: string | undefined): HypothesisSe
   };
 }
 
-export function createHypothesisDependencies(env: Record<string, string | undefined>): { hypothesisGenerator: HypothesisGenerator | null; hypothesisSealer: HypothesisSealer } {
+export function createHypothesisDependencies(env: Record<string, string | undefined>, wrapProvider: (provider: AiProvider) => AiProvider = (p) => p): { hypothesisGenerator: HypothesisGenerator | null; hypothesisSealer: HypothesisSealer } {
   const config = resolveAiConfig(env);
   const sealer = createHypothesisSealer(env.IPMAT_HYPOTHESIS_SECRET);
   if (config.kind === "none") return { hypothesisGenerator: null, hypothesisSealer: sealer };
-  const provider: AiProvider = config.kind === "anthropic" ? new AnthropicProvider(config.model) : new DevScriptedProvider();
+  const provider: AiProvider = wrapProvider(config.kind === "anthropic" ? new AnthropicProvider(config.model) : new DevScriptedProvider());
   return { hypothesisGenerator: (observation, context) => generateObservationHypothesis(provider, { observation, designedErrorCategory: context.designedErrorCategory }), hypothesisSealer: sealer };
 }

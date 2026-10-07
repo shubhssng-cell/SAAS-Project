@@ -18,13 +18,15 @@ export function Dashboard({
   studentEmail,
   prepStatus,
   onStart,
-  onOpenTraining
+  onOpenTraining,
+  onOpenBilling
 }: {
   dashboard: DashboardViewModel;
   studentEmail: string;
   prepStatus: PrepStatusViewModel;
   onStart: () => void;
   onOpenTraining: () => void;
+  onOpenBilling?: () => void;
 }) {
   return (
     <Screen eyebrow="Dashboard" headline="Welcome back." subtext={greetingSubtext(studentEmail)}>
@@ -52,6 +54,16 @@ export function Dashboard({
           Choose training
         </Button>
       </Card>
+
+      {onOpenBilling ? (
+        <Card>
+          <p className="mode-tag">Plan</p>
+          <h2 className="headline headline-compact">Your plan and usage.</h2>
+          <Button block variant="secondary" onClick={onOpenBilling}>
+            View plan
+          </Button>
+        </Card>
+      ) : null}
     </Screen>
   );
 }

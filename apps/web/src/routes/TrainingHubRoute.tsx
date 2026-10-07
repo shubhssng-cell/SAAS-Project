@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isSessionExpiredError, type TrainingCompletionViewModel, type TrainingHubViewModel } from "../adapter/index.js";
+import { isNotEntitledError, isSessionExpiredError, type TrainingCompletionViewModel, type TrainingHubViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { TrainingHub } from "../components/TrainingHub.js";
 import { LoadingState } from "../design/index.js";
@@ -65,6 +65,12 @@ export function TrainingHubRoute() {
     } catch (error) {
       if (isSessionExpiredError(error)) {
         setState({ status: "error", sessionExpired: true });
+      } else if (isNotEntitledError(error)) {
+        // Fixed copy; the paywall decision was the server's. The billing page shows what the student's plan includes.
+        setStartError("That training isn't part of your current access. You can see your plan on the billing page.");
+        startInFlight.current = false;
+        setStartingSystemId(null);
+        return;
       } else {
         setStartError("We couldn't start that training. Please try again.");
         // The hub may have changed under us (e.g. another tab started a session): re-read it.

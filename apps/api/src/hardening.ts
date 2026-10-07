@@ -24,7 +24,7 @@ export class HttpLimitError extends Error {
 
 // ---- rate limits ------------------------------------------------------------------------------------------------------
 
-export type RateBucket = "ip" | "auth" | "auth_account" | "api" | "tutor" | "simulation_write" | "preferences_write";
+export type RateBucket = "ip" | "auth" | "auth_account" | "api" | "tutor" | "simulation_write" | "preferences_write" | "billing_write" | "webhook";
 
 /**
  * PROVISIONAL numbers (nothing in the repository calibrates them against real traffic). They are chosen to be invisible to a
@@ -37,7 +37,10 @@ export const DEFAULT_RATE_RULES: Readonly<Record<RateBucket, RateLimit>> = Objec
   api: { limit: 300, windowMs: 60_000 },
   tutor: { limit: 12, windowMs: 60_000 },
   simulation_write: { limit: 150, windowMs: 60_000 },
-  preferences_write: { limit: 20, windowMs: 60_000 }
+  preferences_write: { limit: 20, windowMs: 60_000 },
+  // Phase 9 Unit 4: starting a checkout or cancelling is rare; the webhook is keyed by the provider's address, not a student.
+  billing_write: { limit: 10, windowMs: 60_000 },
+  webhook: { limit: 300, windowMs: 60_000 }
 });
 
 /** At most this many tutor requests per student may be in flight at once (each is a paid, slow model call). */
@@ -132,7 +135,7 @@ export function securityHeaders(res: ServerResponse, requestId: string, producti
 }
 
 /** Reads a JSON body with a hard size cap and a content-type requirement (when there is a body). */
-export function readBoundedBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+export function readBoundedBody(req: IncomingMessage, maxBytes: number, options: { preserve?: boolean } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers["content-length"]);
     if (Number.isFinite(declared) && declared > maxBytes) {
@@ -155,8 +158,10 @@ export function readBoundedBody(req: IncomingMessage, maxBytes: number): Promise
     });
     req.on("end", () => {
       if (failed) return;
-      const raw = Buffer.concat(chunks).toString("utf-8").trim();
-      if (raw !== "") {
+      // A signed webhook is verified over the EXACT bytes received, so `preserve` skips the trim a normal JSON body gets.
+      const exact = Buffer.concat(chunks).toString("utf-8");
+      const raw = options.preserve ? exact : exact.trim();
+      if (raw.trim() !== "") {
         const type = String(req.headers["content-type"] ?? "").toLowerCase();
         if (!type.startsWith("application/json")) {
           reject(new HttpLimitError("unsupported_media_type", "Requests must be sent as application/json.", 415));
@@ -192,7 +197,9 @@ const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/v1\/simulations$/, "/v1/simulations"],
   [/^\/v1\/simulations\/[^/]+$/, "/v1/simulations/:id"],
   [/^\/v1\/simulations\/[^/]+\/questions\/[^/]+$/, "/v1/simulations/:id/questions/:position"],
-  [/^\/v1\/simulations\/[^/]+\/(answers|submit)$/, "/v1/simulations/:id/$1"]
+  [/^\/v1\/simulations\/[^/]+\/(answers|submit)$/, "/v1/simulations/:id/$1"],
+  [/^\/v1\/billing$/, "/v1/billing"],
+  [/^\/v1\/billing\/(checkout|cancel|webhook)$/, "/v1/billing/$1"]
 ];
 
 export function routeTemplate(method: string, pathname: string): string {

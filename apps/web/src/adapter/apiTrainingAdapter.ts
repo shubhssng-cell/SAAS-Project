@@ -79,6 +79,11 @@ export function isSessionExpiredError(error: unknown): boolean {
   return error instanceof PracticeApiRequestError && error.failure.kind === "not_authenticated";
 }
 
+/** A request the server refused because the student's current plan does not include it (Phase 9 Unit 4). Transport-level kind only; the server decides entitlement. */
+export function isNotEntitledError(error: unknown): boolean {
+  return error instanceof PracticeApiRequestError && (error.failure.kind === "not_entitled" || error.failure.kind === "usage_limit_reached");
+}
+
 function asObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }

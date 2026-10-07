@@ -34,7 +34,13 @@ export const LOG_FIELDS = [
   "errorCode",
   "dependency",
   "check",
-  "count"
+  "count",
+  // Phase 9 Unit 4 (billing): configuration ids and coarse states only - never an amount, a reference, a signature or a payload.
+  "feature",
+  "meter",
+  "planId",
+  "eventType",
+  "subscriptionStatus"
 ] as const;
 export type LogField = (typeof LOG_FIELDS)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean | null | undefined>>;

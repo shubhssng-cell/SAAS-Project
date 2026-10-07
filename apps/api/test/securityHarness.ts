@@ -5,6 +5,11 @@ import { InMemoryOrchestrationAuditStore } from "@ipmat/db";
 import { InMemorySimulationRepository, SimulationService } from "@ipmat/exam-simulation";
 import { createLogger, createMetrics, createRateLimiter, type Metrics } from "@ipmat/observability";
 import { InMemoryPreferenceStore } from "@ipmat/personalization";
+import type { EntitlementMode, PlanCatalog } from "@ipmat/billing";
+import type { CommerceServices } from "@ipmat/billing-api";
+import { HmacTestProvider, testCatalog } from "@ipmat/billing-api/testing";
+import type { InMemoryBillingStore } from "@ipmat/db";
+import { createInMemoryCommerce } from "../src/commerceWiring.js";
 import { createRuntime, DEFAULT_RATE_RULES, type ApiRuntime, type RateBucket } from "../src/hardening.js";
 import { observeProvider } from "../src/providerObservability.js";
 import { createServer } from "../src/server.js";
@@ -32,6 +37,8 @@ export interface AppOptions {
   maxBodyBytes?: number;
   extraQuestions?: ReturnType<typeof tutorQuestion>[];
   clock?: () => number;
+  /** Phase 9 Unit 4: wire the commercial layer. Omitted = the pre-Unit-4 behaviour (no commerce at all). */
+  commerce?: { mode: EntitlementMode; catalog?: PlanCatalog; provider?: boolean; now?: () => Date };
 }
 
 export interface App {
@@ -46,6 +53,10 @@ export interface App {
   logRecords: () => Array<Record<string, unknown>>;
   known: Set<string>;
   call: (method: string, path: string, body?: unknown, cookie?: string, headers?: Record<string, string>, rawBody?: string) => Promise<{ status: number; json: Record<string, unknown>; raw: string; headers: Headers }>;
+  /** Present only when `options.commerce` was given. */
+  commerce: CommerceServices | null;
+  billing: InMemoryBillingStore | null;
+  payments: HmacTestProvider;
   student: (enroll?: boolean) => Promise<{ cookie: string; studentId: string; email: string }>;
   submit: (cookie: string, questionId: string, chosenAnswer: string) => Promise<string>;
   close: () => Promise<void>;
@@ -93,7 +104,11 @@ export async function buildApp(options: AppOptions = {}): Promise<App> {
     readiness: options.readiness ?? (async () => true),
     security: { allowedOrigins: options.allowedOrigins ?? null, trustProxy: options.trustProxy ?? false, production: options.production ?? false, maxBodyBytes: options.maxBodyBytes ?? 32 * 1024 }
   });
-  const server = createServer({ ...deps, assistant, runtime });
+  const payments = new HmacTestProvider();
+  const built = options.commerce
+    ? createInMemoryCommerce({ mode: options.commerce.mode, catalog: options.commerce.catalog ?? testCatalog(), returnUrl: null, provider: options.commerce.provider === false ? null : payments }, deps, { logger, metrics }, known, options.commerce.now)
+    : null;
+  const server = createServer({ ...deps, assistant, commerce: built?.commerce ?? null, runtime });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -138,6 +153,9 @@ export async function buildApp(options: AppOptions = {}): Promise<App> {
     audits,
     preferences,
     assistant,
+    commerce: built?.commerce ?? null,
+    billing: built?.store ?? null,
+    payments,
     metrics,
     logs,
     logRecords: () => logs.map((l) => JSON.parse(l) as Record<string, unknown>),

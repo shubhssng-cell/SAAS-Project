@@ -5,6 +5,8 @@ import { createHypothesisDependencies } from "./hypothesisWiring.js";
 import { createServer } from "./server.js";
 import { buildProductionRuntime } from "./hardening.js";
 import { createInMemoryAssistantServices, createPrismaAssistantServices } from "./assistantWiring.js";
+import { createInMemoryCommerce, createPrismaCommerce, resolveCommerceConfig } from "./commerceWiring.js";
+import { observeProvider } from "./providerObservability.js";
 import { createInMemoryDependencies, createPrismaDependencies } from "./wiring.js";
 
 /**
@@ -17,13 +19,22 @@ import { createInMemoryDependencies, createPrismaDependencies } from "./wiring.j
  */
 const PORT = Number(process.env.PORT ?? 4001);
 const mode = resolvePersistenceMode(process.env);
+// Fails fast (before anything connects) on a missing or invalid commercial configuration -- see commerceWiring.ts.
+const commerceConfig = resolveCommerceConfig(process.env);
 const DB_READINESS_TIMEOUT_MS = 2000;
 
 if (mode.kind === "prisma") {
   const prisma = createPrismaClient(mode.databaseUrl);
   await prisma.$connect(); // fail fast if the database is unreachable or the credentials are wrong
   const runtime = buildProductionRuntime(process.env, { readiness: async () => { await Promise.race([prisma.$queryRaw`SELECT 1`, new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), DB_READINESS_TIMEOUT_MS).unref())]); return true; } });
-  const server = createServer({ ...createPrismaDependencies(prisma), ...createHypothesisDependencies(process.env), assistant: createPrismaAssistantServices(prisma, process.env, runtime), runtime });
+  const { commerce, aiUsage } = createPrismaCommerce(prisma, commerceConfig, runtime);
+  const server = createServer({
+    ...createPrismaDependencies(prisma),
+    ...createHypothesisDependencies(process.env, (provider) => observeProvider(provider, { ...runtime, usage: aiUsage })),
+    assistant: createPrismaAssistantServices(prisma, process.env, runtime, aiUsage),
+    commerce,
+    runtime
+  });
   server.listen(PORT, () => {
     console.log(`@ipmat/api listening on http://localhost:${PORT} (Prisma repositories; database connected)`);
   });
@@ -37,7 +48,16 @@ if (mode.kind === "prisma") {
 } else {
   /** Phase 2 Unit 1: development-only published practice content (see `devContent.ts`) -- never production data. */
   const devContent = await buildDevContentSeed();
-  const server = createServer({ ...createInMemoryDependencies(devContent), ...createHypothesisDependencies(process.env), assistant: createInMemoryAssistantServices(), runtime: buildProductionRuntime(process.env) });
+  const runtime = buildProductionRuntime(process.env);
+  const deps = createInMemoryDependencies(devContent);
+  const { commerce, store } = createInMemoryCommerce(commerceConfig, deps, runtime);
+  const server = createServer({
+    ...deps,
+    ...createHypothesisDependencies(process.env, (provider) => observeProvider(provider, { ...runtime, usage: store })),
+    assistant: createInMemoryAssistantServices(),
+    commerce,
+    runtime
+  });
   server.listen(PORT, () => {
     console.log(
       `@ipmat/api listening on http://localhost:${PORT} (in-memory dependencies, no database; ${devContent.questionContent.length} development-only published questions)`

@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  * not re-litigate the tracked one.
  */
 
-const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice", "src/adapter", "src/training", "src/tutor"];
+const SCANNED_DIRS = ["src/router", "src/routes", "src/design", "src/components", "src/auth", "src/enrollment", "src/dashboard", "src/practice", "src/adapter", "src/training", "src/tutor", "src/billing"];
 const EXCLUDED_FILES: string[] = ["src/adapter/service.ts", "src/adapter/fixtures.ts", "src/adapter/presentation.ts"];
 
 const BANNED_IMPORT_SPECIFIERS = [
@@ -52,6 +52,9 @@ const BANNED_IMPORT_SPECIFIERS = [
   // directly (that stays exclusively server-side).
   "@ipmat/enrollment-api",
   "@ipmat/prep-phase",
+  // Phase 9 Unit 4 -- the browser is never a source of billing truth: it reads /v1/billing and imports none of the billing packages.
+  "@ipmat/billing",
+  "@ipmat/billing-api",
   "@prisma/client"
 ];
 

@@ -22,6 +22,7 @@
     "@ipmat/ai-orchestration": "*",
     "@ipmat/attempt": "*",
     "@ipmat/autopsy": "*",
+    "@ipmat/billing": "*",
     "@ipmat/concept-graph": "*",
     "@ipmat/content-authoring": "*",
     "@ipmat/content-intelligence": "*",
@@ -32,12 +33,12 @@
     "@ipmat/examiner-lens": "*",
     "@ipmat/mastery": "*",
     "@ipmat/personalization": "*",
-    "@ipmat/prep-phase": "*",
     "@ipmat/practice-block": "*",
     "@ipmat/practice-session": "*",
-    "@ipmat/tutor": "*",
+    "@ipmat/prep-phase": "*",
     "@ipmat/question-engine": "*",
     "@ipmat/question-generation": "*",
+    "@ipmat/tutor": "*",
     "@prisma/client": "^5.20.0"
   },
   "devDependencies": {

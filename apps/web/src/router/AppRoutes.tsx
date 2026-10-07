@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { OnboardingGate } from "../auth/OnboardingGate.js";
 import { RequireAuth } from "../auth/RequireAuth.js";
 import { EnrollmentGate } from "../enrollment/EnrollmentGate.js";
+import { BillingRoute } from "../routes/BillingRoute.js";
 import { DashboardRoute } from "../routes/DashboardRoute.js";
 import { EnrollPage } from "../routes/EnrollPage.js";
 import { LandingPage } from "../routes/LandingPage.js";
@@ -135,6 +136,14 @@ const RENDERERS: Record<string, (params: Record<string, string>) => ReactElement
         <EnrollmentGate mode="require-complete">
           <TrainingResultRoute sessionId={params.sessionId ?? ""} questionId={params.questionId ?? ""} />
         </EnrollmentGate>
+      </OnboardingGate>
+    </RequireAuth>
+  ),
+  // Phase 9 Unit 4 -- needs a signed-in, onboarded student; NOT an enrollment (an unenrolled student may still see and buy a plan).
+  billing: () => (
+    <RequireAuth>
+      <OnboardingGate mode="require-complete">
+        <BillingRoute />
       </OnboardingGate>
     </RequireAuth>
   ),

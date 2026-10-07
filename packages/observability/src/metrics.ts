@@ -8,7 +8,7 @@
  * `maxSeries` distinct series exist (the rest are counted in `overflow`), so a caller-influenced value can never grow memory
  * without bound.
  */
-export const METRIC_LABELS = ["route", "status", "outcome", "bucket", "category", "provider", "operation", "check"] as const;
+export const METRIC_LABELS = ["route", "status", "outcome", "bucket", "category", "provider", "operation", "check", "feature", "meter"] as const;
 export type MetricLabel = (typeof METRIC_LABELS)[number];
 export type MetricLabels = Partial<Record<MetricLabel, string | number>>;
 

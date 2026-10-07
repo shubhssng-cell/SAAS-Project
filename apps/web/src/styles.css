@@ -825,3 +825,10 @@ a.btn {
     display: none;
   }
 }
+
+/* Phase 9 Unit 4 -- billing page: separate one plan option from the next. */
+.plan-option + .plan-option {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+}

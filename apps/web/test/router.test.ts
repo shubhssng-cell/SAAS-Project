@@ -25,7 +25,8 @@ const REQUIRED_ROUTES: Array<{ id: string; pattern: string }> = [
   { id: "practice-question", pattern: "/practice/:questionId" },
   { id: "training", pattern: "/training" },
   { id: "training-result", pattern: "/training/:sessionId/result/:questionId" },
-  { id: "training-session", pattern: "/training/:sessionId" }
+  { id: "training-session", pattern: "/training/:sessionId" },
+  { id: "billing", pattern: "/billing" }
 ];
 
 describe("ROUTE_TABLE -- covers every route required by Product Phase 1 Unit 2", () => {

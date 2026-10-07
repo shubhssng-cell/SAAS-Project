@@ -103,9 +103,9 @@ describe("a real orchestrator writing to the durable audit store", () => {
 });
 
 describe("schema / migration 0017 - static invariants", () => {
-  it("is the next migration and is additive only (no DROP/ALTER-DROP/DELETE/UPDATE/TRUNCATE of existing objects)", () => {
+  it("is migration 0017 and is additive only (no DROP/ALTER-DROP/DELETE/UPDATE/TRUNCATE of existing objects)", () => {
     const dirs = readdirSync(join(DB_ROOT, "prisma", "migrations")).filter((d) => /^\d{4}_/.test(d)).sort();
-    expect(dirs.indexOf("0017_production_persistence_foundation")).toBe(dirs.length - 1);
+    expect(dirs.indexOf("0017_production_persistence_foundation")).toBe(16); // history-stable: later units (0018, Phase 9 Unit 4) append after it
     expect(dirs.slice(0, 16).map((d) => d.slice(0, 4))).toEqual(Array.from({ length: 16 }, (_, i) => String(i + 1).padStart(4, "0")));
     const code = migration.replace(/--.*$/gm, "");
     expect(code).not.toMatch(/\bDROP\s+(TABLE|COLUMN|TYPE|INDEX|CONSTRAINT)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bUPDATE\s+"/i);

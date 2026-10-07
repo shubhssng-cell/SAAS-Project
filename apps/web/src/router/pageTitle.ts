@@ -16,7 +16,8 @@ const ROUTE_TITLES: Record<string, string> = {
   "practice-question": "Question",
   training: "Training",
   "training-result": "Training result",
-  "training-session": "Training session"
+  "training-session": "Training session",
+  billing: "Your plan"
 };
 
 /**

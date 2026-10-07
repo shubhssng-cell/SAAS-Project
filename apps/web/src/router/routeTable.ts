@@ -28,5 +28,7 @@ export const ROUTE_TABLE: RouteTableEntry[] = [
   // Phase 5 Unit 1 -- deliberate training. Literal/longer patterns first, like the practice routes above.
   { id: "training", pattern: "/training" },
   { id: "training-result", pattern: "/training/:sessionId/result/:questionId" },
-  { id: "training-session", pattern: "/training/:sessionId" }
+  { id: "training-session", pattern: "/training/:sessionId" },
+  // Phase 9 Unit 4 -- plan, access and usage. Authenticated, but deliberately not behind enrollment: entitlement and enrollment are separate.
+  { id: "billing", pattern: "/billing" }
 ];

@@ -13,6 +13,7 @@ import {
   PrismaTutorOwnershipPort,
   PrismaTutorQuestionPort
 } from "@ipmat/db";
+import type { AiUsageSink } from "@ipmat/billing";
 import { SimulationService } from "@ipmat/exam-simulation";
 import { InMemoryPreferenceStore } from "@ipmat/personalization";
 import type { PrismaClient } from "@prisma/client";
@@ -43,12 +44,12 @@ export function resolveTutorProvider(env: Record<string, string | undefined>): A
   return config.kind === "anthropic" ? new AnthropicProvider(config.model) : null;
 }
 
-export function createPrismaAssistantServices(prisma: PrismaClient, env: Record<string, string | undefined>, runtime?: Pick<ApiRuntime, "logger" | "metrics">): AssistantServices {
+export function createPrismaAssistantServices(prisma: PrismaClient, env: Record<string, string | undefined>, runtime?: Pick<ApiRuntime, "logger" | "metrics">, usage?: AiUsageSink): AssistantServices {
   const raw = resolveTutorProvider(env);
   return createAssistantServices({
     ownership: new PrismaTutorOwnershipPort(prisma),
     tutorPorts: { questions: new PrismaTutorQuestionPort(prisma), concepts: new ExamPackTutorConceptPort(new PrismaExamPackRepository(prisma)), attempts: new PrismaTutorAttemptPort(prisma) },
-    provider: raw ? observeProvider(raw, runtime) : null,
+    provider: raw ? observeProvider(raw, { ...runtime, usage }) : null,
     aiOptions: TUTOR_AI_OPTIONS,
     metrics: runtime?.metrics,
     logger: runtime?.logger,

@@ -1,5 +1,6 @@
 import type { AiCompletion, AiProvider } from "@ipmat/ai";
-import { NOOP_LOGGER, NOOP_METRICS, type Logger, type Metrics } from "@ipmat/observability";
+import type { AiUsageSink } from "@ipmat/billing";
+import { currentContext, NOOP_LOGGER, NOOP_METRICS, type Logger, type Metrics } from "@ipmat/observability";
 
 /**
  * Provider call observability (Phase 9 Unit 3, docs/DECISIONS.md D-099): a transparent decorator around any `@ipmat/ai` provider.
@@ -19,9 +20,27 @@ export function classifyProviderError(error: unknown): ProviderFailureCategory {
   return "unknown";
 }
 
-export function observeProvider(provider: AiProvider, observability: { metrics?: Metrics; logger?: Logger } = {}): AiProvider {
+/**
+ * `usage` (Phase 9 Unit 4, D-100) additionally records one USAGE FACT per provider call - provider, model, token counts exactly
+ * as the provider reported them, outcome, coarse failure category, latency, the request's correlation id and the one-way student
+ * reference. Never the prompt, the completion, an answer key, a cost (no authoritative pricing exists here) or a provider message.
+ * It is best-effort telemetry: a failure to record is logged and counted, and never changes the model call's result. Authoritative
+ * metering (limits) is the reservation made BEFORE the work, not this record.
+ */
+export function observeProvider(provider: AiProvider, observability: { metrics?: Metrics; logger?: Logger; usage?: AiUsageSink } = {}): AiProvider {
   const metrics = observability.metrics ?? NOOP_METRICS;
   const logger = observability.logger ?? NOOP_LOGGER;
+  const usage = observability.usage;
+  const recordUsage = (fields: { inputTokens: number | null; outputTokens: number | null; outcome: "ok" | "error"; failureCategory: string | null; latencyMs: number }): void => {
+    if (!usage) return;
+    const ctx = currentContext();
+    void usage
+      .record({ requestId: ctx?.requestId ?? null, studentRef: ctx?.studentRef ?? null, occurredAt: new Date().toISOString(), provider: provider.name, model: provider.model, ...fields })
+      .catch(() => {
+        metrics.inc("ai_usage_record_failures_total", { provider: provider.name });
+        logger.warn("billing.ai_usage_record_failed", { provider: provider.name, failureCategory: "dependency_unavailable" });
+      });
+  };
   return {
     name: provider.name,
     model: provider.model,
@@ -32,6 +51,7 @@ export function observeProvider(provider: AiProvider, observability: { metrics?:
         const latencyMs = Date.now() - start;
         metrics.observeMs("provider_latency_ms", latencyMs, { provider: provider.name, outcome: "ok" });
         logger.info("provider.call", { provider: provider.name, model: provider.model, latencyMs, outcome: "ok" });
+        recordUsage({ inputTokens: completion.usage?.inputTokens ?? null, outputTokens: completion.usage?.outputTokens ?? null, outcome: "ok", failureCategory: null, latencyMs });
         return completion;
       } catch (error) {
         const latencyMs = Date.now() - start;
@@ -39,6 +59,7 @@ export function observeProvider(provider: AiProvider, observability: { metrics?:
         metrics.observeMs("provider_latency_ms", latencyMs, { provider: provider.name, outcome: "error" });
         metrics.inc("provider_errors_total", { provider: provider.name, category });
         logger.warn("provider.call", { provider: provider.name, model: provider.model, latencyMs, outcome: "error", failureCategory: category });
+        recordUsage({ inputTokens: null, outputTokens: null, outcome: "error", failureCategory: category, latencyMs });
         throw error;
       }
     }

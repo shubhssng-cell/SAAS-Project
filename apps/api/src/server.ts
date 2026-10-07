@@ -2,6 +2,8 @@ import { newRequestId, runWithContext, studentRef, updateContext, type RequestCo
 import { HttpLimitError, SESSION_TOKEN_SHAPE, checkOrigin, clientAddress, createRuntime, isDatabaseUnavailable, readBoundedBody, routeTemplate, securityHeaders, type ApiRuntime, type RateBucket } from "./hardening.js";
 import { AssistantApiError, type AssistantServices, type StudentClaim as AssistantClaim } from "@ipmat/assistant-api";
 import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
+import type { FeatureId, MeterId } from "@ipmat/billing";
+import { BillingApiError, type CommerceServices } from "@ipmat/billing-api";
 import { EnrollmentApiError, EnrollmentApiService, type EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { PracticeApiError, PracticeApiService, TrainingApiService, type PracticeApiDependencies, type StudentRequestClaim, type TrainingApiDependencies } from "@ipmat/practice-api";
@@ -188,11 +190,33 @@ const simulationOf = (s: AssistantServices) => s.simulation ?? (() => { throw no
  * There is deliberately NO route for question generation (no staff identity exists to authorize one) and none for the Phase 7
  * intelligence results (no student-facing presentation is defined).
  */
-const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: AssistantHandler; limit?: RateBucket; gate?: boolean }> = [
-  { method: "POST", pattern: /^\/v1\/tutor\/ask$/, handler: async (s, claim, body) => s.tutor.ask(claim, body), limit: "tutor", gate: true },
+/**
+ * Phase 9 Unit 4 (D-100): which routes are commercially gated, declared as DATA next to the route. The handler never reads billing
+ * state - `CommerceGuard` does, and only the existing application service runs once it says yes. `settle` decides, from the
+ * service's own result, whether the reserved usage unit was delivered (`consumed`) or not (`released`).
+ */
+interface Commercial {
+  feature: FeatureId;
+  meter?: MeterId;
+  settle?: (result: unknown) => "consumed" | "released";
+}
+
+/** A tutor reply that never reached the student because of the provider (not the student's usage) gives the unit back. */
+const NOT_DELIVERED_CODES = new Set(["temporarily_unavailable", "not_available"]);
+const settleTutor = (result: unknown): "consumed" | "released" => {
+  const r = result as { status?: unknown; failure?: { code?: unknown } | null } | null;
+  return r?.status === "answered" || !(typeof r?.failure?.code === "string" && NOT_DELIVERED_CODES.has(r.failure.code)) ? "consumed" : "released";
+};
+
+/** Starting while one is already in progress returns that simulation (`created: false`) -- not a new start, so the reserved unit is given back. */
+const settleSimulationStart = (result: unknown): "consumed" | "released" => ((result as { created?: unknown } | null)?.created === false ? "released" : "consumed");
+
+const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: AssistantHandler; limit?: RateBucket; gate?: boolean; commercial?: Commercial }> = [
+  { method: "POST", pattern: /^\/v1\/tutor\/ask$/, handler: async (s, claim, body) => s.tutor.ask(claim, body), limit: "tutor", gate: true, commercial: { feature: "tutor", meter: "tutor_request", settle: settleTutor } },
   { method: "GET", pattern: /^\/v1\/preferences$/, handler: async (s, claim) => s.preferences.get(claim) },
   { method: "PUT", pattern: /^\/v1\/preferences$/, handler: async (s, claim, body) => s.preferences.update(claim, body), limit: "preferences_write" },
-  { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim), limit: "simulation_write" },
+  // Only STARTING a simulation is gated: one already begun can still be answered and submitted, so a lapse mid-exam never discards a student's work.
+  { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim), limit: "simulation_write", commercial: { feature: "simulation", meter: "simulation_start", settle: settleSimulationStart } },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).get(claim, p[0] ?? "") },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)\/questions\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).question(claim, p[0] ?? "", p[1]) },
   { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/answers$/, handler: async (s, claim, body, p) => simulationOf(s).answer(claim, p[0] ?? "", body), limit: "simulation_write" },
@@ -223,6 +247,10 @@ function sendError(res: ServerResponse, error: unknown): void {
   }
   if (error instanceof AssistantApiError) {
     sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof BillingApiError) {
+    sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } }, error.httpStatus === 503 ? { "retry-after": "5" } : {});
     return;
   }
   if (error instanceof AuthApiError || error instanceof EnrollmentApiError) {
@@ -464,7 +492,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * `chosenAnswer`, unlike the auth/enrollment table) rather than being
  * folded into `AUTH_ROUTES`.
  */
-export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & { assistant?: AssistantServices | null; runtime?: ApiRuntime }) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & { assistant?: AssistantServices | null; commerce?: CommerceServices | null; runtime?: ApiRuntime }) {
   const service = new PracticeApiService(deps);
   const trainingService = new TrainingApiService({
     trainingRecommendationService: deps.trainingRecommendationService,
@@ -544,6 +572,39 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
             return;
           }
 
+          // ---- Phase 9 Unit 4: billing. Session-authenticated like every student route, but it needs only a student (not an enrollment):
+          // entitlement and enrollment are separate facts. The webhook is the exception: its caller is the payment provider, authenticated
+          // by the provider's signature over the raw body, never by a cookie.
+          if (url.pathname === "/v1/billing/webhook" && method === "POST") {
+            enforce("webhook", ip);
+            const rawBody = await readBoundedBody(req, security.maxBodyBytes, { preserve: true });
+            if (!deps.commerce) throw new BillingApiError("not_available", "This endpoint isn't available.", 503);
+            const headers: Record<string, string | undefined> = {};
+            for (const [k, v] of Object.entries(req.headers)) headers[k.toLowerCase()] = Array.isArray(v) ? v[0] : v;
+            sendJson(res, 200, await deps.commerce.webhook.handle({ rawBody, headers }));
+            return;
+          }
+          if (/^\/v1\/billing(\/(checkout|cancel))?$/.test(url.pathname) && (method === "GET" || method === "POST")) {
+            const isRead = url.pathname === "/v1/billing";
+            if (isRead !== (method === "GET")) {
+              sendError(res, new PracticeApiError("not_found", "No matching route.", 404));
+              return;
+            }
+            const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
+            const studentId = await resolveAuthenticatedStudentId(authService, parseCookies(req.headers.cookie));
+            enforce("api", studentId);
+            if (!isRead) enforce("billing_write", studentId);
+            const commerce = deps.commerce;
+            if (!commerce) throw new BillingApiError("not_available", "Billing isn't available right now.", 503);
+            if (url.pathname === "/v1/billing/checkout") sendJson(res, 200, await commerce.billing.startCheckout(studentId, body));
+            else if (url.pathname === "/v1/billing/cancel") sendJson(res, 200, await commerce.billing.requestCancellation(studentId, body));
+            else {
+              const { enrollment } = await enrollmentService.getCurrentEnrollment({ studentId });
+              sendJson(res, 200, await commerce.billing.getSummary(studentId, enrollment ? await commerce.examScope(studentId, enrollment.id) : null));
+            }
+            return;
+          }
+
           const assistantRoute = ASSISTANT_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
           if (assistantRoute) {
             const match = assistantRoute.pattern.exec(url.pathname);
@@ -551,6 +612,7 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
             const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
             enforce("api", claim.studentId);
             if (assistantRoute.limit) enforce(assistantRoute.limit, claim.studentId);
+            await deps.commerce?.guard.requireExam(claim);
             if (assistantRoute.gate) {
               releaseGate = runtime.tutorGate.acquire(claim.studentId);
               if (!releaseGate) {
@@ -560,7 +622,20 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
               }
             }
             if (!deps.assistant) throw notConfigured("This feature is");
-            sendJson(res, 200, await assistantRoute.handler(deps.assistant, claim, body, match ? match.slice(1).map(safeDecode) : []));
+            const assistant = deps.assistant;
+            const run = (): Promise<unknown> => assistantRoute.handler(assistant, claim, body, match ? match.slice(1).map(safeDecode) : []);
+            const commercial = assistantRoute.commercial;
+            if (commercial && deps.commerce) {
+              const guard = deps.commerce.guard;
+              if (commercial.meter) {
+                sendJson(res, 200, await guard.metered(claim, commercial.feature, commercial.meter, run, commercial.settle ?? (() => "consumed")));
+              } else {
+                await guard.requireFeature(claim, commercial.feature);
+                sendJson(res, 200, await run());
+              }
+            } else {
+              sendJson(res, 200, await run());
+            }
             return;
           }
 
@@ -570,6 +645,9 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
             const body = method === "GET" ? {} : asRecord(await readJsonBody(req, security.maxBodyBytes));
             const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
             enforce("api", claim.studentId);
+            await deps.commerce?.guard.requireExam(claim);
+            // Starting a training session is the advanced-training feature; continuing or finishing one already begun is not re-gated.
+            if (method === "POST" && url.pathname === "/v1/training/sessions") await deps.commerce?.guard.requireFeature(claim, "advanced_training");
             sendJson(res, 200, await trainingRoute.handler(trainingService, claim, body, url.searchParams, { id: match?.[1] ?? "" }));
             return;
           }
@@ -587,6 +665,7 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
           const cookies = parseCookies(req.headers.cookie);
           const claim = await resolvePracticeClaim(authService, enrollmentService, cookies);
           enforce("api", claim.studentId);
+          await deps.commerce?.guard.requireExam(claim);
 
           const result = await route.handler(service, claim, body, url.searchParams, params);
           sendJson(res, 200, result);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, ErrorNotice } from "../design/index.js";
+import { Link } from "../router/router.js";
 import { apiAskTutor, apiGetPreferences, apiUpdatePreferences, TUTOR_LANGUAGES, TUTOR_VERBOSITIES, type Preferences, type TutorAnswer, type TutorOperation } from "./api.js";
 
 /**
@@ -8,7 +9,7 @@ import { apiAskTutor, apiGetPreferences, apiUpdatePreferences, TUTOR_LANGUAGES, 
  * component renders only the student-safe fields the API client already narrowed, and shows the tutor's reply as AI-written text -
  * with any hypothesis labelled as one - never as a diagnosis or a judgment of the student.
  */
-export type TutorPanelState = { status: "idle" } | { status: "loading"; operation: TutorOperation } | { status: "shown"; answer: TutorAnswer } | { status: "error"; message: string };
+export type TutorPanelState = { status: "idle" } | { status: "loading"; operation: TutorOperation } | { status: "shown"; answer: TutorAnswer } | { status: "error"; message: string; /** The refusal is about the student's plan or usage: offer the billing page. */ billing?: boolean };
 
 const OPERATION_LABELS: Array<[TutorOperation, string]> = [
   ["explain_mistake", "Explain what went wrong"],
@@ -71,6 +72,11 @@ export function TutorPanelView({
       </div>
       {state.status === "loading" ? <p className="subtext" role="status">The tutor is working on it…</p> : null}
       {state.status === "error" ? <ErrorNotice>{state.message}</ErrorNotice> : null}
+      {state.status === "error" && state.billing ? (
+        <p className="subtext">
+          <Link to="/billing">See your plan and usage</Link>
+        </p>
+      ) : null}
       {state.status === "shown" ? <TutorAnswerView answer={state.answer} /> : null}
       {preferences ? (
         <div className="tutor-preferences">
@@ -103,6 +109,24 @@ export function TutorPanelView({
   );
 }
 
+/** Maps a failed tutor request to fixed, student-safe copy (the server's wording is never shown). */
+export function errorState(failure: { kind: string; message?: string }): Extract<TutorPanelState, { status: "error" }> {
+  switch (failure.kind) {
+    case "network_error":
+      return { status: "error", message: "We couldn't reach the tutor. Check your connection and try again." };
+    case "rate_limited":
+      return { status: "error", message: failure.message ?? "You're going a little fast. Please wait a moment and try again." };
+    case "not_authenticated":
+      return { status: "error", message: "Your session has ended. Please log in again to use the tutor." };
+    case "not_entitled":
+      return { status: "error", message: "The tutor isn't part of your current access.", billing: true };
+    case "usage_limit_reached":
+      return { status: "error", message: "You've used the tutor as much as your plan allows for now.", billing: true };
+    default:
+      return { status: "error", message: "The tutor isn't available right now. Please try again later." };
+  }
+}
+
 /** Stateful wrapper. Network details stay in `api.ts`; a stale reply (the student asked again) never overwrites a newer one. */
 export function TutorPanel({ questionId }: { questionId: string }) {
   const [state, setState] = useState<TutorPanelState>({ status: "idle" });
@@ -126,7 +150,7 @@ export function TutorPanel({ questionId }: { questionId: string }) {
     void apiAskTutor(operation, questionId).then((result) => {
       if (id !== latest.current) return;
       if (result.ok) setState({ status: "shown", answer: result.answer });
-      else setState({ status: "error", message: result.failure.kind === "network_error" ? "We couldn't reach the tutor. Check your connection and try again." : result.failure.kind === "rate_limited" ? result.failure.message : result.failure.kind === "not_authenticated" ? "Your session has ended. Please log in again to use the tutor." : "The tutor isn't available right now. Please try again later." });
+      else setState(errorState(result.failure));
     });
   }
 
