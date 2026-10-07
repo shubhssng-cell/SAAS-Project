@@ -37,7 +37,7 @@ function readErrorBody(body: unknown): { code?: string; message?: string } {
  */
 export const REQUEST_TIMEOUT_MS = 20_000;
 
-export async function jsonRequest(fetchImpl: FetchLike, method: "GET" | "POST", path: string, body?: unknown, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<JsonRequestResult> {
+export async function jsonRequest(fetchImpl: FetchLike, method: "GET" | "POST" | "PUT", path: string, body?: unknown, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<JsonRequestResult> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Races the whole request (a fetch impl that ignores `signal` still can't hang the caller).

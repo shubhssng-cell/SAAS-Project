@@ -1,3 +1,4 @@
+import { AssistantApiError, type AssistantServices, type StudentClaim as AssistantClaim } from "@ipmat/assistant-api";
 import { AuthApiError, AuthApiService, type AuthApiDependencies } from "@ipmat/auth-api";
 import { EnrollmentApiError, EnrollmentApiService, type EnrollmentApiDependencies } from "@ipmat/enrollment-api";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -176,6 +177,36 @@ const TRAINING_ROUTES: Array<{ method: string; pattern: RegExp; handler: Trainin
   { method: "POST", pattern: /^\/v1\/training\/sessions\/([^/]+)\/finish$/, handler: async (training, claim, _body, _query, params) => training.finishSession(claim, { sessionId: params.id }) }
 ];
 
+type AssistantHandler = (services: AssistantServices, claim: AssistantClaim, body: Record<string, unknown>, params: string[]) => Promise<unknown>;
+
+const notConfigured = (what: string): AssistantApiError => new AssistantApiError("not_available", `${what} isn't available right now.`, 503);
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new AssistantApiError("invalid_request", "The request path is malformed.", 400);
+  }
+}
+const simulationOf = (s: AssistantServices) => s.simulation ?? (() => { throw notConfigured("Simulations are"); })();
+
+/**
+ * Phase 9 Unit 2 (D-098) -- the tutor, preferences and simulation routes. Same cookie-derived claim as every practice route
+ * (`resolvePracticeClaim`): `studentId`/`enrollmentId` are never read from a request, and neither is a clock, a task, a capability,
+ * a workflow, an actor, a role or an exam code. Each handler calls ONE application-service method; there is no business logic here.
+ * There is deliberately NO route for question generation (no staff identity exists to authorize one) and none for the Phase 7
+ * intelligence results (no student-facing presentation is defined).
+ */
+const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: AssistantHandler }> = [
+  { method: "POST", pattern: /^\/v1\/tutor\/ask$/, handler: async (s, claim, body) => s.tutor.ask(claim, body) },
+  { method: "GET", pattern: /^\/v1\/preferences$/, handler: async (s, claim) => s.preferences.get(claim) },
+  { method: "PUT", pattern: /^\/v1\/preferences$/, handler: async (s, claim, body) => s.preferences.update(claim, body) },
+  { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim) },
+  { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).get(claim, p[0] ?? "") },
+  { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)\/questions\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).question(claim, p[0] ?? "", p[1]) },
+  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/answers$/, handler: async (s, claim, body, p) => simulationOf(s).answer(claim, p[0] ?? "", body) },
+  { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/submit$/, handler: async (s, claim, _b, p) => simulationOf(s).submit(claim, p[0] ?? "") }
+];
+
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   const json = JSON.stringify(payload);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -184,6 +215,10 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
 
 /** E — the transport-level half of safe error mapping: takes whatever `PracticeApiError` the application layer already produced (or wraps an unrecognized throw the same defensive way) and writes it as `{ error: { code, message } }` — never a stack trace, never a raw Node/driver error string. */
 function sendError(res: ServerResponse, error: unknown): void {
+  if (error instanceof AssistantApiError) {
+    sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
+    return;
+  }
   if (error instanceof AuthApiError || error instanceof EnrollmentApiError) {
     sendJson(res, error.httpStatus, { error: { code: error.code, message: error.message } });
     return;
@@ -410,7 +445,7 @@ const AUTH_ROUTES: Array<{ method: string; pattern: RegExp; handler: AuthHandler
  * `chosenAnswer`, unlike the auth/enrollment table) rather than being
  * folded into `AUTH_ROUTES`.
  */
-export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader">) {
+export function createServer(deps: PracticeApiDependencies & AuthApiDependencies & EnrollmentApiDependencies & Pick<TrainingApiDependencies, "trainingSessionRepository" | "attemptHistoryReader"> & { assistant?: AssistantServices | null }) {
   const service = new PracticeApiService(deps);
   const trainingService = new TrainingApiService({
     trainingRecommendationService: deps.trainingRecommendationService,
@@ -439,6 +474,16 @@ export function createServer(deps: PracticeApiDependencies & AuthApiDependencies
           } else {
             sendJson(res, result.status, result.body);
           }
+          return;
+        }
+
+        const assistantRoute = ASSISTANT_ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
+        if (assistantRoute) {
+          const match = assistantRoute.pattern.exec(url.pathname);
+          const body = method === "GET" ? {} : asRecord(await readJsonBody(req));
+          const claim = await resolvePracticeClaim(authService, enrollmentService, parseCookies(req.headers.cookie));
+          if (!deps.assistant) throw notConfigured("This feature is");
+          sendJson(res, 200, await assistantRoute.handler(deps.assistant, claim, body, match ? match.slice(1).map(safeDecode) : []));
           return;
         }
 

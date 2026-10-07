@@ -49,3 +49,4 @@ export * from "./inMemoryTrainingSessionRepository.js";
 export * from "./prismaSimulation.js";
 export * from "./prismaPreferenceStore.js";
 export * from "./orchestrationAudit.js";
+export * from "./prismaTutorPorts.js";

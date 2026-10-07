@@ -1,3 +1,4 @@
+import { TutorPanel } from "../tutor/TutorPanel.js";
 import { useEffect, useRef, useState } from "react";
 import { isSessionExpiredError, type AttemptEvidenceViewModel, type AttemptResultViewModel } from "../adapter/index.js";
 import { FailureScreen } from "../components/FailureScreen.js";
@@ -114,6 +115,7 @@ export function PracticeResultRoute({ questionId, continueTo, backTo = `/practic
   return <ResultScreen
       result={state.result}
       evidence={evidence}
+      tutor={state.result.status === "submitted" ? <TutorPanel questionId={questionId} /> : null}
       explanation={state.result.status === "submitted" && !state.result.isCorrect ? <PossibleExplanation adapter={adapter} attemptId={state.result.attemptId} /> : null}
       onSeeWhatHappened={() => navigate(`/practice/${questionId}/autopsy`)} onContinue={handleContinue} />;
 }

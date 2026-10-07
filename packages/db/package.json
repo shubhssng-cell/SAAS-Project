@@ -35,6 +35,7 @@
     "@ipmat/prep-phase": "*",
     "@ipmat/practice-block": "*",
     "@ipmat/practice-session": "*",
+    "@ipmat/tutor": "*",
     "@ipmat/question-engine": "*",
     "@ipmat/question-generation": "*",
     "@prisma/client": "^5.20.0"

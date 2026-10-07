@@ -31,6 +31,7 @@ export function ResultScreen({
   result,
   evidence,
   explanation,
+  tutor,
   onSeeWhatHappened,
   onContinue
 }: {
@@ -38,6 +39,8 @@ export function ResultScreen({
   evidence?: AttemptEvidenceViewModel | null;
   /** Phase 4 Unit 2: the optional "possible explanation" card (an incorrect, submitted attempt only). Rendered after the recorded evidence. */
   explanation?: ReactNode;
+  /** Phase 9 Unit 2: the optional tutor panel, rendered after the explanation (a submitted attempt only). */
+  tutor?: ReactNode;
   onSeeWhatHappened: () => void;
   onContinue: () => void;
 }) {
@@ -129,6 +132,7 @@ export function ResultScreen({
       <EvidenceCard evidence={evidence} />
 
       {explanation}
+      {tutor}
 
       <div className="btn-row">
         {result.hasAutopsy ? (
