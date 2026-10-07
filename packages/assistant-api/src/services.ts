@@ -32,6 +32,8 @@ export interface AssistantDependencies {
   audit?: OrchestrationAuditSink;
   tutorAudit?: TutorAuditSink;
   simulation?: SimulationService | null;
+  /** Optional: lets the web learn whether a simulation is configured for the student's exam (see `SimulationApiService.availability`). */
+  simulationConfigured?: (examCode: string) => Promise<boolean>;
   generation?: QuestionGenerationService | null;
   listOtherExamTerms?: (examCode: string) => Promise<readonly string[]> | readonly string[];
   now?: () => Date;
@@ -77,7 +79,9 @@ export function createAssistantServices(deps: AssistantDependencies): AssistantS
   return {
     tutor: new TutorApiService({ orchestrator, tutorAvailable: deps.provider !== null, deadlineMs: deps.tutorDeadlineMs, metrics: deps.metrics, logger: deps.logger }),
     preferences: new PreferencesApiService(deps.preferences),
-    simulation: deps.simulation ? new SimulationApiService(deps.simulation) : null,
+    simulation: deps.simulation
+      ? new SimulationApiService(deps.simulation, deps.simulationConfigured ? { isConfigured: deps.simulationConfigured, examOf: async (studentId, enrollmentId) => (await deps.ownership.resolveEnrollment(studentId, enrollmentId))?.examCode ?? null } : undefined)
+      : null,
     generation: deps.generation ? new ContentGenerationApiService(orchestrator) : null
   };
 }

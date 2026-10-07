@@ -273,3 +273,28 @@ describe("which subscription a person sees", () => {
     expect(chooseSubscription([], now)).toBeNull();
   });
 });
+
+describe("billing summary cost (Phase 9 Unit 5)", () => {
+  it("one summary reads the student's subscriptions once, and the usage counts it needs, nothing more", async () => {
+    const c = build();
+    let reads = 0;
+    let counts = 0;
+    const list = c.store.listSubscriptionsForStudent.bind(c.store);
+    c.store.listSubscriptionsForStudent = async (id) => { reads += 1; return list(id); };
+    const used = c.store.usedInPeriod.bind(c.store);
+    c.store.usedInPeriod = async (...a) => { counts += 1; return used(...a); };
+    const summary = await c.commerce.billing.getSummary("s1", "IPMAT_INDORE");
+    expect(reads).toBe(1);
+    expect(counts).toBe(summary.usage.length);
+    expect(summary.usage).toEqual([{ meter: "tutor_request", used: 0, limit: 2, period: "day", resetsAt: "2026-10-16T00:00:00.000Z" }]);
+  });
+
+  it("without an enrollment (no exam) the summary reads subscriptions once and counts nothing", async () => {
+    const c = build();
+    let counts = 0;
+    c.store.usedInPeriod = async () => { counts += 1; return 0; };
+    const summary = await c.commerce.billing.getSummary("s1", null);
+    expect(summary.access).toBeNull();
+    expect(counts).toBe(0);
+  });
+});

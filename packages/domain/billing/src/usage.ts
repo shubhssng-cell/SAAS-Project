@@ -111,15 +111,12 @@ export class UsageService {
     if (reservation) await this.deps.store.settle(studentId, reservation.id, status);
   }
 
-  /** The student's usage against each meter their access defines, for the billing summary. */
-  async status(studentId: string, examCode: string): Promise<Array<{ meter: MeterId; used: number; limit: number | "unlimited"; period: UsagePeriod; resetsAt: string }>> {
-    if (this.deps.entitlements.mode === "open") return [];
+  /** Usage against limits the caller already computed (one snapshot): one count per meter, nothing else. */
+  async statusForLimits(studentId: string, limits: readonly EffectiveLimit[]): Promise<Array<{ meter: MeterId; used: number; limit: number | "unlimited"; period: UsagePeriod; resetsAt: string }>> {
     const out: Array<{ meter: MeterId; used: number; limit: number | "unlimited"; period: UsagePeriod; resetsAt: string }> = [];
-    for (const meter of ["tutor_request", "simulation_start"] as const) {
-      const limit: EffectiveLimit | null = await this.deps.entitlements.getUsageLimit(studentId, meter, examCode);
-      if (!limit) continue;
+    for (const limit of limits) {
       const bounds = periodBounds(limit.period, this.deps.now());
-      out.push({ meter, used: await this.deps.store.usedInPeriod(studentId, meter, bounds.start, bounds.end), limit: limit.limit, period: limit.period, resetsAt: bounds.end });
+      out.push({ meter: limit.meter, used: await this.deps.store.usedInPeriod(studentId, limit.meter, bounds.start, bounds.end), limit: limit.limit, period: limit.period, resetsAt: bounds.end });
     }
     return out;
   }

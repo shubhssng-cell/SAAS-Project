@@ -2,7 +2,6 @@ import {
   effectiveStatus,
   findPurchasablePlan,
   findPlan,
-  FEATURE_IDS,
   grantsAccess,
   type BillingStore,
   type EntitlementService,
@@ -96,11 +95,10 @@ export class BillingApiService {
       let access: BillingSummaryDto["access"] = null;
       let usage: BillingSummaryDto["usage"] = [];
       if (examCode !== null) {
-        const exam = (await this.deps.entitlements.canAccessExam(studentId, examCode)).allowed;
-        const features: Array<{ id: FeatureId; allowed: boolean }> = [];
-        for (const id of FEATURE_IDS) features.push({ id, allowed: (await this.deps.entitlements.decide(studentId, id, examCode)).allowed });
-        access = { exam, features };
-        usage = await this.deps.usage.status(studentId, examCode);
+        // One subscription read feeds the subscription card, the access table and the limits (it used to take seven).
+        const described = await this.deps.entitlements.describeAccess(studentId, examCode, subscriptions);
+        access = { exam: described.exam, features: described.features };
+        usage = await this.deps.usage.statusForLimits(studentId, described.limits);
       }
       return {
         enforcement: this.deps.entitlements.mode,

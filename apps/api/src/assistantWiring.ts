@@ -39,6 +39,9 @@ export const TUTOR_AI_OPTIONS = { timeoutMs: 20_000, maxRetries: 1 } as const;
  * config source is empty and a start request answers `no_simulation_configured` until the owner supplies one.
  * Question generation and the Phase 7 intelligence readers are NOT bound (see D-098).
  */
+/** The production simulation configuration source: EMPTY. No authoritative IPMAT duration/sections/counts exist in the repository (D-090), so every start answers `no_simulation_configured` and availability is `false` until the owner supplies one. */
+const SIMULATION_CONFIGS = { findDefinition: async (_examCode: string): Promise<null> => null };
+
 export function resolveTutorProvider(env: Record<string, string | undefined>): AiProvider | null {
   const config = resolveAiConfig(env);
   return config.kind === "anthropic" ? new AnthropicProvider(config.model) : null;
@@ -55,9 +58,10 @@ export function createPrismaAssistantServices(prisma: PrismaClient, env: Record<
     logger: runtime?.logger,
     preferences: new PrismaPreferenceStore(prisma),
     audit: new PrismaOrchestrationAuditStore(prisma),
+    simulationConfigured: async (examCode) => (await SIMULATION_CONFIGS.findDefinition(examCode)) !== null,
     simulation: new SimulationService({
       enrollments: new PrismaSimulationEnrollmentReader(prisma),
-      configs: { findDefinition: async () => null },
+      configs: SIMULATION_CONFIGS,
       questions: new PrismaSimulationQuestionSource(prisma),
       repository: new PrismaSimulationRepository(prisma),
       now: () => new Date().toISOString(),

@@ -24,6 +24,14 @@ const SECTIONS = [
   {
     heading: "Train for the actual exam.",
     body: "Over time, practice can progressively target specific concepts, your solving speed, common traps, unfamiliar question styles, and performance under time pressure."
+  },
+  {
+    heading: "Help when you're stuck.",
+    body: "After you answer a question, you can ask an AI tutor for a hint, an explanation of what went wrong, or a walk-through. Its answers are written by AI, so check them against your own working."
+  },
+  {
+    heading: "Your plan and what it includes.",
+    body: "You can see what your plan includes and how much you've used on the billing page, linked from your dashboard."
   }
 ];
 

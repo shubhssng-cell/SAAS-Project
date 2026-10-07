@@ -1,4 +1,4 @@
-import { findPlan, METER_FEATURE, type AccessBaseline, type FeatureId, type MeterId, type PlanCatalog, type UsageLimit, type UsagePeriod } from "./catalog.js";
+import { FEATURE_IDS, METER_IDS, findPlan, METER_FEATURE, type AccessBaseline, type FeatureId, type MeterId, type PlanCatalog, type UsageLimit, type UsagePeriod } from "./catalog.js";
 import { effectiveStatus, grantsAccess, type Subscription, type SubscriptionStatus } from "./subscription.js";
 
 /**
@@ -74,9 +74,9 @@ export class EntitlementService {
   }
 
   /** Every currently valid subscription-backed entitlement for the student, derived now. A subscription whose plan is no longer in the catalog grants nothing (fail closed). */
-  async snapshot(studentId: string): Promise<AccessSnapshot> {
+  async snapshot(studentId: string, preloaded?: readonly Subscription[]): Promise<AccessSnapshot> {
     const now = this.deps.now();
-    const subscriptions = await this.deps.subscriptions.listSubscriptionsForStudent(studentId);
+    const subscriptions = preloaded ?? (await this.deps.subscriptions.listSubscriptionsForStudent(studentId));
     const entitlements: Entitlement[] = [];
     for (const s of subscriptions) {
       if (s.studentId !== studentId || !grantsAccess(s, now) || s.paidThrough === null) continue;
@@ -102,6 +102,32 @@ export class EntitlementService {
     if (this.deps.catalog.baseline.exams.includes(examCode)) return { allowed: true, reason: "baseline" };
     const snapshot = await this.snapshot(studentId);
     return snapshot.entitlements.some((e) => e.exams.includes(examCode)) ? { allowed: true, reason: "entitled" } : { allowed: false, reason: "not_entitled_exam" };
+  }
+
+  /**
+   * Everything a billing summary needs about a student's access for one exam, answered from ONE snapshot (one subscription read) -
+   * the per-question methods above each take their own snapshot, which is right for a single decision but wasteful for a screen that
+   * asks seven of them. `subscriptions` may be passed when the caller has already loaded them. In `open` mode nothing is restricted
+   * and no limits apply.
+   */
+  async describeAccess(studentId: string, examCode: string, subscriptions?: readonly Subscription[]): Promise<{ exam: boolean; features: Array<{ id: FeatureId; allowed: boolean }>; limits: EffectiveLimit[] }> {
+    if (this.deps.mode === "open") return { exam: true, features: FEATURE_IDS.map((id) => ({ id, allowed: true })), limits: [] };
+    const snapshot = await this.snapshot(studentId, subscriptions);
+    const exam = examGranted(snapshot, examCode);
+    const features = FEATURE_IDS.map((id) => {
+      const sources = sourcesOf(snapshot, id, examCode);
+      return { id, allowed: exam && (sources.fromBaseline || sources.entitlements.length > 0) };
+    });
+    const limits: EffectiveLimit[] = [];
+    for (const meter of METER_IDS) {
+      const sources = sourcesOf(snapshot, METER_FEATURE[meter], examCode);
+      const candidates: UsageLimit[] = [];
+      if (sources.fromBaseline) candidates.push(...snapshot.baseline.usageLimits.filter((l) => l.meter === meter));
+      for (const e of sources.entitlements) candidates.push(...e.usageLimits.filter((l) => l.meter === meter));
+      const best = exam ? mostGenerous(candidates) : null;
+      if (best) limits.push(best);
+    }
+    return { exam, features, limits };
   }
 
   canUseTutor(studentId: string, examCode: string): Promise<AccessDecision> {

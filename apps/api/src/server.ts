@@ -217,6 +217,8 @@ const ASSISTANT_ROUTES: Array<{ method: string; pattern: RegExp; handler: Assist
   { method: "PUT", pattern: /^\/v1\/preferences$/, handler: async (s, claim, body) => s.preferences.update(claim, body), limit: "preferences_write" },
   // Only STARTING a simulation is gated: one already begun can still be answered and submitted, so a lapse mid-exam never discards a student's work.
   { method: "POST", pattern: /^\/v1\/simulations$/, handler: async (s, claim) => simulationOf(s).start(claim), limit: "simulation_write", commercial: { feature: "simulation", meter: "simulation_start", settle: settleSimulationStart } },
+  // Registered BEFORE the `:id` route below, or "availability" would be read as a simulation id.
+  { method: "GET", pattern: /^\/v1\/simulations\/availability$/, handler: async (s, claim) => simulationOf(s).availability(claim) },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).get(claim, p[0] ?? "") },
   { method: "GET", pattern: /^\/v1\/simulations\/([^/]+)\/questions\/([^/]+)$/, handler: async (s, claim, _b, p) => simulationOf(s).question(claim, p[0] ?? "", p[1]) },
   { method: "POST", pattern: /^\/v1\/simulations\/([^/]+)\/answers$/, handler: async (s, claim, body, p) => simulationOf(s).answer(claim, p[0] ?? "", body), limit: "simulation_write" },

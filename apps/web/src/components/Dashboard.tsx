@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { DashboardViewModel } from "../adapter/index.js";
 import { formatEnrolledDate, greetingSubtext, practiceProgressNote, type PrepStatusViewModel } from "../dashboard/prepStatus.js";
 import { Button, Card, Screen } from "../design/index.js";
@@ -19,7 +20,8 @@ export function Dashboard({
   prepStatus,
   onStart,
   onOpenTraining,
-  onOpenBilling
+  onOpenBilling,
+  extra
 }: {
   dashboard: DashboardViewModel;
   studentEmail: string;
@@ -27,6 +29,8 @@ export function Dashboard({
   onStart: () => void;
   onOpenTraining: () => void;
   onOpenBilling?: () => void;
+  /** Extra cards rendered after the main ones (for example the simulation status). */
+  extra?: ReactNode;
 }) {
   return (
     <Screen eyebrow="Dashboard" headline="Welcome back." subtext={greetingSubtext(studentEmail)}>
@@ -64,6 +68,7 @@ export function Dashboard({
           </Button>
         </Card>
       ) : null}
+      {extra}
     </Screen>
   );
 }

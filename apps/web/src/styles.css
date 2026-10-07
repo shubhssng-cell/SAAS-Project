@@ -832,3 +832,10 @@ a.btn {
   padding-top: 1.5rem;
   border-top: 1px solid var(--border, rgba(0, 0, 0, 0.1));
 }
+
+/* Phase 9 Unit 5 -- the tutor's preference dropdowns were under the 32px touch-target floor found by the mobile audit. */
+.tutor-preferences select {
+  min-height: 2.5rem;
+  padding: 0.35rem 0.5rem;
+  margin: 0.25rem 0.25rem 0.25rem 0;
+}

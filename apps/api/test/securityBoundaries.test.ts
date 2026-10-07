@@ -31,7 +31,8 @@ const allTests = SRC_DIRS.flatMap((d) => walk(d)).filter((f) => /\/test\//.test(
 describe("secrets and configuration stay in the approved boundary", () => {
   it("only the API entry/transport/wiring files read process.env; no domain package, no application service, no frontend file does", () => {
     const readers = allSource.filter((f) => /process\.env|import\.meta\.env/.test(read(f))).map(rel).sort();
-    expect(readers).toEqual(["apps/api/src/index.ts", "apps/api/src/server.ts", "apps/api/src/wiring.ts", "apps/web/src/config.ts"].sort().filter((f) => readers.includes(f)));
+    // Phase 9 Unit 5: `checkConfig.ts` is the pre-deploy CLI that evaluates the same environment the entry point reads.
+    expect(readers).toEqual(["apps/api/src/checkConfig.ts", "apps/api/src/index.ts", "apps/api/src/server.ts", "apps/api/src/wiring.ts", "apps/web/src/config.ts"].sort().filter((f) => readers.includes(f)));
     expect(readers.every((f) => f.startsWith("apps/api/src/") || f === "apps/web/src/config.ts")).toBe(true);
   });
 
@@ -128,8 +129,8 @@ describe("the application boundary stays closed", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("nothing in the application layer logs through console, and the only console use in apps/api is the startup banner", () => {
+  it("nothing in the application layer logs through console, and the only console use in apps/api is the startup banner and the two operator CLIs (check:config, smoke) that print a report for a human", () => {
     const uses = allSource.filter((f) => /\bconsole\.(log|info|warn|error|debug)\b/.test(read(f)) && (rel(f).startsWith("packages/assistant-api") || rel(f).startsWith("packages/observability") || rel(f).startsWith("apps/api/src"))).map(rel);
-    expect(uses).toEqual(["apps/api/src/index.ts"]);
+    expect(uses).toEqual(["apps/api/src/checkConfig.ts", "apps/api/src/index.ts", "apps/api/src/smoke.ts"]);
   });
 });

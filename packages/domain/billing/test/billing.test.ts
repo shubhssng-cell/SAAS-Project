@@ -463,3 +463,52 @@ describe("webhook helpers", () => {
     for (const v of [null, [], "x", 5, undefined]) expect(reason(() => normalizeBillingEvent(v, now))).toBe("malformed");
   });
 });
+
+describe("describeAccess: a whole summary from ONE snapshot, identical to the individual decisions", () => {
+  const nowFixed = new Date("2026-10-15T12:00:00.000Z");
+  const act = (over: Partial<Subscription> = {}): Subscription => sub({ status: "active", paidThrough: "2026-11-01T00:00:00.000Z", ...over });
+  const build = (subs: Subscription[], mode: "open" | "enforced" = "enforced") => {
+    const reads = { n: 0 };
+    const service = new EntitlementService({ mode, catalog: catalog(), subscriptions: { listSubscriptionsForStudent: async (id) => { reads.n += 1; return subs.filter((s) => s.studentId === id); } }, now: () => nowFixed });
+    return { service, reads };
+  };
+
+  it("matches decide() and getUsageLimit() for every feature, meter and exam, across scenarios", async () => {
+    const scenarios: Subscription[][] = [[], [act()], [act({ status: "cancelled" })], [act({ status: "refunded" })], [act({ planId: "other_exam" })], [act({ planId: "old" })], [act(), act({ id: "s2", planId: "old" })], [act({ planId: "gone" })]];
+    for (const subs of scenarios) {
+      const { service } = build(subs);
+      for (const exam of ["EXAM_A", "EXAM_B", "NOPE"]) {
+        const described = await service.describeAccess("stu", exam);
+        expect(described.exam).toBe((await service.canAccessExam("stu", exam)).allowed);
+        for (const f of described.features) expect(f.allowed, `${f.id}@${exam}`).toBe((await service.decide("stu", f.id, exam)).allowed);
+        for (const meter of ["tutor_request", "simulation_start"] as const) {
+          const individual = await service.getUsageLimit("stu", meter, exam);
+          const got = described.limits.find((l) => l.meter === meter) ?? null;
+          expect(got, `${meter}@${exam}`).toEqual(individual);
+        }
+      }
+    }
+  });
+
+  it("reads subscriptions once, or not at all when the caller already has them", async () => {
+    const { service, reads } = build([act()]);
+    await service.describeAccess("stu", "EXAM_A");
+    expect(reads.n).toBe(1);
+    await service.describeAccess("stu", "EXAM_A", [act()]);
+    expect(reads.n).toBe(1);
+  });
+
+  it("an exam outside every source yields no allowed feature and no limit; open mode allows all and meters nothing", async () => {
+    const { service } = build([act()]);
+    const none = await service.describeAccess("stu", "NOPE");
+    expect(none).toEqual({ exam: false, features: [{ id: "tutor", allowed: false }, { id: "simulation", allowed: false }, { id: "advanced_training", allowed: false }], limits: [] });
+    const open = await build([], "open").service.describeAccess("stu", "ANY");
+    expect(open.features.every((f) => f.allowed) && open.limits.length === 0 && open.exam).toBe(true);
+  });
+
+  it("a preloaded list from another student is still filtered by the student id (no foreign grant)", async () => {
+    const { service } = build([]);
+    const d = await service.describeAccess("stu", "EXAM_A", [act({ studentId: "someone-else" })]);
+    expect(d.features.find((f) => f.id === "simulation")?.allowed).toBe(false);
+  });
+});

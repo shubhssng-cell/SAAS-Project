@@ -38,6 +38,8 @@ export interface AppOptions {
   extraQuestions?: ReturnType<typeof tutorQuestion>[];
   clock?: () => number;
   /** Phase 9 Unit 4: wire the commercial layer. Omitted = the pre-Unit-4 behaviour (no commerce at all). */
+  /** `false`: the simulation configuration source is EMPTY, as in production today (default `true`: the labelled test configuration). */
+  simulationConfigured?: boolean;
   commerce?: { mode: EntitlementMode; catalog?: PlanCatalog; provider?: boolean; now?: () => Date };
 }
 
@@ -77,7 +79,7 @@ export async function buildApp(options: AppOptions = {}): Promise<App> {
   const ownership = ownershipPort(async (id) => deps.enrollmentReader.findById(id));
   const sim = new SimulationService({
     enrollments: { findById: async (id) => { const e = await deps.enrollmentReader.findById(id); return e ? { id: e.id, studentId: e.studentId, examCode: EXAM } : null; } },
-    configs: { findDefinition: async (code) => (code === EXAM ? simulationDefinition : null) },
+    configs: { findDefinition: async (code) => (code === EXAM && options.simulationConfigured !== false ? simulationDefinition : null) },
     questions: simulationSource(),
     repository: new InMemorySimulationRepository(),
     now: () => new Date(Date.parse("2026-10-07T10:00:00.000Z")).toISOString(),
@@ -90,6 +92,7 @@ export async function buildApp(options: AppOptions = {}): Promise<App> {
     preferences,
     audit: audits,
     simulation: sim,
+    simulationConfigured: async (code) => code === EXAM && options.simulationConfigured !== false,
     aiOptions: { timeoutMs: 20_000, maxRetries: 0 },
     tutorDeadlineMs: options.tutorDeadlineMs,
     metrics,

@@ -192,3 +192,30 @@ describe("ExamPackTutorConceptPort", () => {
     expect(await port.getConceptGraph("NO_SUCH_EXAM")).toEqual({ concepts: [], relations: [] });
   });
 });
+
+describe("simulation availability (Phase 9 Unit 5)", () => {
+  const claim = { studentId: "s1", enrollmentId: "e1" };
+  const service = { start: async () => { throw new Error("must not start"); } } as never;
+
+  it("is false when no availability source is wired, even though a simulation service exists", async () => {
+    const { SimulationApiService } = await import("../src/simulation.js");
+    expect(await new SimulationApiService(service).availability(claim)).toEqual({ available: false });
+  });
+
+  it("reflects the configured exam of the student's OWN enrollment; an unresolved enrollment is not available; nothing is started", async () => {
+    const { SimulationApiService } = await import("../src/simulation.js");
+    const deps = { isConfigured: async (code: string) => code === "EXAM_A", examOf: async (s: string, e: string) => (s === "s1" && e === "e1" ? "EXAM_A" : null) };
+    const api = new SimulationApiService(service, deps);
+    expect(await api.availability(claim)).toEqual({ available: true });
+    expect(await api.availability({ studentId: "s2", enrollmentId: "e1" })).toEqual({ available: false });
+    expect(await new SimulationApiService(service, { ...deps, examOf: async () => "EXAM_B" }).availability(claim)).toEqual({ available: false });
+  });
+
+  it("an infrastructure failure is a fixed error, never a guess", async () => {
+    const { SimulationApiService } = await import("../src/simulation.js");
+    const api = new SimulationApiService(service, { isConfigured: async () => { throw new Error("db password=hunter2"); }, examOf: async () => "EXAM_A" });
+    const err = await api.availability(claim).catch((e: unknown) => e);
+    expect((err as { httpStatus?: number }).httpStatus).toBe(500);
+    expect(String((err as Error).message)).not.toMatch(/hunter2|db/);
+  });
+});

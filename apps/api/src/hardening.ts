@@ -195,6 +195,7 @@ const ROUTE_TEMPLATES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/v1\/tutor\/ask$/, "/v1/tutor/ask"],
   [/^\/v1\/preferences$/, "/v1/preferences"],
   [/^\/v1\/simulations$/, "/v1/simulations"],
+  [/^\/v1\/simulations\/availability$/, "/v1/simulations/availability"],
   [/^\/v1\/simulations\/[^/]+$/, "/v1/simulations/:id"],
   [/^\/v1\/simulations\/[^/]+\/questions\/[^/]+$/, "/v1/simulations/:id/questions/:position"],
   [/^\/v1\/simulations\/[^/]+\/(answers|submit)$/, "/v1/simulations/:id/$1"],

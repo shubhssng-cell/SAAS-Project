@@ -34,8 +34,32 @@ export interface SimulationAnswerDto {
   simulation: SimulationView;
 }
 
+/** Whether a simulation is configured for an exam, and the exam of a student's own enrollment. Both injected; neither is client input. */
+export interface SimulationAvailabilityDeps {
+  isConfigured(examCode: string): Promise<boolean>;
+  examOf(studentId: string, enrollmentId: string): Promise<string | null>;
+}
+
 export class SimulationApiService {
-  constructor(private readonly service: SimulationService) {}
+  constructor(
+    private readonly service: SimulationService,
+    private readonly availabilityDeps?: SimulationAvailabilityDeps
+  ) {}
+
+  /**
+   * Whether the student's exam has a simulation configured (the repository ships no exam rules, so until the owner supplies a
+   * configuration this is `false`). It reads no paper and no student data, starts nothing and uses no allowance, so the web can tell a
+   * student the truth instead of offering a button that can only fail.
+   */
+  async availability(claim: StudentClaim): Promise<{ available: boolean }> {
+    if (!this.availabilityDeps) return { available: false };
+    try {
+      const examCode = await this.availabilityDeps.examOf(claim.studentId, claim.enrollmentId);
+      return { available: examCode !== null && (await this.availabilityDeps.isConfigured(examCode)) };
+    } catch (error) {
+      throw infrastructureError(error, "Something went wrong. Please try again.");
+    }
+  }
 
   private async run<T>(fn: () => Promise<T>): Promise<T> {
     try {

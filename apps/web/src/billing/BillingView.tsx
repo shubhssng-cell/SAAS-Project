@@ -132,6 +132,13 @@ export function BillingView({
         </Card>
       ) : null}
 
+      {summary.plans.length === 0 && summary.enforcement === "enforced" ? (
+        <Card>
+          <p className="mode-tag">Plans</p>
+          <p className="subtext">Paid plans haven't been set up yet, so there is nothing to buy right now. What you can use today is shown above.</p>
+        </Card>
+      ) : null}
+
       <div className="btn-row btn-row-flush">
         <Button variant="secondary" onClick={onBack}>
           Back to dashboard

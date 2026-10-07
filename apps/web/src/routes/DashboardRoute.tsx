@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isSessionExpiredError, type DashboardViewModel } from "../adapter/index.js";
 import { useAuth } from "../auth/AuthContext.js";
 import { Dashboard } from "../components/Dashboard.js";
+import { SimulationCard } from "../components/SimulationCard.js";
 import { FailureScreen } from "../components/FailureScreen.js";
 import { derivePrepStatus } from "../dashboard/prepStatus.js";
 import { LoadingState } from "../design/index.js";
@@ -76,6 +77,7 @@ export function DashboardRoute() {
       onStart={() => navigate("/practice/next")}
       onOpenTraining={() => navigate("/training")}
       onOpenBilling={() => navigate("/billing")}
+      extra={<SimulationCard />}
     />
   );
 }
